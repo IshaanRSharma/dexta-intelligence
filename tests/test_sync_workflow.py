@@ -62,6 +62,7 @@ class FakeStore:
         self.sleep: list[SleepEvent] = []
         self.recovery: list[RecoveryEvent] = []
         self.device: list[DeviceEvent] = []
+        self.predictions: dict[tuple[datetime, str], PredictionEvent] = {}
         self.rollups: dict[tuple[RollupPeriod, datetime], Rollup] = {}
         self.rollup_upsert_calls: list[list[Rollup]] = []
         self.findings: list[Finding] = []
@@ -124,6 +125,15 @@ class FakeStore:
         self.device.extend(events)
         return len(events)
 
+    def insert_predictions(self, events: list[PredictionEvent]) -> int:
+        new = 0
+        for event in events:
+            key = (event.ts, event.curve_kind)
+            if key not in self.predictions:
+                self.predictions[key] = event
+                new += 1
+        return new
+
     def get_glucose(self, start: datetime, end: datetime) -> list[GlucoseEvent]:
         return sorted(
             (e for e in self.glucose.values() if start <= e.ts < end), key=lambda e: e.ts
@@ -147,6 +157,11 @@ class FakeStore:
 
     def get_recovery(self, start: datetime, end: datetime) -> list[RecoveryEvent]:
         return [e for e in self.recovery if start <= e.ts < end]
+
+    def get_predictions(self, start: datetime, end: datetime) -> list[PredictionEvent]:
+        return sorted(
+            (e for e in self.predictions.values() if start <= e.ts < end), key=lambda e: e.ts
+        )
 
     def coverage(self) -> CoverageStats:
         stamps = sorted(self.glucose)
@@ -385,27 +400,26 @@ class TestUtcEnforcement:
 
 
 class TestPredictions:
-    def test_predictions_skipped_with_note(self) -> None:
+    def test_predictions_persisted(self) -> None:
         batch = make_batch()
+        pred = PredictionEvent(
+            ts=DAY2,
+            source="openaps",
+            curve_kind="iob",
+            values_mg_dl=[140.0, 142.0, 145.0],
+        )
         batch_with_preds = NormalizedBatch(
             raw=batch.raw,
             glucose=batch.glucose,
             insulin=batch.insulin,
             meals=batch.meals,
-            predictions=[
-                PredictionEvent(
-                    ts=DAY2,
-                    source="openaps",
-                    curve_kind="iob",
-                    values_mg_dl=[140.0, 142.0, 145.0],
-                )
-            ],
+            predictions=[pred],
         )
         store = FakeStore()
         report = sync(
             FakeConnector(source="fake", batch=batch_with_preds), store, now=FIXED_NOW
         )
         assert report.ok
-        assert len(report.notes) == 1
-        assert "not persisted" in report.notes[0]
-        assert "prediction" in report.notes[0]
+        assert report.notes == ()
+        assert report.inserted["predictions"] == 1
+        assert list(store.predictions.values()) == [pred]

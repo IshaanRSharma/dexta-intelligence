@@ -22,6 +22,7 @@ stdlib ``sqlite3`` only. Design decisions (the parts the protocol leaves open):
   sleep_events          ``ts_start``
   recovery_events       ``ts``
   device_events         ``(ts, kind)``
+  prediction_events     ``(ts, curve_kind)``
   rollups               ``(period, period_start)`` (true upsert: DO UPDATE)
   ====================  =======================================
 
@@ -54,6 +55,7 @@ from dexta_intelligence.models import (
     InsulinEvent,
     InsulinKind,
     MealEvent,
+    PredictionEvent,
     RecoveryEvent,
     Rollup,
     RollupPeriod,
@@ -153,6 +155,18 @@ CREATE TABLE IF NOT EXISTS device_events (
     UNIQUE (ts, kind)
 );
 
+CREATE TABLE IF NOT EXISTS prediction_events (
+    id INTEGER PRIMARY KEY,
+    ts TEXT NOT NULL,
+    source TEXT NOT NULL,
+    curve_kind TEXT NOT NULL,
+    horizon_min INTEGER NOT NULL,
+    values_mg_dl TEXT NOT NULL,
+    raw_event_id INTEGER,
+    UNIQUE (ts, curve_kind)
+);
+CREATE INDEX IF NOT EXISTS idx_prediction_events_ts ON prediction_events (ts);
+
 CREATE TABLE IF NOT EXISTS rollups (
     period TEXT NOT NULL,
     period_start TEXT NOT NULL,
@@ -199,6 +213,13 @@ CREATE TABLE IF NOT EXISTS hypotheses (
     tests TEXT NOT NULL
 );
 """
+
+
+def _prediction_horizon_min(values: list[float]) -> int:
+    """Minutes from cycle time to the last predicted point (5-minute spacing)."""
+    if not values:
+        return 0
+    return max(0, (len(values) - 1) * 5)
 
 
 def _dt_to_text(value: datetime) -> str:
@@ -364,6 +385,25 @@ class SQLiteStore:
             rows,
         )
 
+    def insert_predictions(self, events: list[PredictionEvent]) -> int:
+        rows = [
+            (
+                _dt_to_text(e.ts),
+                e.source,
+                e.curve_kind,
+                _prediction_horizon_min(e.values_mg_dl),
+                json.dumps(e.values_mg_dl),
+                e.raw_event_id,
+            )
+            for e in events
+        ]
+        return self._write_counted(
+            "INSERT OR IGNORE INTO prediction_events "
+            "(ts, source, curve_kind, horizon_min, values_mg_dl, raw_event_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+
     def get_glucose(self, start: datetime, end: datetime) -> list[GlucoseEvent]:
         rows = self._window(
             "SELECT ts, mg_dl, trend, raw_event_id FROM glucose_events", "ts", start, end
@@ -463,6 +503,24 @@ class SQLiteStore:
                 score=r[1],
                 hrv_ms=r[2],
                 rhr_bpm=r[3],
+                raw_event_id=r[4],
+            )
+            for r in rows
+        ]
+
+    def get_predictions(self, start: datetime, end: datetime) -> list[PredictionEvent]:
+        rows = self._window(
+            "SELECT ts, source, curve_kind, values_mg_dl, raw_event_id FROM prediction_events",
+            "ts",
+            start,
+            end,
+        )
+        return [
+            PredictionEvent(
+                ts=_text_to_dt(r[0]),
+                source=r[1],
+                curve_kind=r[2],
+                values_mg_dl=json.loads(r[3]),
                 raw_event_id=r[4],
             )
             for r in rows
@@ -737,6 +795,7 @@ class SQLiteStore:
             ("sleep_events", "ts_end"),
             ("recovery_events", "ts"),
             ("device_events", "ts"),
+            ("prediction_events", "ts"),
         ]
         lows: list[str] = []
         highs: list[str] = []

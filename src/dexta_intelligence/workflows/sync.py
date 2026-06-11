@@ -27,8 +27,7 @@ set (typically ``None``). Backends that can resolve provenance internally
 Predictions note
 ----------------
 :class:`~dexta_intelligence.connectors.base.NormalizedBatch` may carry
-``predictions``, but ``StoragePort`` has no prediction insert method, so
-prediction events are NOT persisted; the report notes how many were skipped.
+``predictions``; they are persisted via :meth:`StoragePort.insert_predictions`.
 """
 
 from __future__ import annotations
@@ -130,14 +129,8 @@ def sync(
         "sleep": store.insert_sleep(batch.sleep) if batch.sleep else 0,
         "recovery": store.insert_recovery(batch.recovery) if batch.recovery else 0,
         "device": store.insert_device(batch.device) if batch.device else 0,
+        "predictions": store.insert_predictions(batch.predictions) if batch.predictions else 0,
     }
-
-    notes: tuple[str, ...] = ()
-    if batch.predictions:
-        notes = (
-            f"{len(batch.predictions)} prediction events not persisted: "
-            "StoragePort has no prediction insert method",
-        )
 
     touched_days = sorted({g.ts.date() for g in batch.glucose})
     rollups: list[Rollup] = []
@@ -156,7 +149,6 @@ def sync(
         inserted=inserted,
         rollup_days=len(rollups),
         duration_s=time.monotonic() - started,
-        notes=notes,
     )
 
 

@@ -23,6 +23,7 @@ from dexta_intelligence.models import (
     InsulinEvent,
     InsulinKind,
     MealEvent,
+    PredictionEvent,
     RawEvent,
     RecoveryEvent,
     Rollup,
@@ -230,6 +231,43 @@ class TestEventRoundTrips:
         store.insert_glucose([GlucoseEvent(ts=ts, mg_dl=99)])
         (got,) = store.get_glucose(WIDE_START, WIDE_END)
         assert got.ts == ts
+
+
+class TestPredictionEvents:
+    def test_round_trip(self, store: SQLiteStore) -> None:
+        events = [
+            PredictionEvent(
+                ts=T0,
+                source="openaps",
+                curve_kind="iob",
+                values_mg_dl=[120.0, 118.0, 115.0],
+                raw_event_id=5,
+            ),
+            PredictionEvent(
+                ts=T0,
+                source="openaps",
+                curve_kind="cob",
+                values_mg_dl=[120.0, 122.0, 125.0],
+            ),
+        ]
+        assert store.insert_predictions(events) == 2
+        assert store.get_predictions(WIDE_START, WIDE_END) == events
+
+    def test_dedupe_on_ts_and_curve_kind(self, store: SQLiteStore) -> None:
+        event = PredictionEvent(
+            ts=T0, source="openaps", curve_kind="uam", values_mg_dl=[100.0, 105.0]
+        )
+        assert store.insert_predictions([event]) == 1
+        assert store.insert_predictions([event]) == 0
+
+    def test_window_half_open(self, store: SQLiteStore) -> None:
+        inside = PredictionEvent(ts=T0, source="loop", curve_kind="loop", values_mg_dl=[140.0])
+        boundary = PredictionEvent(
+            ts=T0 + timedelta(days=2), source="loop", curve_kind="loop", values_mg_dl=[140.0]
+        )
+        store.insert_predictions([inside, boundary])
+        got = store.get_predictions(WIDE_START, T0 + timedelta(days=2))
+        assert got == [inside]
 
 
 class TestEventDedupe:
