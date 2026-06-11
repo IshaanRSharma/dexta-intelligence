@@ -1,0 +1,62 @@
+[
+  {
+    "_id": "6848731aa1b2c3d4e5f60207",
+    "eventType": "BG Check",
+    "created_at": "2026-06-10T16:02:30.000Z",
+    "glucose": 137,
+    "glucoseType": "Finger",
+    "units": "mg/dl",
+    "enteredBy": "Ishaan"
+  },
+  {
+    "_id": "6848731aa1b2c3d4e5f60206",
+    "eventType": "Carb Correction",
+    "created_at": "2026-06-10T15:40:00.000Z",
+    "carbs": 15,
+    "notes": "juice box for pre-walk",
+    "enteredBy": "xdrip"
+  },
+  {
+    "_id": "6848731aa1b2c3d4e5f60205",
+    "eventType": "Suspend Pump",
+    "created_at": "2026-06-10T15:10:00.000Z",
+    "duration": 45,
+    "enteredBy": "Ishaan"
+  },
+  {
+    "_id": "6848731aa1b2c3d4e5f60204",
+    "eventType": "Temp Basal",
+    "created_at": "2026-06-10T14:30:00.000Z",
+    "duration": 30,
+    "absolute": 1.85,
+    "rate": 1.85,
+    "temp": "absolute",
+    "enteredBy": "openaps://AndroidAPS"
+  },
+  {
+    "_id": "6848731aa1b2c3d4e5f60203",
+    "eventType": "Correction Bolus",
+    "created_at": "2026-06-10T14:05:02.000Z",
+    "insulin": 0.35,
+    "isSMB": true,
+    "enteredBy": "openaps://AndroidAPS"
+  },
+  {
+    "_id": "6848731aa1b2c3d4e5f60202",
+    "eventType": "Correction Bolus",
+    "created_at": "2026-06-10T13:45:11.000Z",
+    "insulin": 1.2,
+    "enteredBy": "loop://Ishaan iPhone"
+  },
+  {
+    "_id": "6848731aa1b2c3d4e5f60201",
+    "eventType": "Meal Bolus",
+    "created_at": "2026-06-10T12:02:11.000Z",
+    "insulin": 4.5,
+    "carbs": 45,
+    "protein": 22,
+    "fat": 14,
+    "notes": "lunch - rice bowl",
+    "enteredBy": "loop://Ishaan iPhone"
+  }
+]
