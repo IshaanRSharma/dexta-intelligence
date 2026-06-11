@@ -39,7 +39,11 @@ dexcom = ["pydexcom>=0.4"]
 libre = ["pylibrelinkup>=0.10"]
 whoop = ["httpx>=0.27"]
 postgres = ["psycopg[binary]>=3.2"]
-all = ["dexta-intelligence[llm,nightscout,dexcom,libre,whoop,postgres]"]
+mcp = ["fastmcp>=2.0"]
+all = ["dexta-intelligence[llm,nightscout,dexcom,libre,whoop,postgres,mcp]"]
+
+[project.scripts]
+dexta = "dexta_intelligence.cli:main"
 
 [dependency-groups]
 dev = [
@@ -47,6 +51,7 @@ dev = [
   "pytest-cov>=5.0",
   "mypy>=1.10",
   "ruff>=0.6",
+  "fastmcp>=2.0",
 ]
 
 [project.urls]
