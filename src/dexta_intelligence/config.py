@@ -9,6 +9,7 @@ asking for help.
 
 from __future__ import annotations
 
+import enum
 import os
 import tomllib
 from pathlib import Path
@@ -22,6 +23,8 @@ __all__ = [
     "DataConfig",
     "DexcomConfig",
     "LLMConfig",
+    "LibreConfig",
+    "LibreRegion",
     "WhoopConfig",
     "load_config",
 ]
@@ -69,6 +72,40 @@ class DexcomConfig(_Section):
     """True for accounts registered outside the US (Dexcom's OUS region)."""
 
 
+class LibreRegion(enum.StrEnum):
+    """LibreLinkUp regional API hosts - mirrors pylibrelinkup's ``APIUrl`` identifiers."""
+
+    US = "us"
+    EU = "eu"
+    EU2 = "eu2"
+    AE = "ae"
+    AP = "ap"
+    AU = "au"
+    CA = "ca"
+    DE = "de"
+    FR = "fr"
+    JP = "jp"
+    LA = "la"
+    RU = "ru"
+
+
+class LibreConfig(_Section):
+    """LibreLinkUp follower credentials (a follower account that accepted a
+    sharing invitation, not the wearer's own LibreLink login).
+
+    Prefer the ``LIBRE_EMAIL`` / ``LIBRE_PASSWORD`` / ``LIBRE_REGION``
+    environment variables over the TOML file - these are real account
+    secrets, and configs should stay safe to share.
+    """
+
+    email: str = ""
+    password: str = ""
+    region: LibreRegion = LibreRegion.US
+    """Regional API host the account was registered against (``us``, ``eu``, …)."""
+    patient_id: str = ""
+    """LibreLinkUp patient UUID to follow; empty selects the account's first patient."""
+
+
 class LLMConfig(_Section):
     provider: str = "anthropic"
     """Any LangChain provider (``anthropic``, ``openai``, ``ollama``, …) or
@@ -90,6 +127,7 @@ class Config(_Section):
     nightscout: NightscoutConfig = Field(default_factory=NightscoutConfig)
     whoop: WhoopConfig = Field(default_factory=WhoopConfig)
     dexcom: DexcomConfig = Field(default_factory=DexcomConfig)
+    libre: LibreConfig = Field(default_factory=LibreConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
 
@@ -129,5 +167,17 @@ def load_config(path: Path | None = None) -> Config:
     if dx_ous := os.environ.get("DEXCOM_OUS"):
         # pydantic coerces "true"/"false"/"1"/"0"/"yes"/"no" to bool
         raw.setdefault("dexcom", {})["ous"] = dx_ous
+    _apply_libre_env(raw)
 
     return Config.model_validate(raw)
+
+
+def _apply_libre_env(raw: dict[str, Any]) -> None:
+    """``LIBRE_*`` environment overrides for the ``[libre]`` section."""
+    if libre_email := os.environ.get("LIBRE_EMAIL"):
+        raw.setdefault("libre", {})["email"] = libre_email
+    if libre_password := os.environ.get("LIBRE_PASSWORD"):
+        raw.setdefault("libre", {})["password"] = libre_password
+    if libre_region := os.environ.get("LIBRE_REGION"):
+        # region identifiers are case-insensitive in the wild ("EU2" == "eu2")
+        raw.setdefault("libre", {})["region"] = libre_region.lower()
