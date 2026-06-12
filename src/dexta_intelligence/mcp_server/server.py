@@ -11,6 +11,7 @@ from dexta_intelligence.analytics.rollups import (
     VERY_HIGH_MG_DL,
     VERY_LOW_MG_DL,
 )
+from dexta_intelligence.coldstart import CapabilitySet
 from dexta_intelligence.config import Config, load_config
 from dexta_intelligence.mcp_server import contract
 
@@ -22,7 +23,13 @@ if TYPE_CHECKING:
     from dexta_intelligence.connectors.base import RealtimeConnector
     from dexta_intelligence.store.port import StoragePort
 
-__all__ = ["TOOL_NAMES", "build_realtime_connector", "build_server", "main"]
+__all__ = [
+    "INSULIN_TOOL_NAMES",
+    "TOOL_NAMES",
+    "build_realtime_connector",
+    "build_server",
+    "main",
+]
 
 TOOL_NAMES: tuple[str, ...] = (
     "get_current_glucose",
@@ -35,6 +42,14 @@ TOOL_NAMES: tuple[str, ...] = (
     "check_alerts",
     "export_data",
     "get_agp_report",
+)
+
+#: Insulin extension — registered only when the store holds insulin data.
+INSULIN_TOOL_NAMES: tuple[str, ...] = (
+    "get_boluses",
+    "get_carb_entries",
+    "get_basal_timeline",
+    "get_iob",
 )
 
 
@@ -79,11 +94,59 @@ def build_realtime_connector(config: Config) -> RealtimeConnector | None:
     return None
 
 
+def _capabilities(store: StoragePort) -> CapabilitySet:
+    """Stream presence from store coverage — decides what the server exposes."""
+    coverage = store.coverage()
+    return CapabilitySet(
+        has_insulin=coverage.n_insulin > 0,
+        has_meals=coverage.n_meals > 0,
+        has_sleep=coverage.n_sleep > 0,
+        has_activity=coverage.n_activity > 0,
+    )
+
+
+def _register_insulin_tools(mcp: FastMCP, store: StoragePort) -> None:
+    """The 4 read-only insulin-extension tools. Bad args → ``{"error": ...}``."""
+
+    @mcp.tool(name="get_boluses", run_in_thread=False)
+    def get_boluses(start: str, end: str) -> dict[str, Any]:
+        """Bolus insulin events in a UTC window: timing, units, automatic flag."""
+        try:
+            return contract.get_boluses(store, _parse_dt(start), _parse_dt(end))
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+    @mcp.tool(name="get_carb_entries", run_in_thread=False)
+    def get_carb_entries(start: str, end: str) -> dict[str, Any]:
+        """Meal events with carb counts in a UTC window."""
+        try:
+            return contract.get_carb_entries(store, _parse_dt(start), _parse_dt(end))
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+    @mcp.tool(name="get_basal_timeline", run_in_thread=False)
+    def get_basal_timeline(start: str, end: str) -> dict[str, Any]:
+        """Basal/temp-basal/suspend events in a UTC window, with stability flag."""
+        try:
+            return contract.get_basal_timeline(store, _parse_dt(start), _parse_dt(end))
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+    @mcp.tool(name="get_iob", run_in_thread=False)
+    def get_iob(timestamp: str) -> dict[str, Any]:
+        """Tier B insulin-on-board at an ISO datetime — analysis context, never dosing."""
+        try:
+            return contract.get_iob(store, _parse_dt(timestamp))
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+
 def build_server(
     store: StoragePort,
     realtime: RealtimeConnector | None = None,
 ) -> FastMCP:
-    """Register all 10 MCP tools delegating to :mod:`contract`."""
+    """Register the 10 core MCP tools, plus the insulin extension when the
+    store's coverage shows insulin data (capability gating, Wave 5 §3 phase 6)."""
     fastmcp_cls = _import_fastmcp()
     mcp = fastmcp_cls(
         "Dexta Intelligence",
@@ -207,6 +270,9 @@ def build_server(
     def get_agp_report(start: str, end: str) -> dict[str, Any]:
         """AGP percentile profile — 5-minute-of-day bins across days."""
         return contract.get_agp_report(store, _parse_dt(start), _parse_dt(end))
+
+    if _capabilities(store).has_insulin:
+        _register_insulin_tools(mcp, store)
 
     return mcp
 

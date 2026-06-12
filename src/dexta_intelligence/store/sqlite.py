@@ -50,6 +50,10 @@ from dexta_intelligence.models import (
     FindingStats,
     FindingStatus,
     GlucoseEvent,
+    Goal,
+    GoalCheckpoint,
+    GoalMetric,
+    GoalStatus,
     Hypothesis,
     HypothesisStatus,
     InsulinEvent,
@@ -67,7 +71,7 @@ if TYPE_CHECKING:
 
 __all__ = ["SQLiteStore"]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SECONDS_PER_DAY = 86400.0
 _CGM_SLOT_SECONDS = 300.0  # expected 5-minute CGM cadence
@@ -212,6 +216,27 @@ CREATE TABLE IF NOT EXISTS hypotheses (
     source_finding_id INTEGER,
     tests TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS goals (
+    id INTEGER PRIMARY KEY,
+    statement TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    target REAL,
+    tools TEXT NOT NULL,
+    cadence_days INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS goal_checkpoints (
+    id INTEGER PRIMARY KEY,
+    goal_id INTEGER NOT NULL REFERENCES goals (id),
+    ts TEXT NOT NULL,
+    metric_value REAL,
+    note TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_goal_checkpoints_goal ON goal_checkpoints (goal_id, ts);
 """
 
 
@@ -220,6 +245,20 @@ def _prediction_horizon_min(values: list[float]) -> int:
     if not values:
         return 0
     return max(0, (len(values) - 1) * 5)
+
+
+def _row_to_goal(r: tuple[Any, ...]) -> Goal:
+    return Goal(
+        id=r[0],
+        statement=r[1],
+        metric=GoalMetric(r[2]),
+        direction=r[3],
+        target=r[4],
+        tools=json.loads(r[5]),
+        cadence_days=r[6],
+        status=GoalStatus(r[7]),
+        created_at=_opt_text_to_dt(r[8]),
+    )
 
 
 def _dt_to_text(value: datetime) -> str:
@@ -270,7 +309,7 @@ class SQLiteStore:
     # ── lifecycle ────────────────────────────────────────────────────────────
 
     def migrate(self) -> None:
-        """Create the schema if absent. Idempotent."""
+        """Create or upgrade the schema. Idempotent (IF NOT EXISTS throughout)."""
         with self._conn:
             self._conn.executescript(_SCHEMA)
             row = self._conn.execute("SELECT version FROM schema_version").fetchone()
@@ -278,6 +317,8 @@ class SQLiteStore:
                 self._conn.execute(
                     "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
                 )
+            elif row[0] < SCHEMA_VERSION:
+                self._conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
 
     # ── layer 1: raw events ──────────────────────────────────────────────────
 
@@ -757,6 +798,74 @@ class SQLiteStore:
                 status=HypothesisStatus(r[2]),
                 source_finding_id=r[3],
                 tests=json.loads(r[4]),
+            )
+            for r in cursor.fetchall()
+        ]
+
+    # ── goals ────────────────────────────────────────────────────────────────
+
+    def insert_goal(self, goal: Goal) -> int:
+        with self._conn:
+            cursor = self._conn.execute(
+                "INSERT INTO goals "
+                "(statement, metric, direction, target, tools, cadence_days, status, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    goal.statement,
+                    goal.metric.value,
+                    goal.direction,
+                    goal.target,
+                    json.dumps(goal.tools),
+                    goal.cadence_days,
+                    goal.status.value,
+                    None if goal.created_at is None else _dt_to_text(goal.created_at),
+                ),
+            )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def get_goals(self, *, status: GoalStatus | None = None) -> list[Goal]:
+        sql = (
+            "SELECT id, statement, metric, direction, target, tools, cadence_days, "
+            "status, created_at FROM goals"
+        )
+        params: tuple[Any, ...] = ()
+        if status is not None:
+            sql += " WHERE status = ?"
+            params = (status.value,)
+        sql += " ORDER BY id ASC"
+        return [_row_to_goal(r) for r in self._conn.execute(sql, params).fetchall()]
+
+    def set_goal_status(self, goal_id: int, status: GoalStatus) -> None:
+        with self._conn:
+            self._conn.execute(
+                "UPDATE goals SET status = ? WHERE id = ?", (status.value, goal_id)
+            )
+
+    def insert_goal_checkpoint(self, checkpoint: GoalCheckpoint) -> int:
+        with self._conn:
+            cursor = self._conn.execute(
+                "INSERT INTO goal_checkpoints (goal_id, ts, metric_value, note) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    checkpoint.goal_id,
+                    _dt_to_text(checkpoint.ts),
+                    checkpoint.metric_value,
+                    checkpoint.note,
+                ),
+            )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def get_goal_checkpoints(self, goal_id: int) -> list[GoalCheckpoint]:
+        cursor = self._conn.execute(
+            "SELECT id, goal_id, ts, metric_value, note FROM goal_checkpoints "
+            "WHERE goal_id = ? ORDER BY ts ASC",
+            (goal_id,),
+        )
+        return [
+            GoalCheckpoint(
+                id=r[0], goal_id=r[1], ts=_text_to_dt(r[2]), metric_value=r[3], note=r[4]
             )
             for r in cursor.fetchall()
         ]

@@ -1,0 +1,14 @@
+{% if answer is none %}
+<div class="empty small">
+  <p>Configure a model to answer this.</p>
+  <p class="hint"><code>pip install 'dexta-intelligence[llm]'</code> and set a provider key.</p>
+</div>
+{% else %}
+<article class="card answer">
+  <p class="qline muted">{{ question }}</p>
+  <div class="prose">{{ answer }}</div>
+  {% if tools %}
+  <footer class="footnote">tools: {% for t in tools %}<span class="mono">{{ t }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</footer>
+  {% endif %}
+</article>
+{% endif %}

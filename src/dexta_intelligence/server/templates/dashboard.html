@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}dexta · dashboard{% endblock %}
+{% block main_class %}wrap-wide{% endblock %}
+{% block content %}
+{% set hero = hero|default({"span_days": none, "coverage_pct": none, "tir_pct": none, "active_findings": 0}) %}
+{% set sidebar = sidebar|default({"sources": [], "pending": [], "unlocked_count": 0, "last_sync": none}) %}
+{% set banners = banners|default([]) %}
+{% set has_connectors = has_connectors|default(false) %}
+{% set below_floor = below_floor|default(true) %}
+
+<div class="page-head">
+  <h1>Dashboard</h1>
+  <p class="page-sub">Your health intelligence at a glance — findings, coverage, and system status.</p>
+</div>
+
+{% include "_banner.html" %}
+{% include "_hero_metrics.html" %}
+
+<div class="actions-bar">
+  <form method="post" action="/actions/sync" class="btn-row">
+    <button type="submit" {% if not has_connectors %}disabled title="Connect a source in Settings first"{% endif %}>Sync now</button>
+  </form>
+  <form method="post" action="/actions/analyze" class="btn-row">
+    <button type="submit" class="btn-secondary" {% if below_floor %}disabled title="Need at least 3 days of data"{% endif %}>Run analyze</button>
+  </form>
+  <a class="btn btn-ghost" href="/chat">Ask a question →</a>
+</div>
+
+<div class="layout-split">
+  <section>
+    <div class="feed-head">
+      <h2>Active findings</h2>
+    </div>
+
+    {% if cards %}
+    <div class="cards">
+      {% for c in cards %}
+      <article class="card">
+        <div class="card-head">
+          <h2>{{ c.headline }}</h2>
+          {% if c.skeptic_survived %}
+            <span class="badge ok" title="survived the skeptic">✓ survived</span>
+          {% else %}
+            <span class="badge bad" title="flagged by the skeptic">✗ flagged</span>
+          {% endif %}
+        </div>
+        <div class="conf">
+          <div class="conf-bar"><span style="width: {{ c.confidence_pct }}%"></span></div>
+          <span class="conf-val">{{ c.confidence_pct }}%</span>
+        </div>
+        <div class="meta">
+          <span class="mono">{{ c.agent }}</span>
+          {% if c.recurrence > 1 %}<span class="chip recur">seen ×{{ c.recurrence }}</span>{% endif %}
+        </div>
+        {% if c.stats_line %}<p class="stats">{{ c.stats_line }}</p>{% endif %}
+        {% if c.body_html %}<div class="prose">{{ c.body_html|safe }}</div>{% endif %}
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">
+      <p>No active findings yet.</p>
+      <p class="hint">Sync your data, then run analyze to populate this feed.</p>
+      <div class="btn-row">
+        <form method="post" action="/actions/sync">
+          <button type="submit" class="btn-secondary" {% if not has_connectors %}disabled{% endif %}>Sync now</button>
+        </form>
+        <form method="post" action="/actions/analyze">
+          <button type="submit" {% if below_floor %}disabled{% endif %}>Run analyze</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if graveyard %}
+    <details class="graveyard">
+      <summary>Graveyard · {{ graveyard|length }} retracted or superseded</summary>
+      <ul>
+        {% for g in graveyard %}
+        <li>
+          <span class="badge bad">✗ {{ g.status }}</span>
+          <span>{{ g.headline }}</span>
+          {% if g.skeptic_notes %}<span class="muted">— {{ g.skeptic_notes }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+  </section>
+
+  {% include "_status_sidebar.html" %}
+</div>
+
+{% endblock %}

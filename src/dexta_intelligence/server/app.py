@@ -1,0 +1,789 @@
+"""FastAPI app factory for ``dexta serve``.
+
+``create_app(config, store_opener)`` wires the routes against the same store
+seam the CLI uses (the ``store_opener`` callable), so tests can inject a seeded
+SQLiteStore and the real server can pass ``open_sqlite_store``. All third-party
+imports are lazy with a clear install hint — the base package never depends on
+the GUI stack.
+"""
+
+from __future__ import annotations
+
+import io
+import os
+from datetime import UTC, datetime, time
+from importlib import resources
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from dexta_intelligence.cli._common import (
+    _analysis_window,
+    build_connectors,
+    discovery_model,
+    is_dexcom_configured,
+    is_libre_configured,
+    is_nightscout_configured,
+    is_oura_configured,
+    is_tidepool_configured,
+    is_whoop_configured,
+    open_sqlite_store,
+)
+from dexta_intelligence.coldstart import CAPABILITY_GATES, HARD_FLOOR_DAYS, ColdStartReport
+from dexta_intelligence.config import env_override_for, load_config, save_config_values
+from dexta_intelligence.connectors.base import HealthReport
+from dexta_intelligence.models import FindingStatus
+from dexta_intelligence.server.render import markdown_to_html, sparkline_svg
+from dexta_intelligence.server.settings_render import field_to_view, panel_to_view
+from dexta_intelligence.server.settings_schema import (
+    ANALYSIS_PANEL,
+    DATA_FIELDS,
+    WIKI_FIELDS,
+    FieldKind,
+    PANELS_BY_KEY,
+    SETTINGS_PANELS,
+    source_nav,
+    SETTINGS_OVERVIEW,
+)
+
+# FastAPI resolves route annotations against this module's globals, so the GUI
+# types must live here at import time. They are an optional extra, so a missing
+# install degrades to ``None`` and ``create_app`` raises a friendly RuntimeError.
+try:
+    from fastapi import FastAPI, Form, HTTPException, Request
+    from fastapi.responses import HTMLResponse, RedirectResponse
+except ModuleNotFoundError:  # pragma: no cover - exercised only without the extra
+    FastAPI = Form = HTTPException = Request = HTMLResponse = RedirectResponse = None  # type: ignore[assignment,misc]
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from datetime import datetime
+
+    from dexta_intelligence.cli._common import StoreOpener
+    from dexta_intelligence.config import Config
+    from dexta_intelligence.models import Finding, Goal
+    from dexta_intelligence.store.port import StoragePort
+
+_INSTALL_HINT = (
+    "The web GUI needs the optional GUI stack. Install it with:\n"
+    "  pip install 'dexta-intelligence[gui]'"
+)
+
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+_SOURCE_CONFIGURED: dict[str, Callable[[Config], bool]] = {
+    "nightscout": is_nightscout_configured,
+    "dexcom": is_dexcom_configured,
+    "libre": is_libre_configured,
+    "whoop": is_whoop_configured,
+    "oura": is_oura_configured,
+    "tidepool": is_tidepool_configured,
+}
+
+
+def _require_gui() -> None:
+    if FastAPI is None:  # the [gui] extra is not installed
+        raise RuntimeError(_INSTALL_HINT)
+    try:
+        import jinja2  # noqa: F401, PLC0415
+    except ModuleNotFoundError as exc:  # pragma: no cover - exercised via install
+        raise RuntimeError(_INSTALL_HINT) from exc
+
+
+def create_app(  # noqa: PLR0915 - a route table; each handler is small
+    config: Config,
+    store_opener: StoreOpener = open_sqlite_store,
+    config_path: Path | None = None,
+    host: str = "127.0.0.1",
+) -> FastAPI:
+    """Build the GUI app bound to a config and a store-opener seam.
+
+    ``config_path`` is the config file the running server was launched with;
+    the settings panel reads back from and writes to *that* file (captured once
+    here, never re-resolved per request). Falls back to the boot-time default.
+    ``host`` is the bind address: a non-loopback bind disables credential
+    editing (status-only) unless ``DEXTA_ALLOW_REMOTE_SETTINGS=1``.
+    """
+    _require_gui()
+
+    from dexta_intelligence.cli._common import resolve_config_path  # noqa: PLC0415
+
+    settings_path = config_path if config_path is not None else resolve_config_path(None)
+
+    from fastapi.staticfiles import StaticFiles  # noqa: PLC0415
+    from fastapi.templating import Jinja2Templates  # noqa: PLC0415
+
+    pkg = resources.files("dexta_intelligence.server")
+    templates_dir = Path(str(pkg / "templates"))
+    static_dir = Path(str(pkg / "static"))
+
+    app = FastAPI(title="dexta", docs_url=None, redoc_url=None)
+    app.state.config_path = settings_path
+    app.state.bind_host = host
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    templates = Jinja2Templates(directory=str(templates_dir))
+    templates.env.globals["nav_items"] = (
+        ("/", "Dashboard"),
+        ("/wiki", "Wiki"),
+        ("/goals", "Goals"),
+        ("/chat", "Chat"),
+        ("/settings", "Settings"),
+    )
+    templates.env.globals["source_nav"] = source_nav()
+
+    def _render(
+        name: str,
+        request: Request,
+        active: str = "",
+        status_code: int = 200,
+        status_pill: str | None = None,
+        **kw: Any,
+    ) -> Any:
+        if status_pill is None:
+            store = store_opener(config, None)
+            try:
+                status_pill = _status_pill_text(store.coverage())
+            finally:
+                _close(store, store_opener)
+        return templates.TemplateResponse(
+            request,
+            name,
+            {"active": active, "status_pill": status_pill, **kw},
+            status_code=status_code,
+        )
+
+    # ── dashboard ─────────────────────────────────────────────────────────────
+
+    @app.get("/", response_class=HTMLResponse)
+    def dashboard(request: Request) -> Any:
+        flash = request.query_params.get("flash")
+        store = store_opener(config, None)
+        try:
+            coverage = store.coverage()
+            gates = ColdStartReport.from_coverage(coverage)
+            findings = store.get_findings(status=None, limit=1_000_000)
+            has_connectors = bool(build_connectors(config))
+            hero = _hero_metrics(store, config, coverage, findings)
+            sidebar = _status_sidebar(config, coverage, gates, store)
+            status_pill = _status_pill_text(coverage)
+        finally:
+            _close(store, store_opener)
+
+        active_findings = [f for f in findings if f.status == FindingStatus.ACTIVE]
+        graveyard = [
+            f
+            for f in findings
+            if f.status
+            in (FindingStatus.REJECTED, FindingStatus.SUPERSEDED, FindingStatus.DISMISSED)
+        ]
+        cards = [_finding_card(f, active_findings) for f in _ranked(active_findings)]
+        banners = _dashboard_banners(
+            coverage,
+            gates,
+            flash=flash,
+            has_connectors=has_connectors,
+        )
+        return _render(
+            "dashboard.html",
+            request,
+            "/",
+            status_pill=status_pill,
+            hero=hero,
+            sidebar=sidebar,
+            banners=banners,
+            has_connectors=has_connectors,
+            below_floor=gates.below_hard_floor,
+            cards=cards,
+            graveyard=[_graveyard_row(f) for f in graveyard],
+        )
+
+    @app.post("/actions/sync")
+    def action_sync() -> Any:
+        from dexta_intelligence.cli.data import cmd_sync  # noqa: PLC0415
+
+        buf = io.StringIO()
+        code = cmd_sync(config=config, db_path=None, out=buf)
+        flash = "sync_ok" if code == 0 else "sync_fail"
+        return RedirectResponse(f"/?flash={flash}", status_code=303)
+
+    @app.post("/actions/analyze")
+    def action_analyze() -> Any:
+        from dexta_intelligence.cli.analysis import cmd_analyze  # noqa: PLC0415
+
+        buf = io.StringIO()
+        code = cmd_analyze(config=config, db_path=None, out=buf)
+        if code == 0:
+            flash = "analyze_ok"
+        elif "Need at least" in buf.getvalue():
+            flash = "analyze_skip"
+        else:
+            flash = "analyze_fail"
+        return RedirectResponse(f"/?flash={flash}", status_code=303)
+
+    # ── wiki ──────────────────────────────────────────────────────────────────
+
+    @app.get("/wiki", response_class=HTMLResponse)
+    def wiki_index(request: Request) -> Any:
+        return _wiki_page(request, "index")
+
+    @app.get("/wiki/{page:path}", response_class=HTMLResponse)
+    def wiki_page(request: Request, page: str) -> Any:
+        return _wiki_page(request, page)
+
+    def _wiki_page(request: Request, page: str) -> Any:
+        root = config.wiki.path.expanduser().resolve()
+        slug = page[:-3] if page.endswith(".md") else page
+        md_path = (root / f"{slug}.md").resolve()
+        # Containment check — proper path containment, not a prefix match, so a
+        # sibling dir sharing the root's string prefix (or ``..``) can't escape.
+        contained = md_path == root or md_path.is_relative_to(root)
+        if not contained or not md_path.is_file():
+            return _render("wiki.html", request, "/wiki", body=None, slug=slug, root=str(root))
+        body = markdown_to_html(md_path.read_text(encoding="utf-8"))
+        body = _rewrite_wiki_links(body)
+        return _render("wiki.html", request, "/wiki", body=body, slug=slug, root=str(root))
+
+    # ── goals ─────────────────────────────────────────────────────────────────
+
+    @app.get("/goals", response_class=HTMLResponse)
+    def goals(request: Request) -> Any:
+        store = store_opener(config, None)
+        try:
+            all_goals = store.get_goals()
+            cards = [_goal_card(store, g) for g in all_goals]
+        finally:
+            _close(store, store_opener)
+        return _render("goals.html", request, "/goals", cards=cards)
+
+    # ── chat ──────────────────────────────────────────────────────────────────
+
+    @app.get("/chat", response_class=HTMLResponse)
+    def chat(request: Request) -> Any:
+        has_model = discovery_model(config) is not None
+        return _render("chat.html", request, "/chat", has_model=has_model)
+
+    @app.post("/api/ask", response_class=HTMLResponse)
+    def api_ask(request: Request, question: str = Form(...)) -> Any:
+        from dexta_intelligence.agents.base import AgentContext  # noqa: PLC0415
+        from dexta_intelligence.agents.chat import ChatAgent  # noqa: PLC0415
+
+        model = getattr(request.app.state, "chat_model", None) or discovery_model(config)
+        if model is None:
+            return _render("_answer.html", request, answer=None, question=question)
+        store = store_opener(config, None)
+        try:
+            coverage = store.coverage()
+            gates = ColdStartReport.from_coverage(coverage)
+            end = coverage.last_ts.date() if coverage.last_ts is not None else None
+            from dexta_intelligence.cli._common import _analysis_window  # noqa: PLC0415
+
+            ctx = AgentContext(
+                store=store,
+                window=_analysis_window(config, end),
+                gates=gates,
+                run_id="gui",
+            )
+            agent = ChatAgent(
+                model=model,
+                target_low=config.analysis.target_low,
+                target_high=config.analysis.target_high,
+            )
+            answer = agent.ask(ctx, question)
+        finally:
+            _close(store, store_opener)
+        return _render(
+            "_answer.html",
+            request,
+            question=question,
+            answer=answer.text,
+            tools=list(answer.tools_used),
+            faithful=answer.faithful,
+        )
+
+    # ── settings ──────────────────────────────────────────────────────────────
+
+    def _remote_bind() -> bool:
+        return app.state.bind_host not in _LOOPBACK_HOSTS
+
+    def _settings_cfg() -> Config:
+        # Re-read the launched file so card saves show up without a restart;
+        # env precedence is applied by the loader, same as boot.
+        return load_config(app.state.config_path)
+
+    def _freshness_map() -> dict[str, datetime]:
+        try:
+            store = store_opener(config, None)
+        except Exception:
+            return {}
+        try:
+            sources = [s.connector for s in SETTINGS_PANELS if s.connector is not None]
+            marks = {src: store.get_watermark(src) for src in sources}
+            return {src: ts for src, ts in marks.items() if ts is not None}
+        except Exception:
+            return {}
+        finally:
+            _close(store, store_opener)
+
+    def _settings_context(request: Request, **extra: Any) -> dict[str, Any]:
+        cfg = _settings_cfg()
+        remote_bind = _remote_bind()
+        fresh = _freshness_map()
+        cards = [
+            _card_view(
+                spec,
+                cfg,
+                freshness=fresh.get(spec.connector) if spec.connector else None,
+            )
+            for spec in SETTINGS_PANELS
+        ]
+        connection_cards = [c for c in cards if c.get("category", "connection") == "connection"]
+        intel_cards = [c for c in cards if c.get("category") == "intelligence"]
+        settings_nav = [
+            *[
+                {"key": c["key"], "label": c["title"], "group": "Connections", "ok": c["configured"]}
+                for c in connection_cards
+            ],
+            *[
+                {"key": c["key"], "label": c["title"], "group": "Intelligence", "ok": c["configured"]}
+                for c in intel_cards
+            ],
+            {"key": "analysis", "label": "Analysis & storage", "group": "System", "ok": True},
+        ]
+        default_panel = request.query_params.get("panel") or (
+            connection_cards[0]["key"] if connection_cards else "analysis"
+        )
+        lenses = sorted(cfg.lens) or ["analyze", "watch", "why", "insulin"]
+        analysis_fields = [
+            field_to_view("analysis", f, cfg.analysis, editable=True) for f in ANALYSIS_PANEL.fields
+        ]
+        data_fields = [
+            field_to_view("data", f, cfg.data, editable=True) for f in DATA_FIELDS
+        ]
+        wiki_fields = [
+            field_to_view("wiki", f, cfg.wiki, editable=True) for f in WIKI_FIELDS
+        ]
+        return {
+            "cfg": cfg,
+            "config_path": str(request.app.state.config_path),
+            "cards": cards,
+            "cards_by_key": {c["key"]: c for c in cards},
+            "connection_cards": connection_cards,
+            "intel_cards": intel_cards,
+            "settings_nav": settings_nav,
+            "default_panel": default_panel,
+            "analysis_fields": analysis_fields,
+            "data_fields": data_fields,
+            "analysis_note": ANALYSIS_PANEL.note,
+            "wiki_fields": wiki_fields,
+            "setup_overview": SETTINGS_OVERVIEW,
+            "editable": True,
+            "remote_bind": remote_bind,
+            "lenses": lenses,
+            **extra,
+        }
+
+    @app.get("/settings", response_class=HTMLResponse)
+    def settings(request: Request) -> Any:
+        return _render(
+            "settings.html",
+            request,
+            "/settings",
+            **_settings_context(request, saved=request.query_params.get("saved") == "1"),
+        )
+
+    @app.post("/settings")
+    def save_settings(
+        request: Request,
+        target_low: str = Form(...),
+        target_high: str = Form(...),
+        deep_analysis_window_days: str = Form(...),
+        path: str = Form(...),
+        git: str = Form("off"),
+        backend: str = Form(...),
+        sqlite_path: str = Form(...),
+        database_url: str = Form(""),
+    ) -> Any:
+        try:
+            low = _positive_int("target low", target_low)
+            high = _positive_int("target high", target_high)
+            window = _positive_int("analysis window (days)", deep_analysis_window_days)
+            if low >= high:
+                raise _SettingsError("Target low must be below target high.")
+            if backend not in ("sqlite", "postgres"):
+                raise _SettingsError("Storage backend must be sqlite or postgres.")
+            updates: dict[str, dict[str, Any]] = {
+                "analysis": {
+                    "target_low": low,
+                    "target_high": high,
+                    "deep_analysis_window_days": window,
+                },
+                "wiki": {"path": path, "git": git in ("on", "true", "1")},
+                "data": {
+                    "backend": backend,
+                    "sqlite_path": sqlite_path.strip() or "~/.dexta/dexta.db",
+                },
+            }
+            dsn = database_url.strip()
+            if dsn:
+                updates["data"]["database_url"] = dsn
+            save_config_values(updates, path=request.app.state.config_path)
+        except (ValueError, TypeError) as exc:
+            return _render(
+                "settings.html",
+                request,
+                "/settings",
+                status_code=400,
+                **_settings_context(request, error=str(exc)),
+            )
+        return RedirectResponse("/settings?saved=1", status_code=303)
+
+    @app.post("/settings/{source_key}", response_class=HTMLResponse)
+    async def save_source(request: Request, source_key: str) -> Any:
+        spec = PANELS_BY_KEY.get(source_key)
+        if spec is None:
+            raise HTTPException(status_code=404)
+
+        form = await request.form()
+        updates: dict[str, Any] = {}
+        for f in spec.fields:
+            if env_override_for(spec.section, f.name) is not None:
+                continue
+            if f.kind == FieldKind.CHECKBOX:
+                updates[f.name] = form.get(f.name) in ("on", "true", "1")
+                continue
+            raw = form.get(f.name)
+            value = raw.strip() if isinstance(raw, str) else ""
+            if f.secret and not value:
+                continue
+            updates[f.name] = value
+        try:
+            save_config_values({spec.section: updates}, path=request.app.state.config_path)
+        except (ValueError, TypeError) as exc:
+            card = _card_view(spec, _settings_cfg(), error=str(exc))
+            return _render("_settings_card.html", request, status_code=400, card=card)
+        card = _card_view(
+            spec,
+            _settings_cfg(),
+            freshness=_freshness_map().get(spec.connector) if spec.connector else None,
+            saved=True,
+        )
+        return _render("_settings_card.html", request, card=card)
+
+    @app.post("/settings/{source_key}/test", response_class=HTMLResponse)
+    def test_source(request: Request, source_key: str) -> Any:
+        spec = PANELS_BY_KEY.get(source_key)
+        if spec is None or spec.connector is None:
+            raise HTTPException(status_code=404)
+        cfg = _settings_cfg()
+        connector = next(
+            (c for c in build_connectors(cfg) if c.source == spec.connector), None
+        )
+        if connector is None:
+            return _render("_settings_test.html", request, report=None)
+        try:
+            report = connector.check()
+        except Exception as exc:
+            report = HealthReport(ok=False, source=spec.connector, detail=str(exc))
+        return _render("_settings_test.html", request, report=report)
+
+    return app
+
+
+# ── view helpers (pure, testable) ─────────────────────────────────────────────
+
+_SOURCE_LABELS: dict[str, str] = {
+    "nightscout": "Nightscout",
+    "dexcom": "Dexcom Share",
+    "libre": "LibreLinkUp",
+    "whoop": "Whoop",
+    "oura": "Oura",
+    "tidepool": "Tidepool",
+}
+
+
+def _status_pill_text(coverage: Any) -> str:
+    if coverage.n_glucose == 0:
+        return "Local only · no data"
+    days = int(coverage.span_days)
+    suffix = "s" if days != 1 else ""
+    return f"Local only · {days} day{suffix}"
+
+
+def _hero_metrics(store: StoragePort, config: Config, coverage: Any, findings: list[Any]) -> dict[str, Any]:
+    active = sum(1 for f in findings if f.status == FindingStatus.ACTIVE)
+    span = coverage.span_days if coverage.n_glucose else None
+    cov_pct = coverage.glucose_coverage_pct if coverage.n_glucose else None
+    tir = _recent_tir(store, config, coverage) if coverage.n_glucose else None
+    return {
+        "span_days": span,
+        "coverage_pct": cov_pct,
+        "tir_pct": tir,
+        "active_findings": active,
+    }
+
+
+def _recent_tir(store: StoragePort, config: Config, coverage: Any) -> float | None:
+    from dexta_intelligence.models import RollupPeriod  # noqa: PLC0415
+
+    if coverage.last_ts is None:
+        return None
+    window = _analysis_window(config, coverage.last_ts.date())
+    start_date, end_date = window
+    start = datetime.combine(start_date, time.min, tzinfo=UTC)
+    end = datetime.combine(end_date, time.max, tzinfo=UTC)
+    rollups = store.get_rollups(RollupPeriod.DAILY, start, end)
+    vals = [r.tir for r in rollups if r.tir is not None]
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
+
+
+def _dashboard_banners(
+    coverage: Any,
+    gates: ColdStartReport,
+    *,
+    flash: str | None,
+    has_connectors: bool,
+) -> list[dict[str, str]]:
+    banners: list[dict[str, str]] = []
+    flash_msgs: dict[str, tuple[str, str]] = {
+        "sync_ok": ("ok", "Sync finished successfully."),
+        "sync_fail": ("bad", "Sync failed — check Settings and try again."),
+        "analyze_ok": ("ok", "Analysis complete — findings refreshed."),
+        "analyze_skip": (
+            "setup",
+            f"Need at least {HARD_FLOOR_DAYS:.0f} days of data before analysis.",
+        ),
+        "analyze_fail": ("bad", "Analysis failed — see the CLI log for details."),
+    }
+    if flash in flash_msgs:
+        kind, message = flash_msgs[flash]
+        banners.append({"kind": kind, "message": message})
+
+    if coverage.n_glucose == 0:
+        banners.append(
+            {
+                "kind": "setup",
+                "message": "Connect a data source or upload a CSV to get started.",
+                "href": "/settings",
+                "label": "Open Settings",
+            }
+        )
+    elif not has_connectors and coverage.n_glucose > 0:
+        banners.append(
+            {
+                "kind": "info",
+                "message": "Data loaded locally — connect a source in Settings to keep syncing.",
+                "href": "/settings",
+                "label": "Settings",
+            }
+        )
+    elif gates.below_hard_floor and flash not in ("analyze_skip",):
+        banners.append(
+            {
+                "kind": "setup",
+                "message": (
+                    f"Collect {HARD_FLOOR_DAYS:.0f}+ days of data to unlock analysis "
+                    f"(have {coverage.span_days:.0f})."
+                ),
+            }
+        )
+    return banners
+
+
+def _status_sidebar(
+    config: Config,
+    coverage: Any,
+    gates: ColdStartReport,
+    store: StoragePort,
+) -> dict[str, Any]:
+    now = datetime.now(tz=UTC)
+    sources: list[dict[str, str]] = []
+    for conn in build_connectors(config):
+        label = _SOURCE_LABELS.get(conn.source, conn.source)
+        ts = store.get_watermark(conn.source)
+        fresh = _relative_time(ts, now) if ts is not None else ""
+        sources.append({"label": label, "fresh": fresh})
+
+    if not sources and coverage.n_glucose:
+        for label in _detect_sources(coverage):
+            sources.append({"label": label.title(), "fresh": ""})
+
+    pending = list(gates.pending.values())[:3]
+    unlocked_count = sum(1 for g in CAPABILITY_GATES if g.capability in gates.unlocked)
+
+    last_ts: datetime | None = None
+    for conn in build_connectors(config):
+        ts = store.get_watermark(conn.source)
+        if ts is not None and (last_ts is None or ts > last_ts):
+            last_ts = ts
+    last_sync = _relative_time(last_ts, now) if last_ts is not None else None
+
+    return {
+        "sources": sources,
+        "pending": pending,
+        "unlocked_count": unlocked_count,
+        "last_sync": last_sync,
+    }
+
+
+def _relative_time(ts: datetime, now: datetime) -> str:
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    delta = now - ts.astimezone(UTC)
+    secs = int(delta.total_seconds())
+    if secs < 60:
+        return "just now"
+    if secs < 3600:
+        return f"{secs // 60}m ago"
+    if secs < 86400:
+        return f"{secs // 3600}h ago"
+    return f"{delta.days}d ago"
+
+
+def _card_configured(spec: Any, cfg: Config) -> bool:
+    if spec.key == "llm":
+        return any(os.environ.get(var) for var, _ in spec.env_keys)
+    if spec.key == "evidence":
+        return cfg.evidence.enabled and (
+            cfg.evidence.backend != "openevidence"
+            or bool(os.environ.get("OPENEVIDENCE_API_KEY"))
+        )
+    return _SOURCE_CONFIGURED[spec.key](cfg)
+
+
+def _card_view(
+    spec: Any,
+    cfg: Config,
+    *,
+    freshness: datetime | None = None,
+    saved: bool = False,
+    error: str | None = None,
+) -> dict[str, Any]:
+    return panel_to_view(
+        spec,
+        cfg,
+        configured=_card_configured(spec, cfg),
+        editable=True,
+        freshness=freshness,
+        saved=saved,
+        error=error,
+    )
+
+
+class _SettingsError(ValueError):
+    """A user-facing settings validation failure (re-rendered, never persisted)."""
+
+
+def _positive_int(label: str, raw: str) -> int:
+    """Parse a non-negative integer or raise a user-facing error."""
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise _SettingsError(f"{label.capitalize()} must be a whole number.") from None
+    if value < 0:
+        raise _SettingsError(f"{label.capitalize()} must not be negative.")
+    return value
+
+
+def _close(store: StoragePort, opener: StoreOpener) -> None:
+    if opener is open_sqlite_store and hasattr(store, "close"):
+        store.close()
+
+
+def _detect_sources(coverage: Any) -> list[str]:
+    sources: list[str] = []
+    if coverage.n_glucose:
+        sources.append("glucose")
+    if coverage.n_insulin:
+        sources.append("insulin")
+    if coverage.n_sleep:
+        sources.append("sleep")
+    if coverage.n_activity:
+        sources.append("activity")
+    return sources
+
+
+def _ranked(findings: list[Finding]) -> list[Finding]:
+    def key(f: Finding) -> tuple[float, str]:
+        return (-f.confidence, f.headline)
+
+    return sorted(findings, key=key)
+
+
+def _count_recurrence(finding: Finding, active: list[Finding]) -> int:
+    return sum(1 for f in active if f.kind == finding.kind and f.scope == finding.scope) - 1
+
+
+def _stats_line(finding: Finding) -> str:
+    s = finding.stats
+    bits: list[str] = []
+    if s.effect_size is not None:
+        bits.append(f"effect {s.effect_size:g}")
+    if s.n is not None:
+        bits.append(f"n={s.n}")
+    if s.p_perm is not None:
+        bits.append(f"p={s.p_perm:g}")
+    if s.q_fdr is not None:
+        bits.append(f"q={s.q_fdr:g}")
+    if s.replicated is not None:
+        bits.append("replicated" if s.replicated else "not replicated")
+    return " · ".join(bits)
+
+
+def _finding_card(finding: Finding, active: list[Finding]) -> dict[str, Any]:
+    recurrence = _count_recurrence(finding, active)
+    survived = finding.skeptic_notes is None or "reject" not in finding.skeptic_notes.lower()
+    return {
+        "headline": finding.headline,
+        "agent": finding.agent,
+        "kind": finding.kind,
+        "confidence": finding.confidence,
+        "confidence_pct": round(finding.confidence * 100),
+        "stats_line": _stats_line(finding),
+        "skeptic_survived": survived,
+        "skeptic_notes": finding.skeptic_notes,
+        "recurrence": recurrence + 1,
+        "body_html": markdown_to_html(finding.body_md) if finding.body_md else "",
+    }
+
+
+def _graveyard_row(finding: Finding) -> dict[str, Any]:
+    return {
+        "headline": finding.headline,
+        "status": finding.status.value,
+        "agent": finding.agent,
+        "skeptic_notes": finding.skeptic_notes,
+    }
+
+
+def _goal_card(store: StoragePort, goal: Goal) -> dict[str, Any]:
+    checkpoints = store.get_goal_checkpoints(goal.id) if goal.id is not None else []
+    values = [cp.metric_value for cp in checkpoints if cp.metric_value is not None]
+    latest = checkpoints[-1] if checkpoints else None
+    return {
+        "id": goal.id,
+        "statement": goal.statement,
+        "status": goal.status.value,
+        "metric": goal.metric.value,
+        "direction": goal.direction,
+        "cadence_days": goal.cadence_days,
+        "spark": sparkline_svg(values),
+        "n_checkpoints": len(checkpoints),
+        "latest_note": latest.note if latest else None,
+        "latest_value": latest.metric_value if latest else None,
+    }
+
+
+def _rewrite_wiki_links(body: str) -> str:
+    """Rewrite relative ``*.md`` links to ``/wiki/*`` GUI routes; leave URLs alone."""
+    import re  # noqa: PLC0415
+
+    def repl(m: re.Match[str]) -> str:
+        target = m.group(1)
+        if "://" in target or target.startswith(("/", "#", "mailto:")):
+            return m.group(0)
+        if target.endswith(".md"):
+            target = target[:-3]
+        return f'href="/wiki/{target}"'
+
+    return re.sub(r'href="([^"]+)"', repl, body)

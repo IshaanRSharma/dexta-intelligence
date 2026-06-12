@@ -1,0 +1,56 @@
+# docker-compose for dexta-intelligence
+#
+# QUICK START vs REFERENCE DEPLOYMENT
+# -----------------------------------
+# The zero-setup quick start needs NO containers at all: `dexta init` creates a
+# local SQLite database and you're running. Reach for this compose file only when
+# you want the Postgres *reference* deployment — the same backend used in CI parity
+# tests, suitable for larger histories and multi-process access.
+#
+# This file is a REFERENCE, not a turnkey product. The `dexta` service is a stub:
+# it builds the image and idles, because the harness is a CLI you drive on demand
+# (analyze / ask / goals tick), not a long-running daemon. Exec into it to run
+# commands, or wire `dexta goals tick` to a host cron / scheduler.
+#
+#   docker compose up -d db                       # just Postgres
+#   docker compose run --rm dexta dexta init      # one-off command in the image
+#   docker compose exec dexta dexta analyze       # if the stub is running
+#
+# DATABASE_URL is the single wiring point: the Postgres store reads it as its DSN
+# (config.storage.database_url, env-overridable). Set storage.backend = "postgres"
+# in dexta.toml to use it.
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: dexta
+      POSTGRES_PASSWORD: dexta
+      POSTGRES_DB: dexta
+    ports:
+      - "5432:5432"
+    volumes:
+      - dexta_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dexta -d dexta"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  dexta:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Single wiring point — the Postgres store reads this as its DSN.
+      DATABASE_URL: postgresql://dexta:dexta@db:5432/dexta
+    volumes:
+      - ./:/app
+    working_dir: /app
+    # Stub: the harness is a CLI, not a daemon. Idle so you can `exec`/`run` into it.
+    # Replace with e.g. a cron loop running `dexta goals tick` for ambient operation.
+    command: ["sleep", "infinity"]
+
+volumes:
+  dexta_pgdata:

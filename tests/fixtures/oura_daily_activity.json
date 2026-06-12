@@ -1,0 +1,62 @@
+[
+  {
+    "id": "c1b2c3d4-0001-4000-8000-000000000001",
+    "day": "2026-06-10",
+    "score": 88,
+    "timestamp": "2026-06-10T23:59:00-04:00",
+    "steps": 10432,
+    "active_calories": 620,
+    "total_calories": 2450,
+    "low_activity_time": 7200,
+    "medium_activity_time": 3600,
+    "high_activity_time": 1800,
+    "contributors": {
+      "meet_daily_targets": 90,
+      "move_every_hour": 85,
+      "recovery_time": 88,
+      "stay_active": 86,
+      "training_frequency": 82,
+      "training_volume": 84
+    }
+  },
+  {
+    "id": "c1b2c3d4-0002-4000-8000-000000000002",
+    "day": "2026-06-09",
+    "score": 72,
+    "timestamp": "2026-06-09T23:59:00-04:00",
+    "steps": 8120,
+    "active_calories": 480,
+    "total_calories": 2280,
+    "low_activity_time": 9000,
+    "medium_activity_time": 2400,
+    "high_activity_time": 900,
+    "contributors": {
+      "meet_daily_targets": 75,
+      "move_every_hour": 70,
+      "recovery_time": 74,
+      "stay_active": 72,
+      "training_frequency": 68,
+      "training_volume": 71
+    }
+  },
+  {
+    "id": "c1b2c3d4-0003-4000-8000-000000000003",
+    "day": "2026-06-11",
+    "score": null,
+    "timestamp": "2026-06-11T12:00:00-04:00",
+    "steps": 0,
+    "active_calories": 0,
+    "total_calories": 0,
+    "low_activity_time": 0,
+    "medium_activity_time": 0,
+    "high_activity_time": 0,
+    "contributors": {
+      "meet_daily_targets": null,
+      "move_every_hour": null,
+      "recovery_time": null,
+      "stay_active": null,
+      "training_frequency": null,
+      "training_volume": null
+    }
+  }
+]

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>{% block title %}dexta{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css" />
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">dexta</a>
+      <nav class="nav">
+        {% for href, label in nav_items %}
+          <a href="{{ href }}" class="{{ 'on' if active == href else '' }}">{{ label }}</a>
+        {% endfor %}
+      </nav>
+      {% if status_pill %}
+        <span class="status-pill">{{ status_pill }}</span>
+      {% endif %}
+    </div>
+  </header>
+  <main class="{% block main_class %}wrap-wide{% endblock %}">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="foot">
+    <span>dexta · continuous health intelligence · local only</span>
+  </footer>
+</body>
+</html>

@@ -15,6 +15,7 @@ import statistics
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
+from dexta_intelligence.analytics.oref import insulin_totals
 from dexta_intelligence.analytics.rollups import (
     EXPECTED_READINGS_PER_DAY,
     TARGET_HIGH_MG_DL,
@@ -23,6 +24,7 @@ from dexta_intelligence.analytics.rollups import (
     VERY_LOW_MG_DL,
     coverage_fraction,
 )
+from dexta_intelligence.models import InsulinKind
 from dexta_intelligence.stats.core import summarize
 
 if TYPE_CHECKING:
@@ -33,6 +35,8 @@ if TYPE_CHECKING:
 __all__ = [
     "ALERT_DISCLAIMER",
     "EPISODE_MIN_DURATION_MINUTES",
+    "IOB_DISCLAIMER",
+    "MAX_EVENT_ITEMS",
     "STALE_THRESHOLD_MINUTES",
     "TIME_BLOCKS_UTC",
     "analyze_time_blocks",
@@ -40,9 +44,13 @@ __all__ = [
     "detect_episodes",
     "export_data",
     "get_agp_report",
+    "get_basal_timeline",
+    "get_boluses",
+    "get_carb_entries",
     "get_current_glucose",
     "get_episode_details",
     "get_glucose_readings",
+    "get_iob",
     "get_statistics",
     "get_status_summary",
 ]
@@ -56,6 +64,15 @@ ALERT_DISCLAIMER = (
     "Informational only. Not medical advice. Do not use for insulin dosing "
     "or treatment decisions. Consult your diabetes care team."
 )
+#: IOB is Tier B analysis context computed from logged boluses — never dosing input.
+IOB_DISCLAIMER = (
+    "Analysis context only. Computed from logged boluses, not pump state. "
+    "Never use for insulin dosing or treatment decisions."
+)
+#: Maximum events returned per treatment list (callers narrow the window).
+MAX_EVENT_ITEMS = 100
+#: Bolus lookback for IOB; comfortably past the oref0 5 h DIA floor.
+_IOB_LOOKBACK_HOURS = 8
 
 #: UTC time-of-day blocks for :func:`analyze_time_blocks`.
 TIME_BLOCKS_UTC: dict[str, tuple[int, int]] = {
@@ -105,15 +122,27 @@ def _reading_dict(event: GlucoseEvent) -> dict[str, Any]:
     }
 
 
-def _window_readings(
-    store: StoragePort, start: datetime, end: datetime
-) -> list[GlucoseEvent]:
+def _validate_window(start: datetime, end: datetime) -> tuple[datetime, datetime]:
     start_utc = _require_utc(start)
     end_utc = _require_utc(end)
     if start_utc >= end_utc:
         msg = f"invalid window: start ({start_utc}) must be before end ({end_utc})"
         raise ValueError(msg)
+    return start_utc, end_utc
+
+
+def _window_readings(
+    store: StoragePort, start: datetime, end: datetime
+) -> list[GlucoseEvent]:
+    start_utc, end_utc = _validate_window(start, end)
     return store.get_glucose(start_utc, end_utc)
+
+
+def _cap_events(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str | None]:
+    if len(items) <= MAX_EVENT_ITEMS:
+        return items, None
+    note = f"showing first {MAX_EVENT_ITEMS} of {len(items)} events — narrow the window"
+    return items[:MAX_EVENT_ITEMS], note
 
 
 def _expected_readings(start: datetime, end: datetime) -> int:
@@ -661,4 +690,123 @@ def get_status_summary(
             "items": alerts["alerts"],
             "disclaimer": ALERT_DISCLAIMER,
         },
+    }
+
+
+# ── insulin extension (read-only, capability-gated) ──────────────────────────
+
+
+def get_boluses(
+    store: StoragePort,
+    start: datetime,
+    end: datetime,
+) -> dict[str, Any]:
+    """Bolus insulin events in a UTC window."""
+    start_utc, end_utc = _validate_window(start, end)
+    boluses = [
+        e for e in store.get_insulin(start_utc, end_utc) if e.kind is InsulinKind.BOLUS
+    ]
+    items = [
+        {"ts": _iso(e.ts), "units": e.units, "automatic": e.automatic} for e in boluses
+    ]
+    capped, note = _cap_events(items)
+    payload: dict[str, Any] = {
+        "start": _iso(start_utc),
+        "end": _iso(end_utc),
+        "n_boluses": len(boluses),
+        "total_units": round(sum(e.units for e in boluses if e.units is not None), 2),
+        "boluses": capped,
+    }
+    if note is not None:
+        payload["truncation_note"] = note
+    return payload
+
+
+def get_carb_entries(
+    store: StoragePort,
+    start: datetime,
+    end: datetime,
+) -> dict[str, Any]:
+    """Meal events carrying carb counts in a UTC window."""
+    start_utc, end_utc = _validate_window(start, end)
+    meals = [m for m in store.get_meals(start_utc, end_utc) if m.carbs_g is not None]
+    items: list[dict[str, Any]] = []
+    for meal in meals:
+        entry: dict[str, Any] = {"ts": _iso(meal.ts), "carbs_g": meal.carbs_g}
+        if meal.protein_g is not None:
+            entry["protein_g"] = meal.protein_g
+        if meal.fat_g is not None:
+            entry["fat_g"] = meal.fat_g
+        if meal.note is not None:
+            entry["note"] = meal.note
+        items.append(entry)
+    capped, note = _cap_events(items)
+    payload: dict[str, Any] = {
+        "start": _iso(start_utc),
+        "end": _iso(end_utc),
+        "n_entries": len(meals),
+        "total_carbs_g": round(sum(m.carbs_g for m in meals if m.carbs_g is not None), 1),
+        "entries": capped,
+    }
+    if note is not None:
+        payload["truncation_note"] = note
+    return payload
+
+
+def get_basal_timeline(
+    store: StoragePort,
+    start: datetime,
+    end: datetime,
+) -> dict[str, Any]:
+    """Basal, temp-basal, and suspend events in a UTC window."""
+    start_utc, end_utc = _validate_window(start, end)
+    basal_kinds = (InsulinKind.BASAL, InsulinKind.TEMP_BASAL, InsulinKind.SUSPEND)
+    events = [
+        e for e in store.get_insulin(start_utc, end_utc) if e.kind in basal_kinds
+    ]
+    items: list[dict[str, Any]] = []
+    for event in events:
+        item: dict[str, Any] = {"ts": _iso(event.ts), "kind": event.kind.value}
+        if event.units is not None:
+            item["units"] = event.units
+        if event.duration_min is not None:
+            item["duration_min"] = event.duration_min
+        items.append(item)
+    capped, note = _cap_events(items)
+    n_temp_basal = sum(1 for e in events if e.kind is InsulinKind.TEMP_BASAL)
+    n_suspend = sum(1 for e in events if e.kind is InsulinKind.SUSPEND)
+    payload: dict[str, Any] = {
+        "start": _iso(start_utc),
+        "end": _iso(end_utc),
+        "n_basal": sum(1 for e in events if e.kind is InsulinKind.BASAL),
+        "n_temp_basal": n_temp_basal,
+        "n_suspend": n_suspend,
+        "basal_stable": n_temp_basal == 0 and n_suspend == 0,
+        "events": capped,
+    }
+    if note is not None:
+        payload["truncation_note"] = note
+    return payload
+
+
+def get_iob(store: StoragePort, timestamp: datetime) -> dict[str, Any]:
+    """Tier B insulin-on-board at a moment, from logged boluses (oref0 curve)."""
+    at = _require_utc(timestamp)
+    lookback_start = at - timedelta(hours=_IOB_LOOKBACK_HOURS)
+    doses: list[tuple[datetime, float]] = []
+    n_recent = 0
+    for event in store.get_insulin(lookback_start, at + timedelta(minutes=1)):
+        if event.kind is not InsulinKind.BOLUS or event.ts > at:
+            continue
+        n_recent += 1
+        if event.units is not None:
+            doses.append((event.ts, event.units))
+    totals = insulin_totals(doses, at)
+    return {
+        "timestamp": _iso(at),
+        "iob_units": round(totals.iob, 3),
+        "n_recent_boluses": n_recent,
+        "tier": "B",
+        "method": "computed from logged boluses (oref0 exponential curve)",
+        "note": IOB_DISCLAIMER,
     }

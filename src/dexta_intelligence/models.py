@@ -33,6 +33,10 @@ __all__ = [
     "FindingStats",
     "FindingStatus",
     "GlucoseEvent",
+    "Goal",
+    "GoalCheckpoint",
+    "GoalMetric",
+    "GoalStatus",
     "Hypothesis",
     "HypothesisStatus",
     "InsulinEvent",
@@ -292,6 +296,60 @@ class Hypothesis(_FrozenModel):
     source_finding_id: int | None = None
     tests: list[dict[str, Any]] = Field(default_factory=list)
     id: int | None = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Goals — user-stated objectives pursued by background agents
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class GoalStatus(enum.StrEnum):
+    ACTIVE = "active"
+    ACHIEVED = "achieved"
+    PAUSED = "paused"
+    ABANDONED = "abandoned"
+
+
+class GoalMetric(enum.StrEnum):
+    """Deterministic success metrics. A goal's progress is never LLM-judged."""
+
+    TIR = "tir"
+    NOCTURNAL_TBR = "nocturnal_tbr"
+    TBR = "tbr"
+    MEAN_GLUCOSE = "mean_glucose"
+    CV = "cv"
+
+
+class Goal(_FrozenModel):
+    """A user objective the model composes into a background investigation.
+
+    ``metric`` + ``direction`` define success deterministically (e.g. metric
+    ``nocturnal_tbr``, direction ``decrease``). ``tools`` is the model-composed
+    plan: each entry is a ``{"tool", "args"}`` call the tick runs to keep the
+    goal's evidence fresh. Treatment changes are never a goal output.
+    """
+
+    statement: str
+    metric: GoalMetric
+    direction: Literal["increase", "decrease"]
+    target: float | None = None
+    tools: list[dict[str, Any]] = Field(default_factory=list)
+    cadence_days: int = 7
+    status: GoalStatus = GoalStatus.ACTIVE
+    created_at: datetime | None = None
+    id: int | None = None
+
+
+class GoalCheckpoint(_FrozenModel):
+    """One background tick: the measured metric and a progress note."""
+
+    goal_id: int
+    ts: datetime
+    metric_value: float | None
+    note: str
+    id: int | None = None
+
+    _utc = field_validator("ts")(_require_utc)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

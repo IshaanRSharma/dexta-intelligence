@@ -19,7 +19,53 @@ if TYPE_CHECKING:
     from dexta_intelligence.agents.base import DataRequirement
     from dexta_intelligence.models import CoverageStats
 
-__all__ = ["CAPABILITY_GATES", "ColdStartReport", "Gate"]
+__all__ = ["CAPABILITY_GATES", "CapabilitySet", "ColdStartReport", "Gate"]
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilitySet:
+    """Which data streams exist in the analysis window — the single mechanism
+    deciding which tools a reasoning loop (or the MCP server) exposes.
+
+    Distinct from :class:`ColdStartReport`: gates ask "is there *enough* data
+    for an honest claim", capabilities ask "does this stream exist at all".
+    A tool whose stream is absent is hidden, not error-prone."""
+
+    has_insulin: bool
+    has_meals: bool
+    has_sleep: bool
+    has_activity: bool
+    has_predictions: bool = False
+
+    def allows(self, need: str | None) -> bool:
+        """Whether the named stream requirement is met (``None`` = no requirement)."""
+        if need is None:
+            return True
+        return {
+            "insulin": self.has_insulin,
+            "meals": self.has_meals,
+            "sleep": self.has_sleep,
+            "activity": self.has_activity,
+            "predictions": self.has_predictions,
+        }.get(need, True)
+
+    def missing_notes(self) -> list[str]:
+        """Human/model-readable notes for absent streams, with the unlock path."""
+        notes: list[str] = []
+        if not self.has_insulin:
+            notes.append(
+                "insulin/pump data absent — treatment tools disabled "
+                "(connect Nightscout treatments)"
+            )
+        if not self.has_meals:
+            notes.append("carb entries absent — meal tools disabled (log carbs in Nightscout)")
+        if not self.has_sleep:
+            notes.append("sleep data absent (connect a wearable)")
+        if not self.has_activity:
+            notes.append("activity data absent (connect a wearable)")
+        if not self.has_predictions:
+            notes.append("no algorithm prediction curves (looping uploads unlock reconciliation)")
+        return notes
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}dexta · chat{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Ask dexta</h1>
+  <p class="page-sub">Free-form questions over your data — every number traces to a tool call.</p>
+</div>
+{% if not has_model %}
+<div class="empty">
+  <p>Chat needs a language model.</p>
+  <p class="hint">Set a provider in Settings and add an API key to your environment.</p>
+  <a class="btn btn-secondary" href="/settings" style="margin-top:14px">Open Settings</a>
+</div>
+{% else %}
+<form hx-post="/api/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin" class="ask">
+  <input type="text" name="question" placeholder="e.g. what drives my overnight lows?" autocomplete="off" required />
+  <button type="submit">Ask</button>
+  <span id="spin" class="spin htmx-indicator">thinking…</span>
+</form>
+<p class="muted small">Observation only — never dosing advice.</p>
+<div id="answer"></div>
+{% endif %}
+{% endblock %}

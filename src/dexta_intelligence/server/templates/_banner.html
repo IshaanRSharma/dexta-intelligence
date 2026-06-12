@@ -1,0 +1,12 @@
+{% if banners %}
+<div class="banners">
+  {% for b in banners %}
+  <div class="banner {{ b.kind }}">
+    <p class="banner-msg">{{ b.message }}</p>
+    {% if b.href and b.label %}
+      <a class="btn btn-secondary" href="{{ b.href }}">{{ b.label }}</a>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

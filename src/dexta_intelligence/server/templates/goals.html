@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}dexta · goals{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Goals</h1>
+  <p class="page-sub">Track what you want to improve — progress arcs update as the system ticks.</p>
+</div>
+{% if cards %}
+<div class="cards">
+  {% for g in cards %}
+  <article class="card">
+    <div class="card-head">
+      <h2>{{ g.statement }}</h2>
+      <span class="pill {{ g.status }}">{{ g.status }}</span>
+    </div>
+    <div class="meta">
+      <span class="mono">{{ g.metric }}</span>
+      <span class="muted">{{ g.direction }} · every {{ g.cadence_days }}d</span>
+    </div>
+    <div class="arc">{{ g.spark|safe }}</div>
+    {% if g.latest_note %}
+      <p class="stats">
+        {% if g.latest_value is not none %}<strong>{{ "%.1f"|format(g.latest_value) }}</strong> · {% endif %}{{ g.latest_note }}
+      </p>
+    {% else %}
+      <p class="muted">No checkpoints yet — they accrue as the background agent ticks.</p>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <p>No goals yet.</p>
+  <p class="hint">Describe what you want to improve — e.g. “reduce my overnight lows”.</p>
+  <p class="hint small">Goal creation in the GUI is coming next. For now: <code>dexta goals add "…"</code></p>
+</div>
+{% endif %}
+{% endblock %}

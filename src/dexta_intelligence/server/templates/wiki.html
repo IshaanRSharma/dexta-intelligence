@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}dexta · wiki{% endblock %}
+{% block content %}
+{% if body %}
+  <article class="prose wiki">{{ body|safe }}</article>
+{% else %}
+  <div class="empty">
+    <p>No wiki page <code>{{ slug }}</code> yet.</p>
+    <p class="hint">Generate the knowledge base with <code>dexta wiki</code>.</p>
+    <p class="muted">Looking in <span class="mono">{{ root }}</span></p>
+  </div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,40 @@
+<aside class="sidebar" aria-label="Status">
+  <div class="side-panel">
+    <h3>Data sources</h3>
+    {% if sidebar.sources %}
+    <ul class="side-list">
+      {% for s in sidebar.sources %}
+      <li>
+        <span class="dot set"></span>
+        <span>{{ s.label }}</span>
+        {% if s.fresh %}<span class="side-meta">{{ s.fresh }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted small">No sources connected yet.</p>
+    <a class="btn btn-secondary" href="/settings" style="margin-top:10px;width:100%">Connect in Settings</a>
+    {% endif %}
+  </div>
+
+  <div class="side-panel">
+    <h3>Capabilities</h3>
+    <p class="small muted" style="margin:0 0 10px">{{ sidebar.unlocked_count }} unlocked</p>
+    {% if sidebar.pending %}
+    <ul class="side-list">
+      {% for p in sidebar.pending %}
+      <li><span class="dot"></span><span>{{ p }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted small" style="margin:0">All gates satisfied for current data.</p>
+    {% endif %}
+  </div>
+
+  {% if sidebar.last_sync %}
+  <div class="side-panel">
+    <h3>Last sync</h3>
+    <p class="small" style="margin:0">{{ sidebar.last_sync }}</p>
+  </div>
+  {% endif %}
+</aside>

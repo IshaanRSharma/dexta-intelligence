@@ -1,0 +1,10 @@
+{% if report is none %}
+<p class="muted small" style="margin:0">Not configured — fill in credentials and save first.</p>
+{% else %}
+<p class="health" style="margin:0">
+  <span class="dot {{ 'set' if report.ok else 'unset' }}"></span>
+  <strong>{{ 'Connection OK' if report.ok else 'Connection failed' }}</strong>
+  {% if report.detail %} · {{ report.detail }}{% endif %}
+  {% if report.latest_data_ts %} · latest data {{ report.latest_data_ts.strftime('%b %d, %H:%M') }}{% endif %}
+</p>
+{% endif %}

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "w1b2c3d4-0001-4000-8000-000000000001",
+    "activity": "running",
+    "day": "2026-06-10",
+    "start_datetime": "2026-06-10T11:00:00-04:00",
+    "end_datetime": "2026-06-10T11:45:00-04:00",
+    "calories": 420,
+    "distance": 8042,
+    "intensity": "moderate",
+    "source": "confirmed",
+    "label": "Morning run"
+  },
+  {
+    "id": "w1b2c3d4-0002-4000-8000-000000000002",
+    "activity": "weight_training",
+    "day": "2026-06-09",
+    "start_datetime": "2026-06-09T12:00:00-04:00",
+    "end_datetime": "2026-06-09T13:00:00-04:00",
+    "calories": 310,
+    "distance": null,
+    "intensity": "hard",
+    "source": "manual",
+    "label": null
+  },
+  {
+    "id": "w1b2c3d4-0003-4000-8000-000000000003",
+    "activity": "walking",
+    "day": "2026-06-10",
+    "start_datetime": null,
+    "end_datetime": "2026-06-10T15:20:00-04:00",
+    "calories": null,
+    "distance": 1200,
+    "intensity": "easy",
+    "source": "autodetected",
+    "label": null
+  }
+]

@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}dexta · settings{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <h1>Settings</h1>
+  <p class="page-sub">Connect your data sources, set clinical targets, and configure intelligence providers.</p>
+</div>
+
+{% if saved %}<div class="flash">Saved to <code>{{ config_path }}</code></div>{% endif %}
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+{% if cards|default([])|length == 0 %}
+<div class="callout bad">
+  <p><strong>Server needs a restart.</strong> Connection forms did not load.
+  Stop <code>dexta serve</code> (Ctrl-C) and start it again, then refresh this page.</p>
+</div>
+{% endif %}
+
+<div class="callout info">
+  <p><strong>Local only.</strong> No authentication — use on a trusted network.
+  Credentials save to <code>{{ config_path }}</code> (mode 0600).
+  Environment variables override form values.</p>
+</div>
+
+{% if remote_bind %}
+<div class="callout warn">
+  <p><strong>Network exposure.</strong> Bound beyond localhost — anyone on your network can edit these settings.</p>
+</div>
+{% endif %}
+
+{% if setup_overview|default([])|length > 0 %}
+<details class="routing-summary">
+  <summary>How data reaches Dexta</summary>
+  <dl class="routing-map">
+    {% for row in setup_overview %}
+    <div class="routing-row">
+      <dt>{{ row.title }}</dt>
+      <dd>
+        {{ row.examples }}
+        {% if row.panel %}
+        · <a href="?panel={{ row.panel }}">configure {{ row.panel }}</a>
+        {% endif %}
+      </dd>
+    </div>
+    {% endfor %}
+  </dl>
+</details>
+{% endif %}
+
+{% set card_index = cards_by_key if cards_by_key is defined else {} %}
+{% set nav_items = settings_nav if settings_nav is defined and settings_nav|length > 0 else (source_nav if source_nav is defined else []) %}
+{% if nav_items|length == 0 %}
+{% set nav_items = [
+  {'key':'nightscout','label':'Nightscout','group':'Connections'},
+  {'key':'dexcom','label':'Dexcom Share (pydexcom)','group':'Connections'},
+  {'key':'libre','label':'Libre (LibreLinkUp)','group':'Connections'},
+  {'key':'whoop','label':'Whoop','group':'Connections'},
+  {'key':'oura','label':'Oura','group':'Connections'},
+  {'key':'tidepool','label':'Tidepool (JSON export)','group':'Connections'},
+  {'key':'llm','label':'LLM provider','group':'Intelligence'},
+  {'key':'evidence','label':'Literature (optional)','group':'Intelligence'},
+  {'key':'analysis','label':'Analysis & storage','group':'System'},
+] %}
+{% endif %}
+{% set active_panel = default_panel|default('nightscout') %}
+
+<div class="settings-layout">
+  <aside class="settings-nav" aria-label="Settings sections">
+    {% set ns = namespace(last_group='') %}
+    {% for item in nav_items %}
+      {% if item.group != ns.last_group %}
+        <p class="settings-nav-label">{{ item.group }}</p>
+        {% set ns.last_group = item.group %}
+      {% endif %}
+      {% set linked = card_index.get(item.key) %}
+      {% set ok = linked.configured if linked else (item.ok if item.ok is defined else false) %}
+      <button type="button"
+              class="settings-nav-item{% if item.key == active_panel %} on{% endif %}"
+              data-filter="{{ item.key }}">
+        <span class="settings-nav-text">{{ item.label }}</span>
+        {% if item.key != 'analysis' %}
+        <span class="dot {{ 'set' if ok else 'unset' }}" title="{{ 'Configured' if ok else 'Not configured' }}"></span>
+        {% else %}
+        <span class="dot set" title="Always available"></span>
+        {% endif %}
+      </button>
+    {% endfor %}
+  </aside>
+
+  <div class="settings-panels">
+    {% for item in nav_items if item.key != 'analysis' %}
+    {% set card = card_index.get(item.key) %}
+    <div class="settings-panel-view" data-panel="{{ item.key }}"{% if item.key != active_panel %} hidden{% endif %}>
+      {% if card %}
+        {% include "_settings_card.html" %}
+      {% else %}
+        <div class="settings-panel empty-panel">
+          <h3>{{ item.label }}</h3>
+          <p class="hint">Restart <code>dexta serve</code> to load this connection form.</p>
+        </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+
+    <div class="settings-panel-view" data-panel="analysis"{% if active_panel != 'analysis' %} hidden{% endif %}>
+      <form method="post" action="/settings" class="settings-panel">
+        <div class="settings-panel-head">
+          <div>
+            <h3>Storage</h3>
+            <p>Database for glucose, insulin, and findings · <span class="mono">[data]</span></p>
+          </div>
+        </div>
+        {% for f in data_fields|default([]) %}
+          {% set prefix = 'data' %}
+          {% include "_settings_field.html" %}
+        {% endfor %}
+        {% if analysis_note %}
+        <p class="field-hint storage-note">{{ analysis_note }}</p>
+        {% endif %}
+
+        <div class="settings-panel-head section-gap">
+          <div>
+            <h3>Clinical targets</h3>
+            <p>Used by metrics, goals, and finding thresholds · <span class="mono">[analysis]</span></p>
+          </div>
+        </div>
+        <div class="field-row">
+          {% for f in analysis_fields %}
+            {% set prefix = 'analysis' %}
+            {% include "_settings_field.html" %}
+          {% endfor %}
+        </div>
+
+        <div class="settings-panel-head section-gap">
+          <div>
+            <h3>Wiki output</h3>
+            <p>Markdown knowledge base generated from findings · <span class="mono">[wiki]</span></p>
+          </div>
+        </div>
+        {% for f in wiki_fields %}
+          {% set prefix = 'wiki' %}
+          {% include "_settings_field.html" %}
+        {% endfor %}
+
+        <div class="settings-panel-head section-gap">
+          <div>
+            <h3>Lenses</h3>
+            <p>Named agent routes — configured in <code>dexta.toml</code>.</p>
+          </div>
+        </div>
+        <div class="lenses">
+          {% for l in lenses %}<span class="chip">{{ l }}</span>{% endfor %}
+        </div>
+
+        <div class="settings-save-row">
+          <button type="submit">Save changes</button>
+          <span class="muted small">Writes <code>{{ config_path }}</code></span>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var nav = document.querySelector(".settings-nav");
+  var panels = document.querySelectorAll(".settings-panel-view");
+  if (!nav || !panels.length) return;
+
+  function show(key) {
+    panels.forEach(function (p) { p.hidden = p.dataset.panel !== key; });
+    nav.querySelectorAll(".settings-nav-item").forEach(function (b) {
+      b.classList.toggle("on", b.dataset.filter === key);
+    });
+    var url = new URL(window.location.href);
+    url.searchParams.set("panel", key);
+    history.replaceState(null, "", url);
+  }
+
+  nav.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-filter]");
+    if (btn) show(btn.dataset.filter);
+  });
+
+  var initial = new URLSearchParams(window.location.search).get("panel");
+  if (initial && nav.querySelector('[data-filter="' + initial + '"]')) {
+    show(initial);
+  }
+})();
+</script>
+{% endblock %}

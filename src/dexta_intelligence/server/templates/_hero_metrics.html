@@ -1,0 +1,45 @@
+<section class="hero-grid" aria-label="Summary">
+  <div class="hero-tile">
+    <div class="hero-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+    </div>
+    {% if hero.span_days is not none %}
+      <div class="hero-num">{{ "%.0f"|format(hero.span_days) }}</div>
+    {% else %}
+      <div class="hero-num empty">—</div>
+    {% endif %}
+    <div class="hero-label">days of data</div>
+  </div>
+
+  <div class="hero-tile">
+    <div class="hero-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h2l2-7 4 14 4-10 2 3h6"/></svg>
+    </div>
+    {% if hero.coverage_pct is not none %}
+      <div class="hero-num">{{ "%.0f"|format(hero.coverage_pct) }}%</div>
+    {% else %}
+      <div class="hero-num empty">—</div>
+    {% endif %}
+    <div class="hero-label">sensor coverage</div>
+  </div>
+
+  <div class="hero-tile">
+    <div class="hero-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>
+    </div>
+    {% if hero.tir_pct is not none %}
+      <div class="hero-num">{{ "%.0f"|format(hero.tir_pct) }}%</div>
+    {% else %}
+      <div class="hero-num empty">—</div>
+    {% endif %}
+    <div class="hero-label">time in range</div>
+  </div>
+
+  <div class="hero-tile">
+    <div class="hero-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+    </div>
+    <div class="hero-num">{{ hero.active_findings }}</div>
+    <div class="hero-label">active findings</div>
+  </div>
+</section>

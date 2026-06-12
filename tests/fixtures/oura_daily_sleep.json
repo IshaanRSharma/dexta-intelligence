@@ -1,0 +1,47 @@
+[
+  {
+    "id": "d1b2c3d4-0001-4000-8000-000000000001",
+    "day": "2026-06-10",
+    "score": 91,
+    "timestamp": "2026-06-10T12:35:00-04:00",
+    "contributors": {
+      "deep_sleep": 82,
+      "efficiency": 90,
+      "latency": 88,
+      "rem_sleep": 85,
+      "restfulness": 79,
+      "timing": 92,
+      "total_sleep": 91
+    }
+  },
+  {
+    "id": "d1b2c3d4-0002-4000-8000-000000000002",
+    "day": "2026-06-09",
+    "score": 76,
+    "timestamp": "2026-06-09T08:30:00-04:00",
+    "contributors": {
+      "deep_sleep": 70,
+      "efficiency": 80,
+      "latency": 75,
+      "rem_sleep": 72,
+      "restfulness": 74,
+      "timing": 78,
+      "total_sleep": 76
+    }
+  },
+  {
+    "id": "d1b2c3d4-0003-4000-8000-000000000003",
+    "day": "2026-06-11",
+    "score": null,
+    "timestamp": "2026-06-11T08:00:00-04:00",
+    "contributors": {
+      "deep_sleep": null,
+      "efficiency": null,
+      "latency": null,
+      "rem_sleep": null,
+      "restfulness": null,
+      "timing": null,
+      "total_sleep": null
+    }
+  }
+]

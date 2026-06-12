@@ -1,0 +1,62 @@
+[
+  {
+    "id": "a1b2c3d4-0001-4000-8000-000000000001",
+    "day": "2026-06-10",
+    "type": "long_sleep",
+    "bedtime_start": "2026-06-10T01:00:00-04:00",
+    "bedtime_end": "2026-06-10T08:30:00-04:00",
+    "time_in_bed": 27000,
+    "total_sleep_duration": 24600,
+    "deep_sleep_duration": 5400,
+    "light_sleep_duration": 13500,
+    "rem_sleep_duration": 5700,
+    "awake_time": 2400,
+    "average_hrv": 78.4,
+    "average_heart_rate": 54.0,
+    "lowest_heart_rate": 52,
+    "efficiency": 92
+  },
+  {
+    "id": "a1b2c3d4-0002-4000-8000-000000000002",
+    "day": "2026-06-09",
+    "type": "sleep",
+    "bedtime_start": "2026-06-09T14:00:00-04:00",
+    "bedtime_end": "2026-06-09T14:45:00-04:00",
+    "time_in_bed": 2700,
+    "total_sleep_duration": 2400,
+    "deep_sleep_duration": 600,
+    "light_sleep_duration": 1800,
+    "rem_sleep_duration": 0,
+    "awake_time": 300,
+    "average_hrv": 51.2,
+    "average_heart_rate": 60.0,
+    "lowest_heart_rate": 58,
+    "efficiency": 89
+  },
+  {
+    "id": "a1b2c3d4-0003-4000-8000-000000000003",
+    "day": "2026-06-10",
+    "type": "deleted",
+    "bedtime_start": "2026-06-10T21:00:00-04:00",
+    "bedtime_end": "2026-06-11T03:00:00-04:00",
+    "time_in_bed": 21600,
+    "total_sleep_duration": null,
+    "deep_sleep_duration": null,
+    "light_sleep_duration": null,
+    "rem_sleep_duration": null,
+    "awake_time": null
+  },
+  {
+    "id": "a1b2c3d4-0004-4000-8000-000000000004",
+    "day": "2026-06-11",
+    "type": "long_sleep",
+    "bedtime_start": "2026-06-11T01:00:00-04:00",
+    "bedtime_end": null,
+    "time_in_bed": 0,
+    "total_sleep_duration": null,
+    "deep_sleep_duration": null,
+    "light_sleep_duration": null,
+    "rem_sleep_duration": null,
+    "awake_time": null
+  }
+]

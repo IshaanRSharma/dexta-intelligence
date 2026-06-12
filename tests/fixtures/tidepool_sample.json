@@ -1,0 +1,28 @@
+[
+  {
+    "type": "cbg",
+    "units": "mg/dL",
+    "value": 112,
+    "id": "cbg-001",
+    "time": "2024-06-01T08:15:00.000Z"
+  },
+  {
+    "type": "cbg",
+    "units": "mmol/L",
+    "value": 6.1,
+    "id": "cbg-002",
+    "time": "2024-06-01T09:00:00.000Z"
+  },
+  {
+    "type": "bolus",
+    "subType": "normal",
+    "normal": 4.5,
+    "id": "bolus-001",
+    "time": "2024-06-01T08:10:00.000Z"
+  },
+  {
+    "type": "wizard",
+    "id": "wizard-001",
+    "time": "2024-06-01T07:00:00.000Z"
+  }
+]

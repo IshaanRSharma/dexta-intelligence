@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -22,7 +23,7 @@ from dexta_intelligence.models import (
     PredictionEvent,
 )
 from dexta_intelligence.store import SQLiteStore
-from dexta_intelligence.testing.synthetic import generate_null
+from dexta_intelligence.testing.synthetic import generate_null, scenario_all
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -256,3 +257,30 @@ class TestAgentContract:
         assert reconciliation_agent.name == AGENT_NAME
         assert reconciliation_agent.requires.min_span_days >= 1.0
         assert reconciliation_agent.requires.min_glucose_coverage_pct >= 50.0
+
+
+class TestPerformance:
+    def test_90_day_scenario_completes_under_15s(self, store: SQLiteStore) -> None:
+        """Tier B reconciliation on 90 days must not be O(n²) (regression guard).
+
+        The old code rebuilt the deviation series per meal per cycle and shuffled
+        an unbounded null/effect group, which never completed on this input. The
+        bound is intentionally generous (real runtime is well under it) so it
+        catches algorithmic blowups, not minor perf drift, on slow CI hardware.
+        """
+        events, _ = scenario_all(seed=42, n_days=90)
+        store.insert_glucose(events["glucose"])
+        store.insert_insulin(events["insulin"])
+        store.insert_meals(events["meal"])
+        coverage = store.coverage()
+        first = coverage.first_ts or events["glucose"][0].ts
+        last = coverage.last_ts or events["glucose"][-1].ts
+        window = (first.date(), last.date())
+
+        start = time.monotonic()
+        findings = reconciliation_agent.run(_ctx(store, window=window))
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 15.0, f"reconciliation on 90d took {elapsed:.1f}s (expected < 15s)"
+        # Sanity: the planted effects still surface (the fix preserved behavior).
+        assert findings, "expected Tier B findings on the 90-day all-effects scenario"

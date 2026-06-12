@@ -18,6 +18,10 @@ from dexta_intelligence.models import (
     FindingStats,
     FindingStatus,
     GlucoseEvent,
+    Goal,
+    GoalCheckpoint,
+    GoalMetric,
+    GoalStatus,
     Hypothesis,
     HypothesisStatus,
     InsulinEvent,
@@ -525,3 +529,58 @@ class TestHypotheses:
         got = store.get_hypotheses(status="refuted")
         assert [h.statement for h in got] == ["refuted one"]
         assert store.get_hypotheses(status="stale") == []
+
+
+class TestGoals:
+    def _goal(self, statement: str = "reduce my overnight lows") -> Goal:
+        return Goal(
+            statement=statement,
+            metric=GoalMetric.NOCTURNAL_TBR,
+            direction="decrease",
+        )
+
+    def test_insert_and_get_round_trips(self, store: SQLiteStore) -> None:
+        gid = store.insert_goal(self._goal())
+        assert gid == 1
+        (got,) = store.get_goals()
+        assert got.id == gid
+        assert got.statement == "reduce my overnight lows"
+        assert got.status is GoalStatus.ACTIVE
+
+    def test_get_goals_orders_by_id_ascending(self, store: SQLiteStore) -> None:
+        ids = [store.insert_goal(self._goal(f"goal {i}")) for i in range(5)]
+        got = store.get_goals()
+        assert [g.id for g in got] == sorted(ids)
+
+    def test_get_goals_filters_by_status(self, store: SQLiteStore) -> None:
+        active = store.insert_goal(self._goal("active one"))
+        paused = store.insert_goal(self._goal("paused one"))
+        store.set_goal_status(paused, GoalStatus.PAUSED)
+        got = store.get_goals(status=GoalStatus.ACTIVE)
+        assert [g.id for g in got] == [active]
+
+    def test_checkpoint_ordering_under_same_timestamp(self, store: SQLiteStore) -> None:
+        gid = store.insert_goal(self._goal())
+        ts = T0
+        notes = ["first", "second", "third", "fourth"]
+        for note in notes:
+            store.insert_goal_checkpoint(
+                GoalCheckpoint(goal_id=gid, ts=ts, metric_value=1.0, note=note)
+            )
+        got = store.get_goal_checkpoints(gid)
+        # Same ts on every row: insertion order (rowid) must break the tie so the
+        # arc note ("prior -> current") compares against the true previous tick.
+        assert [c.note for c in got] == notes
+        assert [c.id for c in got] == sorted(c.id for c in got)
+
+    def test_checkpoints_scoped_to_their_goal(self, store: SQLiteStore) -> None:
+        g1 = store.insert_goal(self._goal("g1"))
+        g2 = store.insert_goal(self._goal("g2"))
+        store.insert_goal_checkpoint(
+            GoalCheckpoint(goal_id=g1, ts=T0, metric_value=1.0, note="for g1")
+        )
+        store.insert_goal_checkpoint(
+            GoalCheckpoint(goal_id=g2, ts=T0, metric_value=2.0, note="for g2")
+        )
+        assert [c.note for c in store.get_goal_checkpoints(g1)] == ["for g1"]
+        assert [c.note for c in store.get_goal_checkpoints(g2)] == ["for g2"]

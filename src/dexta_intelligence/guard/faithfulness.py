@@ -3,7 +3,8 @@
 The core safety property of the platform: **every number in LLM-authored
 prose must trace to the deterministic evidence pool**, within a small
 relative tolerance. Untraceable output is rejected and the caller falls back
-to deterministic text. The model ranks and explains; it cannot invent.
+to deterministic text. The model is the intelligence layer — it discovers,
+ranks, and explains — but every number it cites must trace to the evidence pool.
 
 This is a hardened port of the guard that shipped in the donor codebase's
 clinical brief (where it ran in production against real endocrinologist

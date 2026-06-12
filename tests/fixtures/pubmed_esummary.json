@@ -1,0 +1,28 @@
+{
+  "header": {
+    "type": "esummary",
+    "version": "0.3"
+  },
+  "result": {
+    "uids": [
+      "30100000",
+      "29200001"
+    ],
+    "30100000": {
+      "uid": "30100000",
+      "pubdate": "2018 Jul 15",
+      "source": "Diabetes Care",
+      "title": "Postprandial exercise and glycemic excursions in type 1 diabetes.",
+      "fulljournalname": "Diabetes Care",
+      "elocationid": "doi: 10.0000/dc.30100000"
+    },
+    "29200001": {
+      "uid": "29200001",
+      "pubdate": "2017 Nov",
+      "source": "Diabetologia",
+      "title": "Overnight basal insulin requirements and dawn phenomenon.",
+      "fulljournalname": "Diabetologia",
+      "elocationid": "doi: 10.0000/diab.29200001"
+    }
+  }
+}

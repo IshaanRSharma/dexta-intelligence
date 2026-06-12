@@ -9,6 +9,7 @@ Spec §7.1. No LLM imports in this module.
 
 from __future__ import annotations
 
+import bisect
 import math
 import random
 from collections import defaultdict
@@ -23,7 +24,9 @@ from dexta_intelligence.agents.base import (
     DataRequirement,
 )
 from dexta_intelligence.analytics.oref import (
-    carbs_on_board,
+    CARB_WINDOW_MIN,
+    MAX_COB_DEFAULT,
+    MIN_5M_CARBIMPACT_DEFAULT,
     deviation_series,
     predict_glucose,
     temp_basal_to_microboluses,
@@ -75,6 +78,20 @@ _DEFAULT_CARB_RATIO = 10.0
 _DEFAULT_HORIZON_MIN = 120.0
 _RIGOR_SEED = 42
 _STEP = timedelta(minutes=5)
+
+#: Cap on near-null baseline samples handed to the permutation test. A few
+#: thousand draws already give a stable null; uncapped, the group grows with
+#: every cycle/horizon and makes each :func:`assess` shuffle (n_permutations
+#: times pool size) blow up on multi-month windows. A no-op for the small
+#: fixtures the unit tests exercise, so numeric parity there is unaffected.
+_MAX_BASELINE_SAMPLES = 2050
+
+#: Same budget for the episode (effect) group per contributor: a strong,
+#: recurrent miss is established by a bounded sample, and an uncapped group
+#: (tens of thousands of cycles on long windows) only inflates the permutation
+#: cost. Episodes are kept in time order (oldest first), so the earliest
+#: occurrences are analyzed; far below this for any unit-test fixture.
+_MAX_EPISODE_SAMPLES = 512
 
 ContributorKind = Literal[
     "carb_underestimate",
@@ -203,19 +220,35 @@ def _tier_b_cycles(
 ) -> dict[datetime, dict[str, PredictionEvent]]:
     doses = _build_doses(insulin)
     series = [(g.ts, float(g.mg_dl)) for g in glucose]
-    deviations = dict(deviation_series(series, doses, _DEFAULT_ISF))
+    # Deviations are prefix-independent (each entry depends only on a
+    # consecutive pair and the full dose list), so compute the series once and
+    # slice per meal instead of rebuilding it inside every COB call.
+    dev_pairs = deviation_series(series, doses, _DEFAULT_ISF)
+    dev_ts = [ts for ts, _ in dev_pairs]
+    dev_val = [dev for _, dev in dev_pairs]
+    deviations = dict(dev_pairs)
+    carb_window = timedelta(minutes=CARB_WINDOW_MIN)
     cycles: dict[datetime, dict[str, PredictionEvent]] = {}
+
+    # Doses sorted by timestamp let each cycle look at only the doses that can
+    # still be active over its [at - DIA, at + horizon] span; the rest
+    # contribute exactly zero IOB/activity in oref's curves.
+    sorted_doses = sorted(doses)
+    dose_ts = [ts for ts, _ in sorted_doses]
+    dia = timedelta(minutes=_DEFAULT_HORIZON_MIN + 300.0)
 
     for idx, g in enumerate(glucose):
         if idx + EPISODE_MIN_HORIZON_MIN // 5 >= len(glucose):
             continue
         ts = g.ts
         bg = float(g.mg_dl)
-        cob_g = _total_cob_at(meals, series[: idx + 1], doses, ts)
+        cob_g = _total_cob_at(meals, dev_ts, dev_val, ts, carb_window)
         dev = deviations.get(ts, 0.0)
+        lo = bisect.bisect_left(dose_ts, ts - dia)
+        hi = bisect.bisect_right(dose_ts, ts + timedelta(minutes=_DEFAULT_HORIZON_MIN))
         curves = predict_glucose(
             bg,
-            doses,
+            sorted_doses[lo:hi],
             ts,
             _DEFAULT_ISF,
             horizon_min=_DEFAULT_HORIZON_MIN,
@@ -237,23 +270,30 @@ def _tier_b_cycles(
 
 def _total_cob_at(
     meals: list[MealEvent],
-    glucose_prefix: list[tuple[datetime, float]],
-    doses: list[tuple[datetime, float]],
+    dev_ts: list[datetime],
+    dev_val: list[float],
     at: datetime,
+    carb_window: timedelta,
 ) -> float:
+    """Sum announced-carb COB at ``at`` over the precomputed deviation series.
+
+    Mirrors :func:`dexta_intelligence.analytics.oref.carbs_on_board` exactly
+    (``ci = max(deviation, MIN_5M_CARBIMPACT)``; COB clamped to
+    ``[0, MAX_COB]``) but reuses one shared deviation series sliced by
+    :mod:`bisect`, rather than rebuilding it per meal per cycle.
+    """
+    csf_inv = _DEFAULT_CARB_RATIO / _DEFAULT_ISF
     total = 0.0
     for meal in meals:
-        if meal.carbs_g and meal.ts <= at <= meal.ts + timedelta(minutes=360):
-            result = carbs_on_board(
-                meal.carbs_g,
-                meal.ts,
-                glucose_prefix,
-                doses,
-                _DEFAULT_ISF,
-                _DEFAULT_CARB_RATIO,
-                at,
-            )
-            total += result.cob_g
+        if not meal.carbs_g or not (meal.ts <= at <= meal.ts + carb_window):
+            continue
+        deadline = min(at, meal.ts + carb_window)
+        lo = bisect.bisect_right(dev_ts, meal.ts)
+        hi = bisect.bisect_right(dev_ts, deadline)
+        absorbed = sum(
+            max(dev_val[i], MIN_5M_CARBIMPACT_DEFAULT) * csf_inv for i in range(lo, hi)
+        )
+        total += min(MAX_COB_DEFAULT, max(0.0, meal.carbs_g - absorbed))
     return total
 
 
@@ -287,19 +327,20 @@ def _detect_episodes(
 
         peak_horizon = 0
         peak_abs = 0.0
-        peak_errors: dict[str, float] = {}
-        for _kind, pairs in errors_by_curve.items():
+        for pairs in errors_by_curve.values():
             for horizon, err in pairs:
                 if horizon < EPISODE_MIN_HORIZON_MIN:
                     continue
                 if abs(err) > peak_abs:
                     peak_abs = abs(err)
                     peak_horizon = horizon
-                    peak_errors = _errors_at_horizon(errors_by_curve, horizon)
 
         if peak_abs < EPISODE_ERROR_THRESHOLD_MG_DL:
             continue
 
+        # peak_errors depends only on the final peak_horizon, so resolve it once
+        # here rather than re-scanning every curve each time the peak advances.
+        peak_errors = _errors_at_horizon(errors_by_curve, peak_horizon)
         contributor = _attribute(peak_errors)
         worst_curve = max(peak_errors, key=lambda k: abs(peak_errors[k]))
         signed = peak_errors[worst_curve]
@@ -367,13 +408,21 @@ def _baseline_errors(
     cycles: dict[datetime, dict[str, PredictionEvent]],
     glucose_map: dict[datetime, int],
 ) -> list[float]:
-    """Near-null forecast errors used as the rigor comparison group."""
+    """Near-null forecast errors used as the rigor comparison group.
+
+    Capped at :data:`_MAX_BASELINE_SAMPLES`: the permutation null is stable well
+    before then, and an unbounded group would make each :func:`assess` shuffle
+    scale with the window length. The cap never trips for the small fixtures the
+    unit tests use, so their numbers are unchanged.
+    """
     baseline: list[float] = []
     for curves in cycles.values():
         ref = curves.get("iob") or next(iter(curves.values()))
         for horizon, err in _horizon_errors(ref, glucose_map):
             if horizon >= EPISODE_MIN_HORIZON_MIN and abs(err) < EPISODE_ERROR_THRESHOLD_MG_DL:
                 baseline.append(err)
+        if len(baseline) >= _MAX_BASELINE_SAMPLES:
+            return baseline[:_MAX_BASELINE_SAMPLES]
     return baseline
 
 
@@ -408,7 +457,8 @@ def _episodes_to_findings(
     findings: list[Finding] = []
     rng = random.Random(_RIGOR_SEED)
 
-    for contributor, group in by_contributor.items():
+    for contributor, full_group in by_contributor.items():
+        group = full_group[:_MAX_EPISODE_SAMPLES]
         episode_errors = [ep.signed_error_mg_dl for ep in group]
         null_group = list(baseline_errors) if baseline_errors else [0.0] * len(episode_errors)
         if len(null_group) < 8:

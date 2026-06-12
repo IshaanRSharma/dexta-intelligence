@@ -6,14 +6,18 @@ import io
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING, ClassVar, TextIO
 
 from dexta_intelligence.agents.base import AgentContext, AgentRegistry, DataRequirement
 from dexta_intelligence.cli import (
     cmd_analyze,
+    cmd_ask,
     cmd_doctor,
+    cmd_goals,
     cmd_init,
     cmd_sync,
+    cmd_upload,
+    cmd_wiki,
     init_config_path,
     is_dexcom_configured,
     is_libre_configured,
@@ -23,10 +27,18 @@ from dexta_intelligence.cli import (
     open_sqlite_store,
     resolve_config_path,
 )
-from dexta_intelligence.config import Config, load_config
+from dexta_intelligence.config import Config, WikiConfig, load_config
 from dexta_intelligence.connectors.base import HealthReport, NormalizedBatch
-from dexta_intelligence.models import Finding, FindingStats, FindingStatus, GlucoseEvent, RawEvent
+from dexta_intelligence.models import (
+    Finding,
+    FindingStats,
+    FindingStatus,
+    GlucoseEvent,
+    GoalStatus,
+    RawEvent,
+)
 from dexta_intelligence.store import SQLiteStore
+from dexta_intelligence.workflows.goals import compose_goal
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,6 +50,7 @@ else:
     import pytest
 
 FIXED_NOW = datetime(2025, 6, 10, 12, 0, tzinfo=UTC)
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @dataclass
@@ -382,6 +395,297 @@ class TestAnalyze:
         store.close()
 
 
+class TestUpload:
+    def test_upload_clarity_into_store(self, tmp_path: Path) -> None:
+        store = _tmp_store(tmp_path)
+        out = _capture()
+        csv_path = FIXTURES / "clarity_sample.csv"
+
+        code = cmd_upload(
+            path=csv_path,
+            config=Config(),
+            db_path=None,
+            csv_format="auto",
+            tz="UTC",
+            out=out,
+            opener=_opener_for(store),
+            now=FIXED_NOW,
+        )
+        text = out.getvalue()
+
+        assert code == 0
+        assert "csv:clarity" in text
+        assert "raw new:" in text
+        assert store.coverage().n_glucose == 13
+        store.close()
+
+    def test_reupload_is_idempotent(self, tmp_path: Path) -> None:
+        store = _tmp_store(tmp_path)
+        csv_path = FIXTURES / "clarity_sample.csv"
+        kwargs = {
+            "path": csv_path,
+            "config": Config(),
+            "db_path": None,
+            "csv_format": "auto",
+            "tz": "UTC",
+            "opener": _opener_for(store),
+            "now": FIXED_NOW,
+        }
+
+        assert cmd_upload(out=_capture(), **kwargs) == 0
+        out = _capture()
+        code = cmd_upload(out=out, **kwargs)
+        text = out.getvalue()
+
+        assert code == 0
+        assert "raw new: 0" in text
+        assert store.coverage().n_glucose == 13
+        store.close()
+
+    def test_bad_file_exit_one_no_traceback(self, tmp_path: Path) -> None:
+        store = _tmp_store(tmp_path)
+        bad = tmp_path / "bad.csv"
+        bad.write_text("not,a,valid,header\n1,2,3,4\n", encoding="utf-8")
+        out = _capture()
+
+        code = cmd_upload(
+            path=bad,
+            config=Config(),
+            db_path=None,
+            csv_format="auto",
+            tz="UTC",
+            out=out,
+            opener=_opener_for(store),
+        )
+        text = out.getvalue()
+
+        assert code == 1
+        assert "✗ upload:" in text
+        assert "Traceback" not in text
+        store.close()
+
+
+class TestAsk:
+    def test_without_model_explains_how_to_enable(self, tmp_path: Path) -> None:
+        store = _tmp_store(tmp_path)
+        out = io.StringIO()
+        code = cmd_ask(
+            question="why are my mornings high?",
+            config=Config(),
+            db_path=None,
+            out=out,
+            opener=_opener_for(store),
+            model=None,
+        )
+        assert code == 1
+        assert "language model" in out.getvalue().lower()
+        store.close()
+
+    def test_with_model_reasons_and_prints_answer(self, tmp_path: Path) -> None:
+        store = _tmp_store(tmp_path)
+        # enough glucose to clear the hard floor
+        start = datetime.now(tz=UTC) - timedelta(days=30)
+        store.insert_glucose(
+            [GlucoseEvent(ts=start + timedelta(hours=i), mg_dl=120) for i in range(24 * 30)]
+        )
+
+        class _Msg:
+            content = "Your data looks steady around target."
+            tool_calls: ClassVar[list[object]] = []
+
+        class _Model:
+            def bind_tools(self, _schemas: object) -> _Model:
+                return self
+
+            def invoke(self, _messages: object) -> _Msg:
+                return _Msg()
+
+        out = io.StringIO()
+        code = cmd_ask(
+            question="how am I doing?",
+            config=Config(),
+            db_path=None,
+            out=out,
+            opener=_opener_for(store),
+            model=_Model(),
+        )
+        assert code == 0
+        assert "steady around target" in out.getvalue()
+        store.close()
+
+
+class TestWiki:
+    def test_projects_findings_into_pages(self, tmp_path: Path) -> None:
+        store = _tmp_store(tmp_path)
+        store.insert_finding(
+            Finding(
+                agent="pattern",
+                kind="pattern_tod_drift",
+                scope="pattern_analysis",
+                headline="Overnight drift +28 mg/dL",
+                evidence={"drift_mg_dl": 28.0},
+                stats=FindingStats(effect_size=0.7, n=46),
+                confidence=0.8,
+                status=FindingStatus.ACTIVE,
+                window_start=datetime.now(tz=UTC) - timedelta(days=30),
+                window_end=datetime.now(tz=UTC),
+            )
+        )
+        out = io.StringIO()
+        config = Config(wiki=WikiConfig(path=tmp_path / "wiki", git=False))
+
+        code = cmd_wiki(config=config, db_path=None, out=out, opener=_opener_for(store))
+
+        assert code == 0
+        assert "wiki:" in out.getvalue()
+        index = (tmp_path / "wiki" / "index.md").read_text()
+        assert "Overnight drift +28 mg/dL" in index
+        assert (tmp_path / "wiki" / "topics" / "pattern-tod-drift.md").is_file()
+        store.close()
+
+
+class TestGoals:
+    def test_add_with_statement_succeeds(self, tmp_path: Path) -> None:
+        store = _tmp_store(tmp_path)
+        out = _capture()
+
+        code = cmd_goals(
+            action="add",
+            statement="reduce my overnight lows",
+            config=Config(),
+            db_path=None,
+            out=out,
+            opener=_opener_for(store),
+            model=None,
+        )
+        text = out.getvalue()
+
+        assert code == 0
+        assert "Goal #1" in text
+        store.close()
+
+    def test_add_without_statement_fails(self, tmp_path: Path) -> None:
+        store = _tmp_store(tmp_path)
+        out = _capture()
+
+        code = cmd_goals(
+            action="add",
+            statement=None,
+            config=Config(),
+            db_path=None,
+            out=out,
+            opener=_opener_for(store),
+            model=None,
+        )
+
+        assert code == 2
+        store.close()
+
+    def test_list_with_no_goals(self, tmp_path: Path) -> None:
+        store = _tmp_store(tmp_path)
+        out = _capture()
+
+        code = cmd_goals(
+            action="list",
+            statement=None,
+            config=Config(),
+            db_path=None,
+            out=out,
+            opener=_opener_for(store),
+            model=None,
+        )
+        text = out.getvalue()
+
+        assert code == 0
+        assert "No goals yet" in text
+        store.close()
+
+    def test_tick_with_active_goal_and_glucose(self, tmp_path: Path) -> None:
+        store = _tmp_store(tmp_path)
+        # Seed with 30 days of glucose to clear hard floor
+        start = FIXED_NOW - timedelta(days=30)
+        store.insert_glucose(
+            [GlucoseEvent(ts=start + timedelta(hours=i), mg_dl=120) for i in range(24 * 30)]
+        )
+        # Add a goal
+        goal = compose_goal("reduce my overnight lows", now=FIXED_NOW)
+        store.insert_goal(goal)
+        out = _capture()
+
+        code = cmd_goals(
+            action="tick",
+            statement=None,
+            config=Config(),
+            db_path=None,
+            out=out,
+            opener=_opener_for(store),
+            model=None,
+            now=FIXED_NOW,
+        )
+        text = out.getvalue()
+
+        assert code == 0
+        assert "#1" in text
+        # Check that a checkpoint was written
+        checkpoints = store.get_goal_checkpoints(1)
+        assert len(checkpoints) > 0
+        store.close()
+
+    def test_paused_goals_not_ticked(self, tmp_path: Path) -> None:
+        store = _tmp_store(tmp_path)
+        start = FIXED_NOW - timedelta(days=30)
+        store.insert_glucose(
+            [GlucoseEvent(ts=start + timedelta(hours=i), mg_dl=120) for i in range(24 * 30)]
+        )
+        goal = compose_goal("reduce my overnight lows", now=FIXED_NOW)
+        goal_id = store.insert_goal(goal)
+        store.set_goal_status(goal_id, GoalStatus.PAUSED)
+        out = _capture()
+
+        code = cmd_goals(
+            action="tick",
+            statement=None,
+            config=Config(),
+            db_path=None,
+            out=out,
+            opener=_opener_for(store),
+            model=None,
+            now=FIXED_NOW,
+        )
+        text = out.getvalue()
+
+        assert code == 0
+        assert "No active goals" in text
+        store.close()
+
+    def test_abandoned_goals_not_ticked(self, tmp_path: Path) -> None:
+        store = _tmp_store(tmp_path)
+        start = FIXED_NOW - timedelta(days=30)
+        store.insert_glucose(
+            [GlucoseEvent(ts=start + timedelta(hours=i), mg_dl=120) for i in range(24 * 30)]
+        )
+        goal_id = store.insert_goal(compose_goal("reduce my overnight lows", now=FIXED_NOW))
+        store.set_goal_status(goal_id, GoalStatus.ABANDONED)
+        out = _capture()
+
+        code = cmd_goals(
+            action="tick",
+            statement=None,
+            config=Config(),
+            db_path=None,
+            out=out,
+            opener=_opener_for(store),
+            model=None,
+            now=FIXED_NOW,
+        )
+
+        assert code == 0
+        assert "No active goals" in out.getvalue()
+        # the abandoned goal never advanced
+        assert store.get_goal_checkpoints(goal_id) == []
+        store.close()
+
+
 class TestMain:
     def test_help(self) -> None:
         with pytest.raises(SystemExit) as exc:
@@ -396,3 +700,68 @@ class TestMain:
     def test_no_command_prints_help(self, capsys: pytest.CaptureFixture[str]) -> None:
         assert main([]) == 0
         assert "init" in capsys.readouterr().out
+
+    def test_ask_missing_question_exits_with_code_2(self) -> None:
+        with pytest.raises(SystemExit) as exc:
+            main(["ask"])
+        assert exc.value.code == 2
+
+    def _hermetic_db(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """A migrated db under tmp_path; chdir away from any stray dexta.toml."""
+        monkeypatch.chdir(tmp_path)
+        db = tmp_path / "main.db"
+        SQLiteStore(db).migrate()
+        return db
+
+    def test_ask_without_model_routes_through_main(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        db = self._hermetic_db(tmp_path, monkeypatch)
+        # No provider key → no model; cmd_ask explains how to enable and exits 1.
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        code = main(["--db", str(db), "ask", "why are my mornings high?"])
+        assert code == 1
+        assert "language model" in capsys.readouterr().out.lower()
+
+    def test_goals_add_then_list_through_main(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        db = self._hermetic_db(tmp_path, monkeypatch)
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        add_code = main(["--db", str(db), "goals", "add", "reduce my overnight lows"])
+        assert add_code == 0
+        assert "Goal #1" in capsys.readouterr().out
+
+        list_code = main(["--db", str(db), "goals", "list"])
+        assert list_code == 0
+        assert "reduce my overnight lows" in capsys.readouterr().out
+
+    def test_goals_add_without_statement_through_main(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        db = self._hermetic_db(tmp_path, monkeypatch)
+        code = main(["--db", str(db), "goals", "add"])
+        assert code == 2
+        assert "Provide a goal" in capsys.readouterr().out
+
+    def test_goals_tick_through_main(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        db = self._hermetic_db(tmp_path, monkeypatch)
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        store = SQLiteStore(db)
+        start = datetime.now(tz=UTC) - timedelta(days=30)
+        store.insert_glucose(
+            [GlucoseEvent(ts=start + timedelta(hours=i), mg_dl=120) for i in range(24 * 30)]
+        )
+        store.insert_goal(compose_goal("reduce my overnight lows", now=FIXED_NOW))
+        store.close()
+
+        code = main(["--db", str(db), "goals", "tick"])
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "#1" in out

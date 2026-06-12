@@ -1,0 +1,25 @@
+{% if setup_flows or setup_links %}
+<div class="setup-guide">
+  {% if setup_flows %}
+  <ul class="setup-path-lines" aria-label="Data routes">
+    {% for flow in setup_flows %}
+    <li class="setup-path-line">
+      {% for step in flow %}
+        {% if not loop.first %}<span class="path-sep" aria-hidden="true">→</span>{% endif %}
+        <span{% if step == 'Dexta' %} class="path-end"{% endif %}>{{ step }}</span>
+      {% endfor %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if setup_links %}
+  <p class="setup-link-row">
+    {% for link in setup_links %}
+      {% if not loop.first %}<span class="path-sep" aria-hidden="true">·</span>{% endif %}
+      <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}</a>
+    {% endfor %}
+  </p>
+  {% endif %}
+</div>
+{% endif %}

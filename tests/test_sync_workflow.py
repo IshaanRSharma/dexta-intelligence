@@ -15,6 +15,9 @@ from dexta_intelligence.models import (
     Finding,
     FindingStatus,
     GlucoseEvent,
+    Goal,
+    GoalCheckpoint,
+    GoalStatus,
     Hypothesis,
     InsulinEvent,
     InsulinKind,
@@ -67,6 +70,8 @@ class FakeStore:
         self.rollup_upsert_calls: list[list[Rollup]] = []
         self.findings: list[Finding] = []
         self.hypotheses: list[Hypothesis] = []
+        self.goals: list[Goal] = []
+        self.goal_checkpoints: list[GoalCheckpoint] = []
 
     def migrate(self) -> None:
         return None
@@ -223,6 +228,25 @@ class FakeStore:
 
     def get_hypotheses(self, *, status: str | None = None) -> list[Hypothesis]:
         return list(self.hypotheses)
+
+    def insert_goal(self, goal: Goal) -> int:
+        self.goals.append(goal)
+        return len(self.goals)
+
+    def get_goals(self, *, status: GoalStatus | None = None) -> list[Goal]:
+        if status is None:
+            return list(self.goals)
+        return [g for g in self.goals if g.status == status]
+
+    def set_goal_status(self, goal_id: int, status: GoalStatus) -> None:
+        return None
+
+    def insert_goal_checkpoint(self, checkpoint: GoalCheckpoint) -> int:
+        self.goal_checkpoints.append(checkpoint)
+        return len(self.goal_checkpoints)
+
+    def get_goal_checkpoints(self, goal_id: int) -> list[GoalCheckpoint]:
+        return [c for c in self.goal_checkpoints if c.goal_id == goal_id]
 
 
 @dataclass

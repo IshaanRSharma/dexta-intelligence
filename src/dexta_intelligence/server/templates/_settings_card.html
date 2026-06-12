@@ -1,0 +1,60 @@
+<article class="card source-card" id="card-{{ card.key }}">
+  <header class="card-head">
+    <div>
+      <h2>{{ card.title }}</h2>
+      {% if card.section %}<p class="card-section mono">[{{ card.section }}]</p>{% endif %}
+    </div>
+    <span class="status-badge {{ 'ok' if card.configured else 'neutral' }}">
+      {{ 'Connected' if card.configured else 'Not configured' }}
+    </span>
+  </header>
+
+  <div class="card-meta">
+    {% if card.unofficial %}<span class="tag">{{ card.banner }}</span>{% endif %}
+    {% if card.note %}<span class="small muted">{{ card.note }}</span>{% endif %}
+    {% if card.freshness %}<span class="freshness">Latest data · {{ card.freshness }}</span>{% endif %}
+  </div>
+
+  {% if card.saved %}<div class="flash card-flash">Saved.</div>{% endif %}
+  {% if card.error %}<div class="flash error card-flash">{{ card.error }}</div>{% endif %}
+
+  {% set setup_flows = card.setup_flows %}
+  {% set setup_links = card.setup_links %}
+  {% include "_settings_setup.html" %}
+
+  <div class="card-body">
+    <form hx-post="/settings/{{ card.key }}" hx-target="#card-{{ card.key }}" hx-swap="outerHTML" class="settings-form">
+      <div class="fields">
+        {% for f in card.fields %}
+          {% set prefix = card.key %}
+          {% include "_settings_field.html" %}
+        {% endfor %}
+      </div>
+
+      {% if card.env_keys %}
+      <div class="env-keys">
+        <p class="field-label env-keys-head">Environment keys</p>
+        <p class="field-hint env-keys-sub">Secrets for this panel — never written to the config file.</p>
+        {% for ev in card.env_keys %}
+        <p class="env-row">
+          <span class="dot {{ 'set' if ev.set else 'unset' }}"></span>
+          <code>{{ ev.name }}</code>
+          <span class="muted">{{ ev.label }} · {{ 'set' if ev.set else 'not set' }}</span>
+        </p>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="card-actions">
+        <button type="submit" {{ 'disabled' if not card.editable else '' }}>Save</button>
+        {% if card.connector %}
+        <button type="button" class="btn-secondary btn-sm"
+                hx-post="/settings/{{ card.key }}/test"
+                hx-target="#test-{{ card.key }}"
+                hx-swap="innerHTML">Test connection</button>
+        {% endif %}
+      </div>
+    </form>
+    {% if card.connector %}<div id="test-{{ card.key }}" class="test-result"></div>{% endif %}
+  </div>
+</article>
