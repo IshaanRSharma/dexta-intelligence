@@ -1584,7 +1584,9 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
     from dexta_intelligence.memory.synthesis import load_latest  # noqa: PLC0415
 
     candidates = [
-        f for f in ctx.store.get_findings(limit=50) if f.agent != "synthesis"
+        f
+        for f in ctx.store.get_findings(limit=50)
+        if f.agent != "synthesis" and f.kind != "investigation"
     ]
     q = query.strip()
     if q and candidates:

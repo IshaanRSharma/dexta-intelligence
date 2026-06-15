@@ -23,6 +23,7 @@ from dexta_intelligence.cli.intelligence import (
     cmd_monitor,
     cmd_wiki,
 )
+from dexta_intelligence.cli.research import cmd_nof1
 from dexta_intelligence.cli.serve import cmd_serve
 from dexta_intelligence.config import load_config
 
@@ -118,6 +119,33 @@ def build_parser() -> argparse.ArgumentParser:
         "--tz",
         default="UTC",
         help="IANA timezone for device-local timestamps (default: UTC)",
+    )
+
+    research_p = sub.add_parser(
+        "research",
+        help="Pre-register a hypothesis and run a rigorous single-subject (n-of-1) test",
+    )
+    research_p.add_argument(
+        "statement",
+        nargs="?",
+        default=None,
+        help='Free-text hypothesis, e.g. "weekends run higher than weekdays"',
+    )
+    research_p.add_argument(
+        "--compare",
+        default=None,
+        help="Comparison to register (weekend, sleep, workout, meal_carbs)",
+    )
+    research_p.add_argument(
+        "--metric",
+        default="mean_glucose",
+        help="Outcome metric for metric-aware comparisons (mean_glucose, tir)",
+    )
+    research_p.add_argument(
+        "--save", action="store_true", help="Persist the result as a kind='nof1' finding"
+    )
+    research_p.add_argument(
+        "--seed", type=int, default=1729, help="Permutation seed (default: 1729)"
     )
 
     sub.add_parser(
@@ -229,6 +257,18 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: PLR0911, PLR0912
             config=config,
             db_path=args.db,
             out=sys.stdout,
+        )
+
+    if args.command == "research":
+        return cmd_nof1(
+            config=config,
+            db_path=args.db,
+            out=sys.stdout,
+            statement=args.statement,
+            compare=args.compare,
+            metric=args.metric,
+            save=args.save,
+            seed=args.seed,
         )
 
     if args.command == "monitor":

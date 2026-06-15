@@ -29,6 +29,7 @@ from dexta_intelligence.cli.intelligence import cmd_goals as cmd_goals
 from dexta_intelligence.cli.intelligence import cmd_wiki as cmd_wiki
 from dexta_intelligence.cli.main import build_parser as build_parser
 from dexta_intelligence.cli.main import main as main
+from dexta_intelligence.cli.research import cmd_nof1 as cmd_nof1
 from dexta_intelligence.cli.serve import cmd_serve as cmd_serve
 
 __all__ = ["main"]

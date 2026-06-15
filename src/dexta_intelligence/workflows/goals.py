@@ -18,7 +18,14 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit
 from dexta_intelligence.analytics.rollups import daily_rollup
-from dexta_intelligence.models import Goal, GoalCheckpoint, GoalMetric, GoalStatus, Hypothesis
+from dexta_intelligence.models import (
+    FindingStatus,
+    Goal,
+    GoalCheckpoint,
+    GoalMetric,
+    GoalStatus,
+    Hypothesis,
+)
 from dexta_intelligence.stats.core import mean
 
 if TYPE_CHECKING:
@@ -27,7 +34,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
     from dexta_intelligence.agents.base import AgentContext
-    from dexta_intelligence.models import GlucoseEvent
+    from dexta_intelligence.models import Finding, GlucoseEvent
 
 logger = logging.getLogger(__name__)
 
@@ -260,31 +267,41 @@ def _default_tools(metric: GoalMetric) -> list[dict[str, Any]]:
 
 # ── tick internals ─────────────────────────────────────────────────────────────
 
-_INVESTIGATE_SYSTEM = """You are a background health agent working on one goal for a \
-Type-1/2 diabetic patient. Investigate ONLY this goal using the tools; then report the single \
-most relevant observation in one sentence. Every number must come from a tool result. \
-Observation only — never dosing or treatment advice. If nothing notable, say so."""
-
-
 def _investigate(goal: Goal, ctx: AgentContext, model: BaseChatModel | None) -> str | None:
+    """This cycle's salient observation toward the goal.
+
+    With a model, the investigation is delegated to the coordinator — the one
+    agentic-investigation engine — so a goal inherits its planning, rigor gate,
+    skeptic re-check, and persisted investigation memory. Without a model, the
+    stored deterministic tool plan is replayed."""
     if model is None:
         return _run_plan(goal, ctx)
 
-    from dexta_intelligence.agents.discovery_tools import tool_specs  # noqa: PLC0415
-    from dexta_intelligence.agents.reason import run_reasoning_loop  # noqa: PLC0415
-    from dexta_intelligence.guard.faithfulness import audit  # noqa: PLC0415
+    from dexta_intelligence.agents.coordinator import CoordinatorAgent  # noqa: PLC0415
 
-    toolkit = DiscoveryToolkit(ctx)
-    result = run_reasoning_loop(
-        model,
-        tool_specs(ctx, toolkit),
-        system=_INVESTIGATE_SYSTEM,
-        user=f'Goal: "{goal.statement}" — what is this cycle\'s most relevant observation?',
-        max_steps=4,
+    findings = CoordinatorAgent(model=model, synthesize_connections=False).investigate(
+        ctx, goal=goal.statement
     )
-    if result.answer and audit(result.answer, result.evidence).ok:
-        return result.answer
-    return _run_plan(goal, ctx)
+    note = _note_from_findings(goal, findings, ctx)
+    return note if note is not None else _run_plan(goal, ctx)
+
+
+def _note_from_findings(goal: Goal, findings: list[Finding], ctx: AgentContext) -> str | None:
+    """Compose a checkpoint observation from the coordinator's findings, banking
+    the strongest as an open hypothesis (as the deterministic plan path does)."""
+    ranked = sorted(
+        findings,
+        key=lambda f: abs(f.stats.effect_size) if f.stats.effect_size is not None else 0.0,
+        reverse=True,
+    )
+    for finding in ranked:
+        if finding.status is FindingStatus.REJECTED:
+            continue
+        effect = finding.stats.effect_size
+        if effect is not None and abs(effect) >= 0.5:  # moderate-or-large effect
+            _bank_observation(goal, finding.headline, ctx)
+        return finding.headline
+    return None
 
 
 def _run_plan(goal: Goal, ctx: AgentContext) -> str | None:

@@ -37,6 +37,7 @@ from dexta_intelligence.agents.base import AgentRegistry
 from dexta_intelligence.agents.discovery_tools import _recall
 from dexta_intelligence.agents.skeptic import skeptic_agent
 from dexta_intelligence.config import Config
+from dexta_intelligence.models import Finding, FindingStatus
 from dexta_intelligence.workflows.lenses import PRODUCERS
 
 if TYPE_CHECKING:
@@ -45,7 +46,6 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
     from dexta_intelligence.agents.base import AgentContext
-    from dexta_intelligence.models import Finding
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,9 @@ AVAILABLE INVESTIGATIONS:
 WHAT DEXTA ALREADY BELIEVES (do not re-derive these; pick investigations that
 extend, challenge, or fill gaps around them):
 {recall}
+
+PAST INVESTIGATIONS (what was already run before — build on these, don't repeat):
+{past}
 
 Choose the subset most relevant to the goal. Selecting all is valid when the goal
 is broad or the record is thin. Use ONLY names from the list above.
@@ -109,18 +112,23 @@ class CoordinatorAgent:
     config: Config = field(default_factory=Config)
     synthesize_connections: bool = True
     max_rounds: int = 2
+    remember: bool = True
 
     def investigate(self, ctx: AgentContext, goal: str | None = None) -> list[Finding]:
         """Plan, run the selected producers, skeptic-review, optionally synthesize.
 
         With a model, after the first round it may run bounded follow-up rounds
         that pivot on what was surfaced (only investigations not already run,
-        stopping as soon as there is nothing new). Returns reviewed findings; the
-        caller persists. Never raises on thin data or planner failure — it
-        degrades to the full producer set and an empty result, never an exception.
+        stopping as soon as there is nothing new). When ``remember`` is set, the
+        process (which investigations ran, for which goal, and what came back) is
+        saved to memory so a later run can recall and build on it. Returns
+        reviewed findings; the caller persists. Never raises on thin data or
+        planner failure — it degrades to the full producer set, never an exception.
         """
         if self.model is None:
-            return self._run_round(ctx, list(PRODUCERS))
+            reviewed = self._run_round(ctx, list(PRODUCERS))
+            self._remember(ctx, goal, set(PRODUCERS), reviewed)
+            return reviewed
 
         ran: set[str] = set()
         reviewed_all: list[Finding] = []
@@ -139,7 +147,43 @@ class CoordinatorAgent:
 
         if self.synthesize_connections and reviewed_all:
             self._synthesize(reviewed_all)
+        self._remember(ctx, goal, ran, reviewed_all)
         return reviewed_all
+
+    def _remember(
+        self, ctx: AgentContext, goal: str | None, ran: set[str], reviewed: list[Finding]
+    ) -> None:
+        """Save the investigation process as memory for future runs — which
+        investigations ran for this goal and what they returned. A later plan
+        recalls these so the coordinator builds on prior work instead of repeating it."""
+        if not self.remember or not ran:
+            return
+        producers = sorted(ran)
+        kinds = sorted({f.kind for f in reviewed})
+        headline = (
+            f"Investigated {goal or 'the whole record'}: ran {', '.join(producers)} "
+            f"→ {len(reviewed)} finding(s)"
+        )
+        try:
+            ctx.store.insert_finding(
+                Finding(
+                    agent="coordinator",
+                    kind="investigation",
+                    scope=(goal or "whole_record")[:120],
+                    headline=headline,
+                    body_md=headline,
+                    evidence={
+                        "goal": goal or "",
+                        "producers": producers,
+                        "n_findings": len(reviewed),
+                        "finding_kinds": kinds,
+                    },
+                    confidence=1.0,
+                    status=FindingStatus.ACTIVE,
+                )
+            )
+        except Exception:
+            logger.warning("coordinator: failed to record investigation memory", exc_info=True)
 
     def _run_round(self, ctx: AgentContext, names: list[str]) -> list[Finding]:
         """Run the named producers under gating + isolation, then skeptic-review."""
@@ -159,6 +203,7 @@ class CoordinatorAgent:
             goal=goal or "Investigate the whole record for anything notable.",
             producers=_producer_catalog(),
             recall=_recall_digest(ctx, goal),
+            past=_past_investigations(ctx),
         )
         data = self._json_call(prompt)
         raw = data.get("investigations") if isinstance(data, dict) else None
@@ -259,6 +304,17 @@ def _recall_digest(ctx: AgentContext, goal: str | None) -> str:
     for question in payload.get("open_questions", []):
         lines.append(f"- open question: {question}")
     return "\n".join(lines) if lines else "(nothing yet — early run)"
+
+
+def _past_investigations(ctx: AgentContext) -> str:
+    """Recall prior investigation recipes (the saved process) for the planner."""
+    try:
+        records = ctx.store.get_findings(
+            agent="coordinator", kind="investigation", status=FindingStatus.ACTIVE, limit=8
+        )
+    except Exception:
+        return "(none yet)"
+    return "\n".join(f"- {r.headline}" for r in records) if records else "(none yet)"
 
 
 def _log_skip(name: str, reasons: list[str]) -> None:

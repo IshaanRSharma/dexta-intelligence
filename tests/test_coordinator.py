@@ -220,5 +220,7 @@ def test_recall_digest_not_raw_findings_in_prompt(store: SQLiteStore) -> None:
     assert "body_md" not in prompt
     active = store.get_findings(status=FindingStatus.ACTIVE, limit=10)
     for finding in active:
+        if finding.kind == "investigation":
+            continue  # recipe records are intentionally surfaced as the past-investigations digest
         if finding.body_md and finding.body_md not in ("body", ""):
             assert finding.body_md not in prompt
