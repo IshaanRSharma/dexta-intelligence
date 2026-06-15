@@ -322,16 +322,42 @@ class SQLiteStore:
 
     # ── layer 1: raw events ──────────────────────────────────────────────────
 
-    def upsert_raw_events(self, events: list[RawEvent]) -> int:
+    def upsert_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
+        if not events:
+            return {}
         rows = [
             (e.source, e.source_id, _dt_to_text(e.source_ts), json.dumps(e.payload))
             for e in events
         ]
-        return self._write_counted(
-            "INSERT INTO raw_events (source, source_id, source_ts, payload) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(source, source_id) DO NOTHING",
-            rows,
-        )
+        with self._conn:
+            self._conn.executemany(
+                "INSERT INTO raw_events (source, source_id, source_ts, payload) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(source, source_id) DO NOTHING",
+                rows,
+            )
+        return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def existing_raw_ids(self, events: list[RawEvent]) -> dict[str, int]:
+        if not events:
+            return {}
+        return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def _raw_ids(self, keys: set[tuple[str, str]]) -> dict[str, int]:
+        """Resolve ``source_id -> id`` for the given ``(source, source_id)`` keys.
+
+        Covers both freshly-inserted and pre-existing rows; ``source_id`` is
+        unique within a source, so the returned keys never collide for a
+        single-source batch.
+        """
+        result: dict[str, int] = {}
+        for source, source_id in keys:
+            row = self._conn.execute(
+                "SELECT id FROM raw_events WHERE source = ? AND source_id = ?",
+                (source, source_id),
+            ).fetchone()
+            if row is not None:
+                result[source_id] = int(row[0])
+        return result
 
     def get_watermark(self, source: str) -> datetime | None:
         row = self._conn.execute(

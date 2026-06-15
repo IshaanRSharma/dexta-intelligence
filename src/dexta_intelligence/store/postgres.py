@@ -293,16 +293,44 @@ class PostgresStore:
 
     # ── layer 1: raw events ──────────────────────────────────────────────────
 
-    def upsert_raw_events(self, events: list[RawEvent]) -> int:
+    def upsert_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
+        if not events:
+            return {}
         rows = [
             (e.source, e.source_id, _to_utc(e.source_ts), self._jsonb(e.payload))
             for e in events
         ]
-        return self._write_counted(
-            "INSERT INTO raw_events (source, source_id, source_ts, payload) "
-            "VALUES (%s, %s, %s, %s) ON CONFLICT (source, source_id) DO NOTHING",
-            rows,
-        )
+        with self._conn, self._conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO raw_events (source, source_id, source_ts, payload) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT (source, source_id) DO NOTHING",
+                rows,
+            )
+        return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def existing_raw_ids(self, events: list[RawEvent]) -> dict[str, int]:
+        if not events:
+            return {}
+        return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def _raw_ids(self, keys: set[tuple[str, str]]) -> dict[str, int]:
+        """Resolve ``source_id -> id`` for the given ``(source, source_id)`` keys.
+
+        ``ON CONFLICT DO NOTHING ... RETURNING`` skips the conflicting rows, so
+        the ids are read back here — covering both freshly-inserted and
+        pre-existing rows. ``source_id`` is unique within a source.
+        """
+        result: dict[str, int] = {}
+        with self._conn.cursor() as cur:
+            for source, source_id in keys:
+                cur.execute(
+                    "SELECT id FROM raw_events WHERE source = %s AND source_id = %s",
+                    (source, source_id),
+                )
+                row = cur.fetchone()
+                if row is not None:
+                    result[source_id] = int(row[0])
+        return result
 
     def get_watermark(self, source: str) -> datetime | None:
         with self._conn.cursor() as cur:

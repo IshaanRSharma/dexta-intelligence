@@ -5,7 +5,7 @@ community, and the richest single source we support: glucose (``entries``),
 real pump data (``treatments``: boluses, carbs, temp basals, suspends) and —
 for looping users — the dosing algorithm's own forecast curves
 (``devicestatus``: ``openaps.suggested.predBGs`` / ``loop.predicted``), which
-feed the Prediction Reconciliation agent (spec §7.1).
+feed the Prediction Reconciliation agent.
 
 The module is split in two layers so parsing stays fixture-testable:
 

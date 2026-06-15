@@ -53,11 +53,25 @@ class StoragePort(Protocol):
 
     # ── layer 1: raw events ──────────────────────────────────────────────────
 
-    def upsert_raw_events(self, events: list[RawEvent]) -> int:
+    def upsert_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
         """Insert raw events, skipping ``(source, source_id)`` duplicates.
 
-        Returns the number of *new* rows — the idempotency contract that makes
-        every connector re-run safe.
+        Returns a ``source_id -> assigned id`` map covering every input event —
+        both newly-inserted and already-existing rows. This both reports the
+        idempotency outcome (callers derive ``new`` counts from it) and exposes
+        the ids so the sync workflow can wire ``raw_event_id`` provenance onto
+        normalized events.
+
+        ``source_id`` keys are unique within a single source; a batch is always
+        one source's pull, so the map is unambiguous per call.
+        """
+        ...
+
+    def existing_raw_ids(self, events: list[RawEvent]) -> dict[str, int]:
+        """``source_id -> id`` for the subset of ``events`` already stored.
+
+        Bounded to the given keys (never a full-table scan). The sync workflow
+        snapshots this before an upsert to count genuinely-new rows.
         """
         ...
 

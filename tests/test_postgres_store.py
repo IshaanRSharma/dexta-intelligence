@@ -168,21 +168,40 @@ class TestPostgresContract:
 
     def test_migrate_is_idempotent(self, store: PostgresStore) -> None:
         store.migrate()
-        assert store.upsert_raw_events([_raw("nightscout", "a", T0)]) == 1
+        assert list(store.upsert_raw_events([_raw("nightscout", "a", T0)])) == ["a"]
         store.migrate()
         assert store.get_watermark("nightscout") == T0
 
     # ── raw events + watermark ────────────────────────────────────────────────
 
-    def test_upsert_dedupes_on_source_and_source_id(self, store: PostgresStore) -> None:
+    def test_upsert_returns_ids_for_new_rows(self, store: PostgresStore) -> None:
         batch = [_raw("nightscout", str(i), T0 + timedelta(minutes=5 * i)) for i in range(3)]
-        assert store.upsert_raw_events(batch) == 3
-        assert store.upsert_raw_events(batch) == 0
-        mixed = [*batch, _raw("nightscout", "3", T0), _raw("whoop", "0", T0)]
-        assert store.upsert_raw_events(mixed) == 2
+        id_map = store.upsert_raw_events(batch)
+        assert set(id_map) == {"0", "1", "2"}
+        assert len(set(id_map.values())) == 3
+
+    def test_upsert_returns_stable_ids_for_existing_rows(self, store: PostgresStore) -> None:
+        batch = [_raw("nightscout", str(i), T0 + timedelta(minutes=5 * i)) for i in range(3)]
+        first = store.upsert_raw_events(batch)
+        assert store.upsert_raw_events(batch) == first
+
+    def test_upsert_maps_new_and_preexisting_together(self, store: PostgresStore) -> None:
+        batch = [_raw("nightscout", str(i), T0 + timedelta(minutes=5 * i)) for i in range(3)]
+        first = store.upsert_raw_events(batch)
+        mixed = [*batch, _raw("nightscout", "3", T0)]
+        id_map = store.upsert_raw_events(mixed)
+        assert {k: id_map[k] for k in first} == first
+        assert id_map["3"] not in first.values()
+
+    def test_existing_raw_ids_reports_only_stored_subset(self, store: PostgresStore) -> None:
+        stored = [_raw("nightscout", str(i), T0 + timedelta(minutes=5 * i)) for i in range(2)]
+        store.upsert_raw_events(stored)
+        probe = [*stored, _raw("nightscout", "9", T0)]
+        assert set(store.existing_raw_ids(probe)) == {"0", "1"}
 
     def test_upsert_empty_batch(self, store: PostgresStore) -> None:
-        assert store.upsert_raw_events([]) == 0
+        assert store.upsert_raw_events([]) == {}
+        assert store.existing_raw_ids([]) == {}
 
     def test_watermark_none_when_empty(self, store: PostgresStore) -> None:
         assert store.get_watermark("nightscout") is None

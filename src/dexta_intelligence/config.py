@@ -21,8 +21,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
     "AnalysisConfig",
+    "CareLinkConfig",
     "Config",
     "DataConfig",
+    "DexcomApiConfig",
     "DexcomConfig",
     "EvidenceConfig",
     "LLMConfig",
@@ -30,6 +32,7 @@ __all__ = [
     "LibreConfig",
     "LibreRegion",
     "OuraConfig",
+    "TandemConfig",
     "TidepoolConfig",
     "WhoopConfig",
     "WikiConfig",
@@ -125,6 +128,54 @@ class LibreConfig(_Section):
     """LibreLinkUp patient UUID to follow; empty selects the account's first patient."""
 
 
+class TandemConfig(_Section):
+    """Tandem t:slim X2 via the t:connect cloud (tconnectsync) — **direct pump
+    access, no Nightscout required**.
+
+    Unofficial/reverse-engineered API: opt-in, may break without notice. Prefer
+    the ``TANDEM_EMAIL`` / ``TANDEM_PASSWORD`` environment variables over the
+    TOML file — these are real account secrets.
+    """
+
+    email: str = ""
+    password: str = ""
+    region: str = "us"
+    """``us`` (t:connect) or ``eu`` (t:connect EU host)."""
+
+
+class CareLinkConfig(_Section):
+    """Medtronic pump + CGM via CareLink — **direct pump access, no Nightscout
+    required**.
+
+    Unofficial/reverse-engineered API: opt-in, may break without notice; auth is
+    region-split and fragile. Prefer the ``CARELINK_USERNAME`` /
+    ``CARELINK_PASSWORD`` environment variables over the TOML file.
+    """
+
+    username: str = ""
+    password: str = ""
+    country: str = "us"
+    """ISO country code the CareLink account is registered in (``us``, ``gb``, …)."""
+    patient: str = ""
+    """For care-partner accounts: the patient username to pull; empty = own account."""
+
+
+class DexcomApiConfig(_Section):
+    """Dexcom **official** API (OAuth2 ``/egvs``) — ToS-clean, ~1-3h delayed.
+
+    Complements the reverse-engineered Share path (:class:`DexcomConfig`) for
+    users who want the sanctioned integration. Token-based in OSS (no embedded
+    web OAuth flow); prefer ``DEXCOM_API_*`` environment variables.
+    """
+
+    access_token: str = ""
+    refresh_token: str = ""
+    client_id: str = ""
+    client_secret: str = ""
+    sandbox: bool = False
+    """True targets Dexcom's sandbox host instead of production."""
+
+
 class LLMConfig(_Section):
     provider: str = "anthropic"
     """Any LangChain provider (``anthropic``, ``openai``, ``ollama``, …) or
@@ -181,8 +232,11 @@ class Config(_Section):
     whoop: WhoopConfig = Field(default_factory=WhoopConfig)
     oura: OuraConfig = Field(default_factory=OuraConfig)
     dexcom: DexcomConfig = Field(default_factory=DexcomConfig)
+    dexcom_api: DexcomApiConfig = Field(default_factory=DexcomApiConfig)
     libre: LibreConfig = Field(default_factory=LibreConfig)
     tidepool: TidepoolConfig = Field(default_factory=TidepoolConfig)
+    tandem: TandemConfig = Field(default_factory=TandemConfig)
+    carelink: CareLinkConfig = Field(default_factory=CareLinkConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     evidence: EvidenceConfig = Field(default_factory=EvidenceConfig)
@@ -227,8 +281,29 @@ def load_config(path: Path | None = None) -> Config:
         # pydantic coerces "true"/"false"/"1"/"0"/"yes"/"no" to bool
         raw.setdefault("dexcom", {})["ous"] = dx_ous
     _apply_libre_env(raw)
+    _apply_pump_env(raw)
 
     return Config.model_validate(raw)
+
+
+def _apply_pump_env(raw: dict[str, Any]) -> None:
+    """Direct-pump + official-Dexcom environment overrides (no Nightscout path)."""
+    if tandem_email := os.environ.get("TANDEM_EMAIL"):
+        raw.setdefault("tandem", {})["email"] = tandem_email
+    if tandem_password := os.environ.get("TANDEM_PASSWORD"):
+        raw.setdefault("tandem", {})["password"] = tandem_password
+    if tandem_region := os.environ.get("TANDEM_REGION"):
+        raw.setdefault("tandem", {})["region"] = tandem_region.lower()
+    if carelink_username := os.environ.get("CARELINK_USERNAME"):
+        raw.setdefault("carelink", {})["username"] = carelink_username
+    if carelink_password := os.environ.get("CARELINK_PASSWORD"):
+        raw.setdefault("carelink", {})["password"] = carelink_password
+    if carelink_country := os.environ.get("CARELINK_COUNTRY"):
+        raw.setdefault("carelink", {})["country"] = carelink_country.lower()
+    if dx_api_token := os.environ.get("DEXCOM_API_ACCESS_TOKEN"):
+        raw.setdefault("dexcom_api", {})["access_token"] = dx_api_token
+    if dx_api_refresh := os.environ.get("DEXCOM_API_REFRESH_TOKEN"):
+        raw.setdefault("dexcom_api", {})["refresh_token"] = dx_api_refresh
 
 
 def _apply_oura_env(raw: dict[str, Any]) -> None:
@@ -266,6 +341,14 @@ ENV_OVERRIDES: dict[tuple[str, str], str] = {
     ("libre", "email"): "LIBRE_EMAIL",
     ("libre", "password"): "LIBRE_PASSWORD",
     ("libre", "region"): "LIBRE_REGION",
+    ("tandem", "email"): "TANDEM_EMAIL",
+    ("tandem", "password"): "TANDEM_PASSWORD",
+    ("tandem", "region"): "TANDEM_REGION",
+    ("carelink", "username"): "CARELINK_USERNAME",
+    ("carelink", "password"): "CARELINK_PASSWORD",
+    ("carelink", "country"): "CARELINK_COUNTRY",
+    ("dexcom_api", "access_token"): "DEXCOM_API_ACCESS_TOKEN",
+    ("dexcom_api", "refresh_token"): "DEXCOM_API_REFRESH_TOKEN",
 }
 
 

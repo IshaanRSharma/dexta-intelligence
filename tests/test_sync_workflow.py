@@ -58,6 +58,8 @@ class FakeStore:
 
     def __init__(self) -> None:
         self.raw: dict[tuple[str, str], RawEvent] = {}
+        self.raw_ids: dict[tuple[str, str], int] = {}
+        self._next_raw_id = 0
         self.glucose: dict[datetime, GlucoseEvent] = {}
         self.insulin: dict[tuple[datetime, InsulinKind], InsulinEvent] = {}
         self.meals: dict[datetime, MealEvent] = {}
@@ -76,14 +78,21 @@ class FakeStore:
     def migrate(self) -> None:
         return None
 
-    def upsert_raw_events(self, events: list[RawEvent]) -> int:
-        new = 0
+    def existing_raw_ids(self, events: list[RawEvent]) -> dict[str, int]:
+        return {
+            e.source_id: self.raw_ids[(e.source, e.source_id)]
+            for e in events
+            if (e.source, e.source_id) in self.raw
+        }
+
+    def upsert_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
         for event in events:
             key = (event.source, event.source_id)
             if key not in self.raw:
                 self.raw[key] = event
-                new += 1
-        return new
+                self._next_raw_id += 1
+                self.raw_ids[key] = self._next_raw_id
+        return {e.source_id: self.raw_ids[(e.source, e.source_id)] for e in events}
 
     def get_watermark(self, source: str) -> datetime | None:
         stamps = [e.source_ts for e in self.raw.values() if e.source == source]
@@ -423,6 +432,48 @@ class TestUtcEnforcement:
         assert report.until.tzinfo == UTC
 
 
+class TestProvenance:
+    def test_glucose_linked_to_originating_raw(self) -> None:
+        store = FakeStore()
+        sync(FakeConnector(source="fake", batch=make_batch()), store, now=FIXED_NOW)
+        stored = sorted(store.glucose.values(), key=lambda e: e.ts)
+        assert all(g.raw_event_id is not None for g in stored)
+        # each glucose points at the raw row sharing its instant
+        for g in stored:
+            raw_key = next(
+                k for k, r in store.raw.items() if r.source_ts == g.ts
+            )
+            assert g.raw_event_id == store.raw_ids[raw_key]
+
+    def test_typed_event_without_matching_raw_stays_unlinked(self) -> None:
+        # make_batch's insulin/meal sit at 23:52, an instant with no raw row.
+        store = FakeStore()
+        sync(FakeConnector(source="fake", batch=make_batch()), store, now=FIXED_NOW)
+        assert all(i.raw_event_id is None for i in store.insulin.values())
+        assert all(m.raw_event_id is None for m in store.meals.values())
+
+    def test_ambiguous_timestamp_left_unlinked(self) -> None:
+        ts = DAY2 + timedelta(hours=1)
+        raw = [
+            RawEvent(source="fake", source_id="a", source_ts=ts, payload={}),
+            RawEvent(source="fake", source_id="b", source_ts=ts, payload={}),
+        ]
+        batch = NormalizedBatch(raw=raw, glucose=[GlucoseEvent(ts=ts, mg_dl=110)])
+        store = FakeStore()
+        sync(FakeConnector(source="fake", batch=batch), store, now=FIXED_NOW)
+        assert store.glucose[ts].raw_event_id is None
+
+    def test_relink_is_idempotent_across_resync(self) -> None:
+        store = FakeStore()
+        connector = FakeConnector(source="fake", batch=make_batch())
+        sync(connector, store, now=FIXED_NOW)
+        first = {ts: g.raw_event_id for ts, g in store.glucose.items()}
+        sync(connector, store, now=FIXED_NOW + timedelta(hours=1))
+        second = {ts: g.raw_event_id for ts, g in store.glucose.items()}
+        assert first == second
+        assert all(v is not None for v in second.values())
+
+
 class TestPredictions:
     def test_predictions_persisted(self) -> None:
         batch = make_batch()
@@ -446,4 +497,6 @@ class TestPredictions:
         assert report.ok
         assert report.notes == ()
         assert report.inserted["predictions"] == 1
-        assert list(store.predictions.values()) == [pred]
+        stored = list(store.predictions.values())
+        assert len(stored) == 1
+        assert stored[0].model_copy(update={"raw_event_id": None}) == pred

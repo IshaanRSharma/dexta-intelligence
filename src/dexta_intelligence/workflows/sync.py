@@ -15,14 +15,18 @@ the raw layer dedupes on ``(source, source_id)`` and timeline ``insert_*``
 methods are expected to skip duplicates likewise, so counts in the report
 reflect genuinely *new* rows.
 
-Provenance note
----------------
-:meth:`StoragePort.upsert_raw_events` returns only a count of new rows — the
-port exposes no way to learn the ids assigned to raw rows. ``raw_event_id``
-linkage therefore cannot be wired by this workflow through the current port;
-normalized events are persisted with whatever ``raw_event_id`` the connector
-set (typically ``None``). Backends that can resolve provenance internally
-(e.g. within one transaction) are free to do so.
+Provenance
+----------
+:meth:`StoragePort.upsert_raw_events` returns a ``source_id -> raw id`` map for
+the upserted batch. Connectors do not carry the raw↔typed link on typed events,
+so it is reconstructed here by timestamp: a typed event's ``ts`` (``ts_start``
+for sleep) is matched against the raw ``source_ts`` of its originating record.
+The match is applied only where a ``source_ts`` maps to exactly one raw row;
+ambiguous timestamps (multiple raws at the same instant) and typed events whose
+timestamp has no matching raw are left with ``raw_event_id=None`` rather than
+guessed. Glucose, where each CGM reading is one raw entry at a distinct instant,
+links cleanly; treatment-derived streams (insulin/meals) link when their
+timestamp uniquely identifies the source treatment.
 
 Predictions note
 ----------------
@@ -33,19 +37,27 @@ Predictions note
 from __future__ import annotations
 
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from dexta_intelligence.analytics.rollups import daily_rollup
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from datetime import date
 
     from dexta_intelligence.connectors.base import Connector
-    from dexta_intelligence.models import Rollup
+    from dexta_intelligence.models import RawEvent, Rollup
     from dexta_intelligence.store.port import StoragePort
+
+
+class _TimelineEvent(Protocol):
+    def model_copy(self: _E, *, update: dict[str, object]) -> _E: ...
+
+
+_E = TypeVar("_E", bound=_TimelineEvent)
 
 __all__ = ["DEFAULT_LOOKBACK", "OVERLAP_MARGIN", "SyncReport", "sync", "sync_all"]
 
@@ -119,17 +131,23 @@ def sync(
     since = watermark - overlap if watermark is not None else until - default_lookback
 
     batch = connector.pull(since)
-    raw_new = store.upsert_raw_events(batch.raw)
+    existing_before = store.existing_raw_ids(batch.raw)
+    id_map = store.upsert_raw_events(batch.raw)
+    raw_new = sum(1 for sid in id_map if sid not in existing_before)
+
+    ts_to_raw_id = _unambiguous_ts_index(batch.raw, id_map)
 
     inserted = {
-        "glucose": store.insert_glucose(batch.glucose) if batch.glucose else 0,
-        "insulin": store.insert_insulin(batch.insulin) if batch.insulin else 0,
-        "meals": store.insert_meals(batch.meals) if batch.meals else 0,
-        "activity": store.insert_activity(batch.activity) if batch.activity else 0,
-        "sleep": store.insert_sleep(batch.sleep) if batch.sleep else 0,
-        "recovery": store.insert_recovery(batch.recovery) if batch.recovery else 0,
-        "device": store.insert_device(batch.device) if batch.device else 0,
-        "predictions": store.insert_predictions(batch.predictions) if batch.predictions else 0,
+        "glucose": _insert_linked(store.insert_glucose, batch.glucose, ts_to_raw_id, "ts"),
+        "insulin": _insert_linked(store.insert_insulin, batch.insulin, ts_to_raw_id, "ts"),
+        "meals": _insert_linked(store.insert_meals, batch.meals, ts_to_raw_id, "ts"),
+        "activity": _insert_linked(store.insert_activity, batch.activity, ts_to_raw_id, "ts"),
+        "sleep": _insert_linked(store.insert_sleep, batch.sleep, ts_to_raw_id, "ts_start"),
+        "recovery": _insert_linked(store.insert_recovery, batch.recovery, ts_to_raw_id, "ts"),
+        "device": _insert_linked(store.insert_device, batch.device, ts_to_raw_id, "ts"),
+        "predictions": _insert_linked(
+            store.insert_predictions, batch.predictions, ts_to_raw_id, "ts"
+        ),
     }
 
     touched_days = sorted({g.ts.date() for g in batch.glucose})
@@ -190,6 +208,47 @@ def sync_all(
                 )
             )
     return reports
+
+
+def _unambiguous_ts_index(
+    raw: list[RawEvent], id_map: dict[str, int]
+) -> dict[datetime, int]:
+    """``source_ts -> raw id`` for instants owned by exactly one raw row.
+
+    Timestamps shared by multiple raws are dropped: a typed event at such an
+    instant cannot be attributed to a single source record, so it is left
+    unlinked rather than mislinked.
+    """
+    counts = Counter(r.source_ts for r in raw)
+    index: dict[datetime, int] = {}
+    for r in raw:
+        if counts[r.source_ts] != 1:
+            continue
+        raw_id = id_map.get(r.source_id)
+        if raw_id is not None:
+            index[r.source_ts] = raw_id
+    return index
+
+
+def _insert_linked(
+    insert: Callable[[list[_E]], int],
+    events: list[_E],
+    ts_to_raw_id: dict[datetime, int],
+    ts_attr: str,
+) -> int:
+    """Wire ``raw_event_id`` onto each event by timestamp, then insert.
+
+    Events whose timestamp has no unique raw match keep ``raw_event_id=None``.
+    """
+    if not events:
+        return 0
+    linked = [
+        e.model_copy(update={"raw_event_id": raw_id})
+        if (raw_id := ts_to_raw_id.get(getattr(e, ts_attr))) is not None
+        else e
+        for e in events
+    ]
+    return insert(linked)
 
 
 def _recompute_day(store: StoragePort, day: date) -> Rollup | None:
