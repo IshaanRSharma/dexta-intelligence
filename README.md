@@ -8,6 +8,7 @@ Bring your own model. Bring your own database. Your data never leaves your infra
 
 > ⚠️ **Not a medical device.** Dexta never gives dosing advice. It surfaces patterns and
 > evidence for you and your care team to review. All findings are hypotheses, not prescriptions.
+> See [MEDICAL_DISCLAIMER.md](MEDICAL_DISCLAIMER.md) and [PRIVACY.md](PRIVACY.md).
 
 ## Eval results
 
