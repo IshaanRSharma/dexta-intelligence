@@ -132,7 +132,7 @@ def _apply_gate(  # noqa: PLR0911 — one return per gate outcome
     capabilities: CapabilitySet,
     rerun: Callable[[str], ReasoningResult] | None,
 ) -> ReasoningResult:
-    """The fade gate (WAVE5 §4): retry once with a hint, then the safe sentence.
+    """The fade gate: retry once with a hint, then the safe sentence.
 
     Deterministic — inspects the tool trace via ``guard.treatment_gate``; the
     one allowed retry is a fresh loop with the gate's hint injected into the

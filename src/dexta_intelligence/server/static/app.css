@@ -291,6 +291,30 @@ button:hover, .btn:hover { background: var(--accent-hover); }
 .answer { margin-top: 20px; }
 .footnote { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
 
+/* live reasoning stream */
+#stream { display: flex; flex-direction: column; gap: 16px; margin-bottom: 20px; }
+.run { padding: 18px 20px; }
+.run .qline { font-weight: 500; color: var(--text-secondary); margin-bottom: 12px; }
+.steps { display: flex; flex-direction: column; gap: 6px; }
+.step {
+  display: flex; align-items: baseline; gap: 8px; font-size: 14px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-secondary);
+  animation: step-in 160ms ease-out;
+}
+.step-arrow { color: var(--accent); }
+.step-name { flex: 1; }
+.step-mark { font-weight: 600; }
+.step-pending { color: var(--muted); }
+.step-ok { color: var(--ok); }
+.step-bad { color: var(--bad); }
+.run-status { margin-top: 12px; }
+.answer-body { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.answer-warn {
+  color: var(--warn); background: var(--warn-soft); border: 1px solid var(--warn-border);
+  border-radius: var(--radius-xs); padding: 8px 12px; margin-top: 12px;
+}
+@keyframes step-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
 .prose { line-height: 1.6; }
 .prose a { color: var(--accent); }
 .prose table { border-collapse: collapse; width: 100%; margin: 0 0 16px; font-size: 14px; }

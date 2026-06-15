@@ -3,6 +3,12 @@
 Every tool is a pure read over the store. Results carry the exact numbers any
 prose will be audited against, plus the raw day-level groups so the rigor
 layer and skeptic can re-test claims independently.
+
+Context policy: data enters the model's context only when a tool is called —
+nothing here is injected eagerly. Every list-returning tool is bounded (see
+``_MAX_LISTED_EVENTS`` / ``_MAX_RECALL_ITEMS``) with a truncation note, so a
+single call can never blow the context budget. Descriptions are kept terse on
+purpose: they ship in every prompt.
 """
 
 from __future__ import annotations
@@ -43,6 +49,8 @@ _WEEKEND = (5, 6)
 _SPIKE_THRESHOLD = 200.0
 #: Max items returned in any treatment-tool event list (context budget).
 _MAX_LISTED_EVENTS = 40
+#: Max findings / connections / open-questions recall returns (context budget).
+_MAX_RECALL_ITEMS = 8
 #: Analysis-only oref profile defaults — mirrors the reconciliation agent.
 #: Never used for dosing; tier-B labeling on every result that uses them.
 _ANALYSIS_ISF = 50.0
@@ -614,7 +622,7 @@ class DiscoveryToolkit:
             result.summary["n_boluses"] = len(rows)
         return result
 
-    # ── treatment inspection (Wave 5 — read the events, not just aggregates) ──
+    # ── treatment inspection — read the events, not just aggregates ──
 
     def get_carb_entries(self) -> dict[str, Any]:
         """Carb entries inside the ACTIVE window, listed individually so the
@@ -1204,8 +1212,10 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
         ToolSpec(
             name="recall",
             description=(
-                "Search what dexta already believes — past findings and open questions "
-                "from prior runs. Call FIRST for questions about known patterns."
+                "What dexta already believes: prior findings (with status, confidence "
+                "and the skeptic's confound notes), open questions, and cross-finding "
+                "connections. Call FIRST for known patterns — it tells you what was "
+                "already doubted so you pick better tools."
             ),
             parameters={
                 "type": "object",
@@ -1225,9 +1235,9 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
         ToolSpec(
             name="list_segments",
             description=(
-                "Coarse structure of the whole record: one row per month "
-                "(or per week if span < 60d) with n_days, mean_glucose, tir_pct, "
-                "n_lows. Call FIRST to orient before narrowing with set_window."
+                "Coarse structure of the whole record: one row per month (per week "
+                "if span < 60d) with n_days, mean_glucose, tir_pct, n_lows. Call FIRST "
+                "to orient before set_window."
             ),
             parameters={"type": "object", "properties": {}},
             fn=list_segments,
@@ -1235,10 +1245,9 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
         ToolSpec(
             name="set_window",
             description=(
-                "Narrow the ACTIVE window every later tool reads from to "
-                "[start, end] ISO dates. Clamps to available data; returns "
-                "active_start, active_end, n_days, n_readings. Call again with "
-                "the full span to widen back out."
+                "Narrow the ACTIVE window all later tools read from to [start, end] "
+                "ISO dates. Clamps to available data; returns active_start/end, "
+                "n_days, n_readings. Re-call with the full span to widen back out."
             ),
             parameters={
                 "type": "object",
@@ -1253,9 +1262,9 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
         ToolSpec(
             name="zoom_event",
             description=(
-                "Drill a spike: set the active window tight around an ISO "
-                "timestamp (+/- pad_hours, default 12) and return the minute-level "
-                "trace with pre_mean, post_mean, peak, nadir."
+                "Drill a spike: window tight around an ISO timestamp (+/- pad_hours, "
+                "default 12); returns the minute-level trace with pre_mean, post_mean, "
+                "peak, nadir."
             ),
             parameters={
                 "type": "object",
@@ -1270,9 +1279,8 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
         ToolSpec(
             name="daily_series",
             description=(
-                "Per-day time series over the ACTIVE window as [{date, value}] "
-                "so you can spot trends/change-points. "
-                "metric: tir|mean_glucose|tbr|cv."
+                "Per-day time series over the ACTIVE window as [{date, value}] to spot "
+                "trends/change-points. metric: tir|mean_glucose|tbr|cv."
             ),
             parameters={
                 "type": "object",
@@ -1399,7 +1407,7 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
 
 
 def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
-    """Treatment-inspection ToolSpecs (Wave 5). Capability filtering happens in
+    """Treatment-inspection ToolSpecs. Capability filtering happens in
     :func:`tool_specs`; these are built unconditionally."""
 
     def _item_numbers(rows: list[dict[str, Any]], prefix: str) -> dict[str, Any]:
@@ -1463,10 +1471,9 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
         ToolSpec(
             name="get_carb_entries",
             description=(
-                "List carb entries inside the ACTIVE window individually "
-                "({ts, carbs_g, ...}) with n_entries and total_carbs_g. Call when "
-                "explaining a spike/meal — an empty result around a spike is itself "
-                "a signal (possible missing carb entry)."
+                "Carb entries in the ACTIVE window ({ts, carbs_g, ...}, n_entries, "
+                "total_carbs_g). Call when explaining a spike/meal — an empty result "
+                "around a spike is itself a signal (possible missing carb entry)."
             ),
             parameters={"type": "object", "properties": {}},
             fn=get_carb_entries,
@@ -1474,10 +1481,9 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
         ToolSpec(
             name="get_boluses",
             description=(
-                "List boluses inside the ACTIVE window individually ({ts, units, "
-                "minutes_after_carb_entry}). minutes_after_carb_entry is the timing "
-                "vs the nearest carb entry — the late-bolus signal. Call when "
-                "explaining a spike/meal/correction."
+                "Boluses in the ACTIVE window ({ts, units, minutes_after_carb_entry}). "
+                "minutes_after_carb_entry is the late-bolus signal. Call when explaining "
+                "a spike/meal/correction."
             ),
             parameters={"type": "object", "properties": {}},
             fn=get_boluses,
@@ -1485,9 +1491,9 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
         ToolSpec(
             name="get_basal_timeline",
             description=(
-                "Basal / temp-basal / suspend events inside the ACTIVE window plus "
-                "basal_stable (true when no temp-basal or suspend interruptions). "
-                "Call to rule basal in or out as a spike contributor."
+                "Basal / temp-basal / suspend events in the ACTIVE window plus "
+                "basal_stable (no temp-basal/suspend). Rules basal in or out as a "
+                "spike contributor."
             ),
             parameters={"type": "object", "properties": {}},
             fn=get_basal_timeline,
@@ -1526,9 +1532,9 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
         ToolSpec(
             name="find_spikes",
             description=(
-                "Excursion peaks above threshold inside the ACTIVE window "
-                "({ts, peak_mg_dl, duration_min}, largest first). Use to locate the "
-                "spike to zoom_event when the user names a day but not a time."
+                "Excursion peaks above threshold in the ACTIVE window ({ts, peak_mg_dl, "
+                "duration_min}, largest first). Locates the spike to zoom_event when the "
+                "user names a day but not a time."
             ),
             parameters={
                 "type": "object",
@@ -1542,11 +1548,10 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
         ToolSpec(
             name="find_similar_events",
             description=(
-                "Recurrence check over the WHOLE record: events at the same time of "
-                "day as the given timestamp (carb entries when logged), each with its "
-                "post-event peak, spiked flag, and bolus_delay_min. Returns n_similar, "
-                "n_spiking and mean bolus delays for spiking vs non-spiking events — "
-                "the 'N of M similar dinners' instrument."
+                "Recurrence over the WHOLE record: events at the same time of day as the "
+                "timestamp (carb entries when logged), each with post-event peak, spiked "
+                "flag, bolus_delay_min; plus n_similar, n_spiking, mean spiking vs "
+                "non-spiking bolus delays. The 'N of M similar dinners' instrument."
             ),
             parameters={
                 "type": "object",
@@ -1562,6 +1567,19 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
 
 
 def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
+    """The structured shared-context channel: what other agents already believe.
+
+    Returns each relevant finding's headline AND the reasoning left behind —
+    ``status``, ``confidence`` and the skeptic's ``skeptic_notes`` (why it was
+    doubted / what confound was flagged) when present — plus the open
+    hypotheses (what is suspected) and synthesis ``connections`` (what is
+    contested across agents). The caller reads these to pick better tools.
+
+    Shape is additive/backward-compatible: keys ``findings`` /
+    ``open_questions`` / ``connections`` and the per-finding numbers tuple are
+    preserved; new fields only extend each entry. Findings, connections and
+    open questions are each capped at :data:`_MAX_RECALL_ITEMS` with a note.
+    """
     from dexta_intelligence.memory import embeddings  # noqa: PLC0415
     from dexta_intelligence.memory.synthesis import load_latest  # noqa: PLC0415
 
@@ -1570,27 +1588,24 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
     ]
     q = query.strip()
     if q and candidates:
-        scored = embeddings.rank(
-            q,
-            [(f"{f.headline} {f.kind} {f.scope}", f) for f in candidates],
-            top_k=8,
-        )
-        findings = [f for score, f in scored if score > 0.05] or candidates[:5]
+        scored = embeddings.rank_findings(q, candidates, top_k=_MAX_RECALL_ITEMS)
+        findings = [f for _score, f in scored] or candidates[:5]
     else:
         findings = candidates[:5]
 
     numbers: dict[str, Any] = {}
     items: list[dict[str, Any]] = []
-    for f in findings[:8]:
-        items.append(
-            {
-                "headline": f.headline,
-                "effect_size": f.stats.effect_size,
-                "n": f.stats.n,
-                "confidence": f.confidence,
-                "status": f.status.value,
-            }
-        )
+    for f in findings[:_MAX_RECALL_ITEMS]:
+        item: dict[str, Any] = {
+            "headline": f.headline,
+            "effect_size": f.stats.effect_size,
+            "n": f.stats.n,
+            "confidence": f.confidence,
+            "status": f.status.value,
+        }
+        if f.skeptic_notes:  # the cross-agent "why this was doubted" signal
+            item["skeptic_notes"] = f.skeptic_notes
+        items.append(item)
         numbers[f"finding_{len(items)}"] = {
             "effect_size": f.stats.effect_size,
             "n": f.stats.n,
@@ -1604,8 +1619,12 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
 
     payload: dict[str, Any] = {
         "findings": items,
-        "open_questions": [h.statement for h in open_q[:5]],
+        "open_questions": [h.statement for h in open_q[:_MAX_RECALL_ITEMS]],
     }
+    if len(open_q) > _MAX_RECALL_ITEMS:
+        payload["open_questions_note"] = (
+            f"showing first {_MAX_RECALL_ITEMS} of {len(open_q)}"
+        )
 
     synthesis = load_latest(ctx.store)
     if synthesis is not None and synthesis.connections:
@@ -1613,11 +1632,16 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
             ranked = embeddings.rank(
                 q,
                 [(line, line) for line in synthesis.connections],
-                top_k=len(synthesis.connections),
+                top_k=_MAX_RECALL_ITEMS,
+                synonyms=True,
             )
             connections = [line for _score, line in ranked]
         else:
-            connections = list(synthesis.connections)
+            connections = list(synthesis.connections[:_MAX_RECALL_ITEMS])
         payload["connections"] = connections
+        if len(synthesis.connections) > _MAX_RECALL_ITEMS:
+            payload["connections_note"] = (
+                f"showing first {_MAX_RECALL_ITEMS} of {len(synthesis.connections)}"
+            )
 
     return (payload, numbers)

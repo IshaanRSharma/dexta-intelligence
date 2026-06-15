@@ -12,7 +12,7 @@ Finding kinds (documented contract)
   events exist in the window.
 - ``observation_wearables`` — sleep and recovery event counts (presence facts).
 
-Spec §7. No LLM imports in this module.
+No LLM imports in this module.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ _EpisodeKind = Literal["hypo", "hyper"]
 
 
 class ObservationAgent:
-    """Facts-only agent implementing spec §7 Observation row."""
+    """Facts-only agent."""
 
     name: str
     requires: DataRequirement

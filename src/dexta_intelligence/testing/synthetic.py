@@ -1,6 +1,6 @@
 """Deterministic synthetic CGM generator with planted, ground-truth effects.
 
-The evaluation framework (spec §14, E4/E5) scores discovery agents on whether
+The evaluation framework scores discovery agents on whether
 they recover *planted* patterns and, crucially, find *nothing* in null data.
 That only works if the ground truth is non-LLM and exactly known. This module
 is that ground truth.

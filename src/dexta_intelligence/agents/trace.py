@@ -2,9 +2,9 @@
 
 The "show your thinking" surface. ``render_trace`` turns a sequence of executed
 ``ToolCall``s (``agents/reason.py``) into one ``TraceLine`` each, restating only
-fields the tool result already guarantees (the schemas documented in
-``docs/WAVE4.md`` Part 1). It NEVER makes a model call and NEVER introduces a
-number absent from the result — it cannot fabricate, so it needs no guard. Every
+fields the tool result already guarantees. It NEVER makes a model call and NEVER
+introduces a number absent from the result — it cannot fabricate, so it needs no
+guard. Every
 field access tolerates a missing key, so a partial result degrades to a plainer
 line instead of raising.
 """

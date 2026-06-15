@@ -176,7 +176,7 @@ class PredictionEvent(_FrozenModel):
     ``openaps.suggested.predBGs``, Loop via ``loop.predicted`` in Nightscout
     ``devicestatus``). These curves are the logged ground truth of the
     algorithm's belief, which the Prediction Reconciliation agent compares
-    against realized CGM (spec §7.1).
+    against realized CGM.
     """
 
     ts: datetime

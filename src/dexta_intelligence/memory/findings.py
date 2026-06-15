@@ -1,7 +1,7 @@
 """Finding memory helpers — recurrence, similarity, and supersession.
 
 The store owns persistence; this module owns the *semantics* of how findings
-relate to each other across analysis runs (spec §3 layer 4).
+relate to each other across analysis runs.
 """
 
 from __future__ import annotations

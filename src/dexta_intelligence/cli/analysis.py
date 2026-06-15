@@ -72,6 +72,52 @@ def _print_finding(out: TextIO, finding: Finding, *, persisted_id: int | None = 
         out.write(f"  skeptic: {finding.skeptic_notes}\n")
 
 
+def cmd_investigate(
+    *,
+    goal: str | None,
+    config: Config,
+    db_path: Path | None,
+    out: TextIO,
+    opener: StoreOpener = open_sqlite_store,
+) -> int:
+    """Deep investigation: the coordinator plans which investigations to run for
+    a goal (or the whole record when ``goal`` is None), then banks findings."""
+    from dexta_intelligence.agents.coordinator import CoordinatorAgent  # noqa: PLC0415
+
+    store = opener(config, db_path)
+    try:
+        coverage = store.coverage()
+        gates = ColdStartReport.from_coverage(coverage)
+        _print_coverage(out, gates)
+        if gates.below_hard_floor:
+            out.write(
+                f"\nNeed at least {HARD_FLOOR_DAYS:.0f} days of data before analysis "
+                f"(have {coverage.span_days:.1f}).\n"
+            )
+            return 1
+        end_date = coverage.last_ts.date() if coverage.last_ts is not None else None
+        window = _analysis_window(config, end_date)
+        ctx = AgentContext(store=store, window=window, gates=gates, run_id=str(uuid.uuid4()))
+
+        target = f'goal: "{goal}"' if goal else "the whole record"
+        out.write(f"\nInvestigating {target} (run {ctx.run_id})…\n")
+        coordinator = CoordinatorAgent(model=discovery_model(config), config=config)
+        findings = coordinator.investigate(ctx, goal=goal)
+
+        if not findings:
+            out.write("\nNo findings produced.\n")
+            return 0
+        out.write("\nFindings\n")
+        persisted_ids = persist_findings(store, findings)
+        for finding, finding_id in zip(findings, persisted_ids, strict=True):
+            if finding.status.value == "rejected":
+                out.write("  [skeptic rejected]\n")
+            _print_finding(out, finding, persisted_id=finding_id)
+    finally:
+        _maybe_close_store(store, opener)
+    return 0
+
+
 def cmd_analyze(
     *,
     config: Config,

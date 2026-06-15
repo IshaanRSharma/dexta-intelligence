@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from dexta_intelligence.config import Config, env_override_for
-from dexta_intelligence.server.settings_schema import ANALYSIS_PANEL, DATA_FIELDS, SETTINGS_PANELS, WIKI_FIELDS
+from dexta_intelligence.server.settings_schema import (
+    ANALYSIS_PANEL,
+    DATA_FIELDS,
+    SETTINGS_PANELS,
+    WIKI_FIELDS,
+)
 
 
 def _section_model(section: str):

@@ -6,7 +6,7 @@ directly). Re-runs :func:`~dexta_intelligence.stats.rigor.assess` with a
 for contradicting priors, and flags known confound pairs (e.g. weekday vs
 sleep effects competing for the same variance).
 
-Spec §8. Deterministic — no LLM imports in this module.
+Deterministic — no LLM imports in this module.
 """
 
 from __future__ import annotations

@@ -146,7 +146,7 @@ def build_server(
     realtime: RealtimeConnector | None = None,
 ) -> FastMCP:
     """Register the 10 core MCP tools, plus the insulin extension when the
-    store's coverage shows insulin data (capability gating, Wave 5 §3 phase 6)."""
+    store's coverage shows insulin data (capability gating)."""
     fastmcp_cls = _import_fastmcp()
     mcp = fastmcp_cls(
         "Dexta Intelligence",

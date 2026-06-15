@@ -187,6 +187,7 @@ def cmd_upload(
     opener: StoreOpener = open_sqlite_store,
     now: datetime | None = None,
 ) -> int:
+    connector: Connector
     if csv_format == "tidepool" or (csv_format == "auto" and path.suffix.lower() == ".json"):
         from dexta_intelligence.config import TidepoolConfig  # noqa: PLC0415
         from dexta_intelligence.connectors.tidepool import TidepoolConnector  # noqa: PLC0415

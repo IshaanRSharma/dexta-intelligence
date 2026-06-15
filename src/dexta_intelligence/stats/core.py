@@ -13,7 +13,7 @@ Ported and hardened from the donor codebase:
   baseline logic behind anomaly detection (:func:`zscores`), with all DB /
   Supabase / LLM-context plumbing stripped.
 
-New for the OSS core (spec §8): :func:`spearman_rho`, :func:`welch_t_test`,
+New for the OSS core: :func:`spearman_rho`, :func:`welch_t_test`,
 :func:`mann_whitney_u`, :func:`cliffs_delta`, :func:`hedges_g`,
 :func:`bootstrap_mean_ci`, :func:`bootstrap_diff_ci`, :func:`summarize`.
 

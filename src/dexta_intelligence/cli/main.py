@@ -11,13 +11,16 @@ from dexta_intelligence.cli._common import (
     init_config_path,
     resolve_config_path,
 )
-from dexta_intelligence.cli.analysis import cmd_analyze
+from dexta_intelligence.cli.analysis import cmd_analyze, cmd_investigate
+from dexta_intelligence.cli.daemon import cmd_daemon
 from dexta_intelligence.cli.data import cmd_doctor, cmd_init, cmd_sync, cmd_upload
 from dexta_intelligence.cli.intelligence import (
     cmd_ask,
     cmd_brief,
+    cmd_demo,
     cmd_explain,
     cmd_goals,
+    cmd_monitor,
     cmd_wiki,
 )
 from dexta_intelligence.cli.serve import cmd_serve
@@ -62,6 +65,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="analyze",
         help="Named agent route (builtin: analyze, watch, why, insulin; or a [lens.*] entry)",
     )
+    investigate_p = sub.add_parser(
+        "investigate",
+        help="Deep investigation: the coordinator plans and runs investigations for a goal",
+    )
+    investigate_p.add_argument(
+        "goal", nargs="?", default=None, help="Goal to investigate (omit for a whole-record pass)"
+    )
+
     sub.add_parser("wiki", help="Regenerate the markdown knowledge base from stored findings")
     sub.add_parser("brief", help="Render a physician-visit brief from accumulated findings")
 
@@ -109,6 +120,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="IANA timezone for device-local timestamps (default: UTC)",
     )
 
+    sub.add_parser(
+        "demo", help="Run dexta end-to-end on a synthetic patient (no data or API key needed)"
+    )
+    sub.add_parser("monitor", help="Scan recent data for anomalies (lows/highs/cliffs/gaps)")
+
+    daemon_p = sub.add_parser(
+        "daemon", help="Run the cadence driver: sync + monitor + goal ticks + periodic deep pass"
+    )
+    daemon_p.add_argument(
+        "--interval", type=float, default=5.0, help="Minutes between cycles (default: 5)"
+    )
+    daemon_p.add_argument(
+        "--deep-every",
+        type=int,
+        default=12,
+        help="Cycles between deep coordinator passes (default: 12)",
+    )
+    daemon_p.add_argument(
+        "--once", action="store_true", help="Run a single cycle and exit (no sleep)"
+    )
+
     serve_p = sub.add_parser("serve", help="Run the local web GUI (needs the [gui] extra)")
     serve_p.add_argument(
         "--host",
@@ -132,6 +164,9 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: PLR0911, PLR0912
     if args.command is None:
         parser.print_help()
         return 0
+
+    if args.command == "demo":
+        return cmd_demo(out=sys.stdout)
 
     config_path = resolve_config_path(args.config)
     config = load_config(config_path if config_path.is_file() else args.config)
@@ -186,6 +221,31 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: PLR0911, PLR0912
             config=config,
             db_path=args.db,
             out=sys.stdout,
+        )
+
+    if args.command == "investigate":
+        return cmd_investigate(
+            goal=args.goal,
+            config=config,
+            db_path=args.db,
+            out=sys.stdout,
+        )
+
+    if args.command == "monitor":
+        return cmd_monitor(
+            config=config,
+            db_path=args.db,
+            out=sys.stdout,
+        )
+
+    if args.command == "daemon":
+        return cmd_daemon(
+            config=config,
+            db_path=args.db,
+            out=sys.stdout,
+            interval=args.interval,
+            deep_every=args.deep_every,
+            once=args.once,
         )
 
     if args.command == "goals":

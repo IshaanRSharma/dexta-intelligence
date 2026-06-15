@@ -14,8 +14,7 @@ from tests.golden import make_store
 
 from dexta_intelligence.agents.base import AgentContext
 from dexta_intelligence.coldstart import ColdStartReport
-from dexta_intelligence.workflows.explain_spike import (
-    INSUFFICIENT_SENTENCE,
+from dexta_intelligence.investigations.spike import (
     NO_TREATMENT_DISCLAIMER,
     OUTPUT_KEYS,
     SAFETY_LINE,

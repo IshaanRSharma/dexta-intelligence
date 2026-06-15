@@ -35,11 +35,7 @@ def field_to_view(
     raw = getattr(section, spec.name)
     is_checkbox = spec.kind == FieldKind.CHECKBOX
     value = raw
-    if is_checkbox:
-        display = ""
-    elif spec.secret:
-        display = ""
-    elif value is None:
+    if is_checkbox or spec.secret or value is None:
         display = ""
     elif hasattr(raw, "value") and not isinstance(raw, (str, int, float, bool)):
         display = str(raw.value)

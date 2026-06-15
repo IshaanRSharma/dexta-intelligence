@@ -24,6 +24,7 @@ from dexta_intelligence.cli.data import cmd_sync as cmd_sync
 from dexta_intelligence.cli.data import cmd_upload as cmd_upload
 from dexta_intelligence.cli.intelligence import cmd_ask as cmd_ask
 from dexta_intelligence.cli.intelligence import cmd_brief as cmd_brief
+from dexta_intelligence.cli.intelligence import cmd_demo as cmd_demo
 from dexta_intelligence.cli.intelligence import cmd_goals as cmd_goals
 from dexta_intelligence.cli.intelligence import cmd_wiki as cmd_wiki
 from dexta_intelligence.cli.main import build_parser as build_parser

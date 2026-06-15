@@ -5,16 +5,25 @@ from __future__ import annotations
 import json
 
 from eval.metrics.e1_faithfulness import E1FaithfulnessResult
+from eval.metrics.e2_power import E2PowerResult
+from eval.metrics.e3_accuracy import E3AccuracyResult
 from eval.metrics.e4_null_fdr import E4NullResult
 from eval.metrics.e5_perturbation import E5PerturbationResult
+from eval.metrics.e_consensus import EConsensusResult
 
 __all__ = [
     "E1FaithfulnessResult",
+    "E2PowerResult",
+    "E3AccuracyResult",
     "E4NullResult",
     "E5PerturbationResult",
+    "EConsensusResult",
     "e1_row",
+    "e2_row",
+    "e3_row",
     "e4_row",
     "e5_row",
+    "e_consensus_row",
     "render_json",
     "render_markdown",
 ]
@@ -51,6 +60,39 @@ def e1_row(result: E1FaithfulnessResult) -> dict[str, object]:
         "E1_catch_target": result.catch_target,
         "E1_false_reject_target": result.false_reject_target,
         "E1_passed": result.passed,
+    }
+
+
+def e2_row(result: E2PowerResult) -> dict[str, object]:
+    return {
+        "E2_best_recall": round(result.best_recall, 4),
+        "E2_recall_target": result.recall_target,
+        "E2_cells": {
+            f"{c.scenario}@{c.effect_size:g}mgdl/{c.n_days}d": round(c.recall, 4)
+            for c in result.cells
+        },
+        "E2_passed": result.passed,
+    }
+
+
+def e3_row(result: E3AccuracyResult) -> dict[str, object]:
+    return {
+        "E3_n_pairs": result.n_pairs,
+        "E3_horizon_min": result.horizon_min,
+        "E3_mard_pct": round(result.mard_pct, 2),
+        "E3_clarke_zones": result.clarke,
+        "E3_clarke_ab_pct": round(result.clarke_ab_pct, 2),
+        "E3_parkes_zones": result.parkes,
+        "E3_parkes_ab_pct": round(result.parkes_ab_pct, 2),
+    }
+
+
+def e_consensus_row(result: EConsensusResult) -> dict[str, object]:
+    return {
+        "Econsensus_n_days": result.n_days,
+        "Econsensus_n_checks": result.n_checks,
+        "Econsensus_n_disagreements": result.n_disagreements,
+        "Econsensus_passed": result.passed,
     }
 
 

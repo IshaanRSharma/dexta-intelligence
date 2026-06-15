@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.chat import _SYSTEM, ChatAnswer, _finish
 from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit, tool_specs
+from dexta_intelligence.agents.orchestrator import INVESTIGATION_DOCTRINE, workflow_tool_specs
 from dexta_intelligence.agents.reason import ReasoningResult, ToolCall, run_reasoning_loop
 
 if TYPE_CHECKING:
@@ -69,7 +70,7 @@ class Reflection:
 
 @dataclass
 class GoalSeekingAgent:
-    """Constrained goal-seeking (WAVE5 §5) — never an open-ended loop.
+    """Constrained goal-seeking — never an open-ended loop.
 
     Hard limits, all enforced in code: ``max_rounds`` defaults to 2; the loop
     also stops when a round calls no tool not already called, when the evidence
@@ -96,7 +97,12 @@ class GoalSeekingAgent:
             return _finish(ReasoningResult(answer="", stopped_reason="model_error"))
 
         toolkit = DiscoveryToolkit(ctx, target_low=self.target_low, target_high=self.target_high)
-        specs = tool_specs(ctx, toolkit)
+        # Goal pursuit gets the same belt as the orchestrator — instruments PLUS
+        # investigation shortcuts — so a goal can compose investigations, not just
+        # read a metric.
+        specs = tool_specs(ctx, toolkit) + workflow_tool_specs(
+            ctx, target_low=self.target_low, target_high=self.target_high
+        )
         spec_names = {spec.name for spec in specs}
 
         merged_evidence: dict[str, Any] = {}
@@ -174,7 +180,7 @@ class GoalSeekingAgent:
         )
 
 
-# ── hard stop conditions (WAVE5 §5 — bounded agency) ─────────────────────────
+# ── hard stop conditions (bounded agency) ─────────────────────────
 
 
 def _must_stop(
@@ -208,19 +214,31 @@ def _must_stop(
 # ── round prompt shaping ─────────────────────────────────────────────────────
 
 
+#: Goal pursuit = composing investigations across rounds toward a conclusion
+#: about the goal, layered on the shared chat rails + investigation doctrine.
+_GOAL_SYSTEM = (
+    _SYSTEM
+    + "\n\n"
+    + INVESTIGATION_DOCTRINE
+    + "\n\nYou are pursuing a STANDING GOAL across rounds. Each round, compose or extend an "
+    "investigation that moves toward a conclusion about the goal — not just a metric reading. "
+    "After each round you reflect on whether the goal is answered; if not, pursue the specific "
+    "angle still missing."
+)
+
+
 def _round_system(trace_summary: str, hint: str) -> str:
     if not trace_summary and not hint:
-        return _SYSTEM
+        return _GOAL_SYSTEM
     addendum = ["", "PRIOR ROUND:"]
     if trace_summary:
         addendum.append(trace_summary)
     if hint:
         addendum.append(
             f"You did not fully answer yet. Still missing: {hint} "
-            "Use the time-traversal tools (set_window, zoom_event, daily_series) "
-            "to close this gap before answering."
+            "Compose or extend an investigation to close this gap before answering."
         )
-    return _SYSTEM + "\n".join(addendum)
+    return _GOAL_SYSTEM + "\n".join(addendum)
 
 
 def _round_user(goal: str, hint: str) -> str:

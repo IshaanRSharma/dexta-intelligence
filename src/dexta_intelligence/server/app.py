@@ -10,7 +10,10 @@ the GUI stack.
 from __future__ import annotations
 
 import io
+import json
 import os
+import queue
+import threading
 from datetime import UTC, datetime, time
 from importlib import resources
 from pathlib import Path
@@ -37,12 +40,12 @@ from dexta_intelligence.server.settings_render import field_to_view, panel_to_vi
 from dexta_intelligence.server.settings_schema import (
     ANALYSIS_PANEL,
     DATA_FIELDS,
+    PANELS_BY_KEY,
+    SETTINGS_OVERVIEW,
+    SETTINGS_PANELS,
     WIKI_FIELDS,
     FieldKind,
-    PANELS_BY_KEY,
-    SETTINGS_PANELS,
     source_nav,
-    SETTINGS_OVERVIEW,
 )
 
 # FastAPI resolves route annotations against this module's globals, so the GUI
@@ -50,13 +53,13 @@ from dexta_intelligence.server.settings_schema import (
 # install degrades to ``None`` and ``create_app`` raises a friendly RuntimeError.
 try:
     from fastapi import FastAPI, Form, HTTPException, Request
-    from fastapi.responses import HTMLResponse, RedirectResponse
+    from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 except ModuleNotFoundError:  # pragma: no cover - exercised only without the extra
     FastAPI = Form = HTTPException = Request = HTMLResponse = RedirectResponse = None  # type: ignore[assignment,misc]
+    StreamingResponse = None  # type: ignore[assignment,misc]
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from datetime import datetime
 
     from dexta_intelligence.cli._common import StoreOpener
     from dexta_intelligence.config import Config
@@ -69,6 +72,9 @@ _INSTALL_HINT = (
 )
 
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+#: Cap on retained chat turns per session (messages, not turns) — bounds context.
+_MAX_SESSION_MESSAGES = 12
 
 _SOURCE_CONFIGURED: dict[str, Callable[[Config], bool]] = {
     "nightscout": is_nightscout_configured,
@@ -119,6 +125,9 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     app = FastAPI(title="dexta", docs_url=None, redoc_url=None)
     app.state.config_path = settings_path
     app.state.bind_host = host
+    #: In-memory chat history per session id (localhost, single-user). Lets GUI
+    #: follow-ups carry conversational context across asks.
+    app.state.sessions = {}
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     templates = Jinja2Templates(directory=str(templates_dir))
     templates.env.globals["nav_items"] = (
@@ -299,6 +308,118 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             faithful=answer.faithful,
         )
 
+    @app.get("/api/ask/stream")
+    async def api_ask_stream(request: Request, q: str, sid: str | None = None) -> Any:
+        """Stream an orchestrator run to the browser as Server-Sent Events.
+
+        The orchestrator is synchronous and calls the model synchronously, so it
+        runs in a worker thread; its ``on_event`` sink pushes each
+        ``ReasoningEvent`` onto a thread-safe queue that this async generator
+        drains into ``text/event-stream`` frames. The stream ends after the
+        ``answer`` event (or a terminal ``error``).
+
+        ``sid`` (optional) keys an in-memory conversation: prior turns are seeded
+        so follow-ups carry context, and this turn is appended after it answers.
+        """
+        question = q.strip()
+        sessions = request.app.state.sessions
+        history = list(sessions.get(sid, [])) if sid else None
+        model = getattr(request.app.state, "chat_model", None) or discovery_model(config)
+        if model is None:
+
+            async def _no_model() -> Any:
+                yield _sse(
+                    {
+                        "kind": "error",
+                        "payload": {
+                            "text": (
+                                "Chat needs a language model. Set a provider in Settings "
+                                "and add an API key to your environment."
+                            )
+                        },
+                    }
+                )
+
+            return StreamingResponse(_no_model(), media_type="text/event-stream")
+
+        events: queue.Queue[Any] = queue.Queue()
+        done = object()
+
+        def _run() -> None:
+            from dexta_intelligence.agents.base import AgentContext  # noqa: PLC0415
+            from dexta_intelligence.agents.orchestrator import OrchestratorAgent  # noqa: PLC0415
+
+            store = store_opener(config, None)
+            try:
+                coverage = store.coverage()
+                gates = ColdStartReport.from_coverage(coverage)
+                end = coverage.last_ts.date() if coverage.last_ts is not None else None
+                ctx = AgentContext(
+                    store=store,
+                    window=_analysis_window(config, end),
+                    gates=gates,
+                    run_id="gui-stream",
+                )
+                agent = OrchestratorAgent(
+                    model=model,
+                    target_low=config.analysis.target_low,
+                    target_high=config.analysis.target_high,
+                )
+
+                def _sink(event: Any) -> None:
+                    # Drop the loop's raw answer — the audited final answer is
+                    # emitted below once the guard/treatment rails have run.
+                    if event.kind == "answer":
+                        return
+                    events.put({"kind": event.kind, "payload": event.payload})
+
+                answer = agent.ask(ctx, question, on_event=_sink, history=history)
+                events.put(
+                    {
+                        "kind": "answer",
+                        "payload": {
+                            "text": answer.text,
+                            "tools": list(answer.tools_used),
+                            "faithful": answer.faithful,
+                        },
+                    }
+                )
+                if sid:
+                    turns = [
+                        *(history or []),
+                        {"role": "user", "content": question},
+                        {"role": "assistant", "content": answer.text},
+                    ]
+                    sessions[sid] = turns[-_MAX_SESSION_MESSAGES:]
+            except Exception as exc:
+                events.put(
+                    {
+                        "kind": "error",
+                        "payload": {"text": f"{type(exc).__name__}: {exc}"},
+                    }
+                )
+            finally:
+                _close(store, store_opener)
+                events.put(done)
+
+        async def _drain() -> Any:
+            import asyncio  # noqa: PLC0415
+
+            worker = threading.Thread(target=_run, daemon=True)
+            worker.start()
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    item = await asyncio.to_thread(events.get, True, 0.25)
+                except queue.Empty:
+                    continue
+                if item is done:
+                    break
+                yield _sse(item)
+
+        return StreamingResponse(_drain(), media_type="text/event-stream")
+
     # ── settings ──────────────────────────────────────────────────────────────
 
     def _remote_bind() -> bool:
@@ -339,11 +460,13 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         intel_cards = [c for c in cards if c.get("category") == "intelligence"]
         settings_nav = [
             *[
-                {"key": c["key"], "label": c["title"], "group": "Connections", "ok": c["configured"]}
+                {"key": c["key"], "label": c["title"], "group": "Connections",
+                 "ok": c["configured"]}
                 for c in connection_cards
             ],
             *[
-                {"key": c["key"], "label": c["title"], "group": "Intelligence", "ok": c["configured"]}
+                {"key": c["key"], "label": c["title"], "group": "Intelligence",
+                 "ok": c["configured"]}
                 for c in intel_cards
             ],
             {"key": "analysis", "label": "Analysis & storage", "group": "System", "ok": True},
@@ -500,6 +623,11 @@ _SOURCE_LABELS: dict[str, str] = {
 }
 
 
+def _sse(event: dict[str, Any]) -> str:
+    """Serialize one ``{kind, payload}`` event as a Server-Sent Events frame."""
+    return f"data: {json.dumps(event, default=str)}\n\n"
+
+
 def _status_pill_text(coverage: Any) -> str:
     if coverage.n_glucose == 0:
         return "Local only · no data"
@@ -508,7 +636,9 @@ def _status_pill_text(coverage: Any) -> str:
     return f"Local only · {days} day{suffix}"
 
 
-def _hero_metrics(store: StoragePort, config: Config, coverage: Any, findings: list[Any]) -> dict[str, Any]:
+def _hero_metrics(
+    store: StoragePort, config: Config, coverage: Any, findings: list[Any]
+) -> dict[str, Any]:
     active = sum(1 for f in findings if f.status == FindingStatus.ACTIVE)
     span = coverage.span_days if coverage.n_glucose else None
     cov_pct = coverage.glucose_coverage_pct if coverage.n_glucose else None

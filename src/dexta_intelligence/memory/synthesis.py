@@ -2,7 +2,7 @@
 
 The deterministic templater (``wiki.py``) lists findings separately; this layer
 reasons *across* them — "your weekend TIR drop and your late-Saturday boluses are
-the same story" — in one LLM call, then renders into the wiki (spec §6.4).
+the same story" — in one LLM call, then renders into the wiki.
 
 Two honesty rules keep it safe and make it the place the model earns its keep:
 every paragraph and connection passes :func:`guard.faithfulness.audit` against the

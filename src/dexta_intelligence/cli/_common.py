@@ -23,6 +23,12 @@ StoreOpener = Callable[[Config, Path | None], StoragePort]
 
 CsvFormatHint = Literal["auto", "clarity", "libreview", "tidepool"]
 
+#: One-line runtime safety footer for clinical CLI surfaces (see MEDICAL_DISCLAIMER.md).
+MEDICAL_DISCLAIMER = (
+    "— dexta is observation and discussion support, not a medical device; it never gives "
+    "dosing advice. Decisions are for you and your care team."
+)
+
 
 def model_for_role(config: Config, role: str) -> Any:
     """Build the LLM for ``role`` from config, or ``None`` for the deterministic path.
@@ -94,6 +100,18 @@ def is_tidepool_configured(config: Config) -> bool:
     return bool(str(path)) and path.is_file()
 
 
+def is_tandem_configured(config: Config) -> bool:
+    return bool(config.tandem.email.strip() and config.tandem.password)
+
+
+def is_carelink_configured(config: Config) -> bool:
+    return bool(config.carelink.username.strip() and config.carelink.password)
+
+
+def is_dexcom_api_configured(config: Config) -> bool:
+    return bool(config.dexcom_api.access_token.strip())
+
+
 def build_connectors(config: Config) -> list[Connector]:
     """Construct every configured connector (lazy provider imports)."""
     connectors: list[Connector] = []
@@ -129,6 +147,21 @@ def build_connectors(config: Config) -> list[Connector]:
         from dexta_intelligence.connectors.tidepool import TidepoolConnector  # noqa: PLC0415
 
         connectors.append(TidepoolConnector(config.tidepool))
+
+    if is_tandem_configured(config):
+        from dexta_intelligence.connectors.tandem import TandemConnector  # noqa: PLC0415
+
+        connectors.append(TandemConnector(config.tandem))
+
+    if is_carelink_configured(config):
+        from dexta_intelligence.connectors.carelink import CareLinkConnector  # noqa: PLC0415
+
+        connectors.append(CareLinkConnector(config.carelink))
+
+    if is_dexcom_api_configured(config):
+        from dexta_intelligence.connectors.dexcom_api import DexcomApiConnector  # noqa: PLC0415
+
+        connectors.append(DexcomApiConnector(config.dexcom_api))
 
     return connectors
 

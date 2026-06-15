@@ -115,7 +115,7 @@ def generate_wiki(
     own repository and every generation that changes a page is committed.
 
     ``synthesis`` (optional) is the LLM-authored, guard-checked narrative
-    layer (spec §6.4): when given, topic pages gain a ``## Synthesis`` section
+    layer: when given, topic pages gain a ``## Synthesis`` section
     and the index a ``## Connections`` section. With ``synthesis=None`` the
     output is byte-identical to the deterministic templating.
     """

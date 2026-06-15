@@ -17,7 +17,7 @@ is applied once across that family. A finding is emitted only when its adjusted
 ``q`` ≤ alpha **and** split-half replication agrees on direction — matching
 reconciliation's ``verdict == "pass"`` bar.
 
-Spec §7. No LLM imports in this module.
+No LLM imports in this module.
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ class _PatternCandidate:
 
 
 class PatternAgent:
-    """Deterministic pattern agent implementing spec §7 Pattern row."""
+    """Deterministic pattern agent."""
 
     name: str
     requires: DataRequirement

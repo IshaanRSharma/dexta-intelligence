@@ -4,7 +4,7 @@ Compares expected glucose trajectories (logged predBG curves for looping users,
 or oref0-math expectations otherwise) against realized CGM, attributes the error,
 counts recurrence, and gates claims through :mod:`dexta_intelligence.stats.rigor`.
 
-Spec §7.1. No LLM imports in this module.
+No LLM imports in this module.
 """
 
 from __future__ import annotations
@@ -121,7 +121,7 @@ class ReconciliationEpisode(_FrozenModel):
 
 
 class PredictionReconciliationAgent:
-    """Deterministic agent implementing spec §7.1."""
+    """Deterministic agent"""
 
     name: str
     requires: DataRequirement

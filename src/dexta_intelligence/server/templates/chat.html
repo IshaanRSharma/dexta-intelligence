@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head">
   <h1>Ask dexta</h1>
-  <p class="page-sub">Free-form questions over your data — every number traces to a tool call.</p>
+  <p class="page-sub">Free-form questions over your data — watch the reasoning, every number traces to a tool call.</p>
 </div>
 {% if not has_model %}
 <div class="empty">
@@ -12,12 +12,21 @@
   <a class="btn btn-secondary" href="/settings" style="margin-top:14px">Open Settings</a>
 </div>
 {% else %}
-<form hx-post="/api/ask" hx-target="#answer" hx-swap="innerHTML" hx-indicator="#spin" class="ask">
-  <input type="text" name="question" placeholder="e.g. what drives my overnight lows?" autocomplete="off" required />
-  <button type="submit">Ask</button>
-  <span id="spin" class="spin htmx-indicator">thinking…</span>
+<div id="stream"></div>
+
+<form id="ask-form" class="ask" autocomplete="off">
+  <input id="ask-input" type="text" name="q" placeholder="e.g. what drives my overnight lows?" autocomplete="off" required />
+  <button id="ask-btn" type="submit">Ask</button>
 </form>
-<p class="muted small">Observation only — never dosing advice.</p>
-<div id="answer"></div>
+<p class="muted small">Observation only — never dosing advice. Ask a follow-up anytime.</p>
+
+<noscript>
+  <form hx-post="/api/ask" hx-target="#stream" hx-swap="innerHTML" class="ask">
+    <input type="text" name="question" placeholder="ask a question" required />
+    <button type="submit">Ask</button>
+  </form>
+</noscript>
+
+<script src="/static/stream.js" defer></script>
 {% endif %}
 {% endblock %}

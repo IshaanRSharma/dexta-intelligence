@@ -134,6 +134,25 @@ def test_full_answer_round_one_stops_after_one_round() -> None:
     assert model.invocations == 3
 
 
+def test_goal_pursuit_can_compose_investigations() -> None:
+    """Goals now get the orchestrator belt: a goal can call an investigation
+    shortcut, not just read a metric."""
+    store = _store()
+    model = _FakeToolModel(
+        [
+            [{"name": "investigate_spike", "args": {"when": "2026-05-20"}, "id": "c1"}],
+            "Composed a spike investigation toward the goal.",
+            _reflect(True),
+        ]
+    )
+    agent = GoalSeekingAgent(model=model)
+
+    answer = agent.pursue(_ctx(store), "reduce my dinner spikes")
+
+    assert "investigate_spike" in model.seen_tools  # the belt exposes investigations
+    assert "investigate_spike" in answer.tools_used  # and the goal agent used one
+
+
 def test_model_none_single_round_no_crash() -> None:
     """No model → reflection falls back to satisfied; a single round, no loop."""
     store = _store()
