@@ -114,7 +114,7 @@ def test_no_insulin_discloses_and_makes_no_cause_claim() -> None:
     out = explain_spike(_ctx("no_insulin"), "2026-03-14")
     assert NO_TREATMENT_DISCLAIMER in str(out["headline"])
     assert out["confidence"] == "low"
-    assert NO_TREATMENT_DISCLAIMER in [str(x) for x in out["limitations"]]  # type: ignore[union-attr]
+    assert any(NO_TREATMENT_DISCLAIMER in str(x) for x in out["limitations"])  # type: ignore[union-attr]
     assert "consistent with late" not in str(out["headline"])
 
 

@@ -77,13 +77,17 @@ if TYPE_CHECKING:
     from dexta_intelligence.config import TandemConfig
 
 __all__ = [
+    "PROFILE_SOURCE_ID",
     "BolusLike",
     "TandemConnector",
     "basal_to_event",
     "bolus_to_events",
+    "format_insulin_profile",
+    "pump_events_to_batch",
 ]
 
 SOURCE = "tandem"
+PROFILE_SOURCE_ID = "tandem:profile:active"
 
 _DEDUPE_MARGIN = timedelta(minutes=5)
 #: t:connect's therapy_timeline takes whole-day bounds (``YYYY-MM-DD``).
@@ -141,16 +145,31 @@ class _ControlIQApi(Protocol):
     def therapy_timeline(self, start_date: str, end_date: str) -> dict[str, Any]: ...
 
 
+class _TandemSourceApi(Protocol):
+    """The Tandem Source surface used for auth, device selection, and pulls."""
+
+    def pump_event_metadata(self) -> list[dict[str, Any]]: ...
+
+    def pump_events(
+        self,
+        tconnect_device_id: str,
+        min_date: str | None = None,
+        max_date: str | None = None,
+        *,
+        fetch_all_event_types: bool = False,
+    ) -> Any: ...
+
+
 class _TConnectClient(Protocol):
     """The tconnectsync ``TConnectApi`` surface the connector uses.
 
-    Only the ControlIQ timeline is consumed; the ws2/android sub-apis are not
-    touched (they are CSV/legacy paths). Stubbable in tests via an injected
-    object exposing ``controliq.therapy_timeline``.
+    ``check`` and ``pull`` both use Tandem Source (``tandemsource``), which is
+    what tconnectsync v2+ relies on after the legacy t:connect web login was
+    retired.
     """
 
     @property
-    def controliq(self) -> _ControlIQApi: ...
+    def tandemsource(self) -> _TandemSourceApi: ...
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -258,6 +277,305 @@ def basal_to_event(basal: dict[str, Any]) -> InsulinEvent | None:
     )
 
 
+#: Tandem Source basal ``commandedRateSourceRaw`` values that map to temp basals.
+_TEMP_BASAL_SOURCES = frozenset({2, 3, 4})
+#: Subset issued by Control-IQ closed loop.
+_ALGO_BASAL_SOURCES = frozenset({3, 4})
+#: Default segment length when the next basal delivery event is unknown.
+_DEFAULT_BASAL_SEGMENT = timedelta(minutes=5)
+
+
+def _event_ts(value: object) -> datetime:
+    """Normalize a tconnectsync event timestamp (arrow or datetime) to UTC."""
+    if hasattr(value, "datetime"):  # arrow.Arrow
+        inner = value.datetime
+        if isinstance(inner, datetime):
+            return inner.astimezone(UTC)
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            msg = "naive tandem event timestamp rejected"
+            raise ValueError(msg)
+        return value.astimezone(UTC)
+    if isinstance(value, str) and value.strip():
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            msg = "naive tandem event timestamp rejected"
+            raise ValueError(msg)
+        return parsed.astimezone(UTC)
+    msg = f"unsupported tandem event timestamp: {value!r}"
+    raise ValueError(msg)
+
+
+def pump_events_to_batch(  # noqa: PLR0912, PLR0915 - one branch per tconnect event type
+    events: Sequence[Any],
+    *,
+    window_start: datetime,
+    source: str = SOURCE,
+    end: datetime | None = None,
+) -> NormalizedBatch:
+    """Convert decoded Tandem Source pump events into normalized timeline rows.
+
+    Mirrors tconnectsync's Tandem Source processors (bolus grouping by
+    ``bolusid``, basal segments from consecutive ``LidBasalDelivery`` events,
+    ``LidPumpingSuspended`` -> suspend). Duck-typed on event class names so
+    tests can stub without importing tconnectsync.
+    """
+    window_end = end or datetime.now(tz=UTC)
+    sorted_events = sorted(events, key=lambda e: _event_ts(e.eventTimestamp))
+
+    raw_events: list[RawEvent] = []
+    insulin: list[InsulinEvent] = []
+    meals: list[MealEvent] = []
+
+    bolus_by_id: dict[int, dict[str, Any]] = {}
+    basal_deliveries: list[Any] = []
+    suspends: list[Any] = []
+
+    for event in sorted_events:
+        name = type(event).__name__
+        if name.endswith("BolusCompleted") or name == "LidBolexCompleted":
+            slot = bolus_by_id.setdefault(int(event.bolusid), {})
+            slot["completed"] = event
+        elif name.endswith("BolusRequestedMsg1") or name.endswith("BolusRequested1"):
+            slot = bolus_by_id.setdefault(int(event.bolusid), {})
+            slot["requested1"] = event
+        elif name.endswith("BasalDelivery"):
+            basal_deliveries.append(event)
+        elif name.endswith("PumpingSuspended"):
+            suspends.append(event)
+
+    for bolus_id, parts in bolus_by_id.items():
+        completed = parts.get("completed")
+        if completed is None:
+            continue
+        ts = _event_ts(completed.eventTimestamp)
+        if ts < window_start or ts > window_end:
+            continue
+        units = _as_float(getattr(completed, "insulindelivered", None))
+        requested1 = parts.get("requested1")
+        carbs_g = _as_float(getattr(requested1, "carbamount", None)) if requested1 else None
+        seq = getattr(completed, "seqNum", bolus_id)
+
+        if units is not None and units > 0:
+            bolus_event = InsulinEvent(ts=ts, kind=InsulinKind.BOLUS, units=units)
+            insulin.append(bolus_event)
+            raw_events.append(
+                _raw_event_from_payload(
+                    source,
+                    f"tandem:bolus:{seq}",
+                    ts,
+                    _event_payload(completed, requested1),
+                )
+            )
+        if carbs_g is not None and carbs_g > 0:
+            meal = MealEvent(ts=ts, carbs_g=carbs_g)
+            meals.append(meal)
+            raw_events.append(
+                _raw_event_from_payload(
+                    source,
+                    f"tandem:carbs:{seq}",
+                    ts,
+                    _event_payload(completed, requested1),
+                )
+            )
+
+    if basal_deliveries:
+        segments: list[tuple[datetime, timedelta, Any]] = []
+        for idx, event in enumerate(basal_deliveries):
+            start = _event_ts(event.eventTimestamp)
+            if idx + 1 < len(basal_deliveries):
+                nxt = _event_ts(basal_deliveries[idx + 1].eventTimestamp)
+                duration = nxt - start
+            else:
+                duration = min(_DEFAULT_BASAL_SEGMENT, window_end - start)
+            if duration.total_seconds() <= 0:
+                duration = _DEFAULT_BASAL_SEGMENT
+            segments.append((start, duration, event))
+
+        for start, duration, event in segments:
+            if start < window_start or start > window_end:
+                continue
+            basal_event = _basal_delivery_to_event(start, duration, event)
+            if basal_event is None:
+                continue
+            seq = getattr(event, "seqNum", start.isoformat())
+            insulin.append(basal_event)
+            raw_events.append(
+                _raw_event_from_payload(
+                    source,
+                    f"tandem:{basal_event.kind.value}:{seq}",
+                    basal_event.ts,
+                    _event_payload(event),
+                )
+            )
+
+    for event in suspends:
+        ts = _event_ts(event.eventTimestamp)
+        if ts < window_start or ts > window_end:
+            continue
+        timeout = _as_float(getattr(event, "rpatimeout", None))
+        suspend = InsulinEvent(
+            ts=ts,
+            kind=InsulinKind.SUSPEND,
+            duration_min=timeout,
+        )
+        seq = getattr(event, "seqNum", ts.isoformat())
+        insulin.append(suspend)
+        raw_events.append(
+            _raw_event_from_payload(source, f"tandem:suspend:{seq}", ts, _event_payload(event))
+        )
+
+    return NormalizedBatch(raw=raw_events, insulin=insulin, meals=meals)
+
+
+def _basal_delivery_to_event(
+    start: datetime, duration: timedelta, event: Any
+) -> InsulinEvent | None:
+    source_raw = int(getattr(event, "commandedRateSourceRaw", -1))
+    if source_raw == 0:
+        return None
+    rate_milli = _as_float(getattr(event, "commandedRate", None))
+    if rate_milli is None or rate_milli <= 0:
+        return None
+    duration_min = duration.total_seconds() / 60.0
+    units = (rate_milli / 1000.0) * duration_min / 60.0
+    if units <= 0:
+        return None
+    if source_raw == 1:
+        kind = InsulinKind.BASAL
+        automatic = None
+    elif source_raw in _TEMP_BASAL_SOURCES:
+        kind = InsulinKind.TEMP_BASAL
+        automatic = source_raw in _ALGO_BASAL_SOURCES
+    else:
+        return None
+    return InsulinEvent(
+        ts=start,
+        kind=kind,
+        units=units,
+        duration_min=duration_min,
+        automatic=automatic,
+    )
+
+
+def _event_payload(*parts: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for part in parts:
+        if part is None:
+            continue
+        todict = getattr(part, "todict", None)
+        if callable(todict):
+            out.update(todict())
+        elif isinstance(part, dict):
+            out.update(part)
+        else:
+            as_dict = getattr(part, "__dict__", None)
+            if isinstance(as_dict, dict):
+                out.update({k: v for k, v in as_dict.items() if not k.startswith("_")})
+    return out
+
+
+def _raw_event_from_payload(
+    source: str, source_id: str, ts: datetime, payload: dict[str, Any]
+) -> RawEvent:
+    return RawEvent(source=source, source_id=source_id, source_ts=ts, payload=payload)
+
+
+def _minutes_to_hhmm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _segment_is_empty(seg: dict[str, Any]) -> bool:
+    keys = ("startTime", "basalRate", "isf", "carbRatio", "targetBg")
+    return all(int(seg.get(k, 0) or 0) == 0 for k in keys)
+
+
+def format_insulin_profile(
+    settings: dict[str, Any],
+    *,
+    pump_serial: str | None = None,
+    as_of: datetime | None = None,
+) -> dict[str, Any]:
+    """Convert Tandem Source pump settings into a readable insulin profile snapshot.
+
+    Pure function — no I/O. Values mirror tconnectsync's Nightscout profile
+    mapping (basal/carb-ratio in pump milliunits, ISF/target in mg/dL).
+    """
+    profiles_block = settings.get("profiles") or {}
+    active_idp = int(profiles_block.get("activeIdp", 0) or 0)
+    profiles_in = profiles_block.get("profile") or []
+    formatted_profiles: list[dict[str, Any]] = []
+    active_name: str | None = None
+
+    for profile in profiles_in:
+        if not isinstance(profile, dict):
+            continue
+        idp = int(profile.get("idp", 0) or 0)
+        name = str(profile.get("name") or f"Profile {idp}")
+        segments: list[dict[str, Any]] = []
+        for seg in profile.get("tDependentSegs") or []:
+            if not isinstance(seg, dict) or _segment_is_empty(seg):
+                continue
+            start = int(seg.get("startTime", 0) or 0)
+            segments.append(
+                {
+                    "time": _minutes_to_hhmm(start),
+                    "basal_u_hr": round(int(seg.get("basalRate", 0) or 0) / 1000.0, 3),
+                    "isf": int(seg.get("isf", 0) or 0),
+                    "carb_ratio": round(int(seg.get("carbRatio", 0) or 0) / 1000.0, 2),
+                    "target_bg": int(seg.get("targetBg", 0) or 0),
+                }
+            )
+        entry: dict[str, Any] = {
+            "name": name,
+            "idp": idp,
+            "active": idp == active_idp,
+            "dia_hr": round(int(profile.get("insulinDuration", 240) or 240) / 60.0, 1),
+            "max_bolus_u": round(int(profile.get("maxBolus", 0) or 0) / 1000.0, 2),
+            "segments": segments,
+        }
+        formatted_profiles.append(entry)
+        if entry["active"]:
+            active_name = name
+
+    cgm = settings.get("cgmSettings") or {}
+    high = cgm.get("highGlucoseAlert") or {}
+    low = cgm.get("lowGlucoseAlert") or {}
+
+    out: dict[str, Any] = {
+        "active_profile": active_name,
+        "profiles": formatted_profiles,
+        "cgm_alerts": {
+            "high_mg_dl": int(high.get("mgPerDl", 0) or 0),
+            "high_enabled": bool(int(high.get("enabled", 0) or 0)),
+            "low_mg_dl": int(low.get("mgPerDl", 0) or 0),
+            "low_enabled": bool(int(low.get("enabled", 0) or 0)),
+        },
+        "units": "mg/dL",
+    }
+    if pump_serial:
+        out["pump_serial"] = pump_serial
+    if as_of is not None:
+        out["as_of"] = as_of.isoformat()
+    return out
+
+
+def _profile_raw_from_device(device: dict[str, Any]) -> RawEvent | None:
+    settings = (device.get("lastUpload") or {}).get("settings")
+    if not isinstance(settings, dict) or not settings:
+        return None
+    as_of = TandemConnector._parse_pump_date(device.get("maxDateWithEvents")) or datetime.now(UTC)
+    serial = str(device.get("serialNumber") or "")
+    payload = format_insulin_profile(
+        settings,
+        pump_serial=serial or None,
+        as_of=as_of,
+    )
+    if not payload.get("profiles"):
+        return None
+    return _raw_event_from_payload(SOURCE, PROFILE_SOURCE_ID, as_of, payload)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Connector - thin session layer over the pure conversion
 # ─────────────────────────────────────────────────────────────────────────────
@@ -281,19 +599,32 @@ class TandemConnector:
 
     # -- Connector protocol ----------------------------------------------------
 
-    def check(self) -> HealthReport:
-        """Establish a t:connect session and probe a small recent window.
+    def check(self, *, timeout_s: float = 25) -> HealthReport:
+        """Establish a Tandem Source session and list pumps on the account.
 
-        Building the client authenticates against t:connect, so bad
-        credentials fail here. Read-only: a one-day therapy_timeline is
-        fetched purely to prove reachability and surface the latest event.
+        tconnectsync v2+ authenticates via ``sso.tandemdiabetes.com`` /
+        ``tdcservices.tandemdiabetes.com``, not the retired t:connect web
+        login. Bad credentials fail here; a successful call proves reachability.
         """
+        import concurrent.futures  # noqa: PLC0415
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(self._check_once)
+            try:
+                return future.result(timeout=timeout_s)
+            except concurrent.futures.TimeoutError:
+                return HealthReport(
+                    ok=False,
+                    source=self.source,
+                    detail=(
+                        f"t:connect did not respond within {int(timeout_s)}s — "
+                        "check network/VPN or try again later."
+                    ),
+                )
+
+    def _check_once(self) -> HealthReport:
         try:
-            now = datetime.now(tz=UTC)
-            timeline = self._client().controliq.therapy_timeline(
-                start_date=(now - timedelta(days=1)).strftime(_DATE_FMT),
-                end_date=now.strftime(_DATE_FMT),
-            )
+            pumps = self._client().tandemsource.pump_event_metadata()
         except RuntimeError:
             # Missing optional dependency is a setup bug, not a connectivity
             # result - keep the "pip install" message loud.
@@ -301,60 +632,67 @@ class TandemConnector:
         except Exception as exc:  # tconnectsync error tree + requests transport errors
             return HealthReport(ok=False, source=self.source, detail=str(exc))
 
-        latest = self._latest_ts(timeline)
+        if not pumps:
+            return HealthReport(
+                ok=False,
+                source=self.source,
+                detail="No pumps found on Tandem Source account",
+            )
+
+        latest_pump = self._pick_latest_pump(pumps)
+        latest_ts = self._parse_pump_date(latest_pump.get("maxDateWithEvents"))
+        serial = latest_pump.get("serialNumber", "?")
         return HealthReport(
             ok=True,
             source=self.source,
-            detail="t:connect session established",
-            latest_data_ts=latest,
+            detail=f"Tandem Source connected · pump {serial}",
+            latest_data_ts=latest_ts,
         )
 
     def pull(self, since: datetime) -> NormalizedBatch:
-        """Fetch the therapy timeline newer than ``since`` (minus a dedupe margin).
+        """Fetch pump events newer than ``since`` (minus a dedupe margin).
 
-        The ControlIQ timeline takes whole-day bounds, so the window is the
-        day of ``window_start`` through today; events before ``window_start``
-        are filtered out after normalization. Raises on provider hiccups - the
-        sync workflow owns retries.
-
-        source_ids are stable per event for idempotency:
-        ``tandem:bolus:<iso-ts>``, ``tandem:carbs:<iso-ts>``,
-        ``tandem:<kind>:<iso-ts>`` for basals.
+        Uses Tandem Source ``pump_events`` (tconnectsync v2+). Events before
+        ``window_start`` are filtered out after normalization. Raises on provider
+        hiccups — the sync workflow owns retries.
         """
         window_start = since.astimezone(UTC) - _DEDUPE_MARGIN
         now = datetime.now(tz=UTC)
-        timeline = self._client().controliq.therapy_timeline(
-            start_date=window_start.strftime(_DATE_FMT),
-            end_date=now.strftime(_DATE_FMT),
+        client = self._client()
+        pumps = client.tandemsource.pump_event_metadata()
+        if not pumps:
+            return NormalizedBatch(raw=[], insulin=[], meals=[])
+
+        device = self._choose_pump(pumps)
+        device_id = str(device["tconnectDeviceId"])
+        events = client.tandemsource.pump_events(
+            device_id,
+            window_start.strftime(_DATE_FMT),
+            now.strftime(_DATE_FMT),
+            fetch_all_event_types=False,
         )
+        batch = pump_events_to_batch(events, window_start=window_start, end=now)
+        profile_raw = _profile_raw_from_device(device)
+        if profile_raw is not None:
+            batch = NormalizedBatch(
+                raw=[*batch.raw, profile_raw],
+                insulin=batch.insulin,
+                meals=batch.meals,
+            )
+        return batch
 
-        raw_events: list[RawEvent] = []
-        insulin: list[InsulinEvent] = []
-        meals: list[MealEvent] = []
+    def _choose_pump(self, pumps: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        serial = self._config.pump_serial.strip()
+        by_serial = {str(p.get("serialNumber")): p for p in pumps}
+        if serial and serial not in {"", "11111111"}:
+            if serial not in by_serial:
+                known = ", ".join(sorted(by_serial))
+                msg = f"Pump serial {serial} not on account (have: {known})"
+                raise RuntimeError(msg)
+            return by_serial[serial]
+        return self._pick_latest_pump(pumps)
 
-        for bolus in self._boluses(timeline):
-            for event in bolus_to_events(bolus):
-                if event.ts < window_start:
-                    continue
-                if isinstance(event, InsulinEvent):
-                    source_id = f"tandem:bolus:{event.ts.isoformat()}"
-                    insulin.append(event)
-                else:
-                    source_id = f"tandem:carbs:{event.ts.isoformat()}"
-                    meals.append(event)
-                raw_events.append(self._raw_event(bolus, event.ts, source_id))
-
-        for basal in self._basals(timeline):
-            basal_event = basal_to_event(basal)
-            if basal_event is None or basal_event.ts < window_start:
-                continue
-            source_id = f"tandem:{basal_event.kind.value}:{basal_event.ts.isoformat()}"
-            insulin.append(basal_event)
-            raw_events.append(self._raw_event(basal, basal_event.ts, source_id))
-
-        return NormalizedBatch(raw=raw_events, insulin=insulin, meals=meals)
-
-    # -- timeline shape helpers ------------------------------------------------
+    # -- legacy ControlIQ conversion helpers (tests + Nightscout-shaped stubs) ─
 
     @staticmethod
     def _boluses(timeline: dict[str, Any]) -> Sequence[BolusLike]:
@@ -380,6 +718,23 @@ class TandemConnector:
                 stamps.append(event.ts)
         return max(stamps) if stamps else None
 
+    @staticmethod
+    def _parse_pump_date(value: object) -> datetime | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+
+    @staticmethod
+    def _pick_latest_pump(pumps: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        def sort_key(pump: dict[str, Any]) -> datetime:
+            ts = TandemConnector._parse_pump_date(pump.get("maxDateWithEvents"))
+            return ts or datetime.min.replace(tzinfo=UTC)
+
+        return max(pumps, key=sort_key)
+
     # -- session plumbing ------------------------------------------------------
 
     def _client(self) -> _TConnectClient:
@@ -403,16 +758,10 @@ class TandemConnector:
         client = tconnectsync.TConnectApi(
             email=self._config.email,
             password=self._config.password,
+            region=self._tconnect_region(),
         )
         return cast("_TConnectClient", client)
 
-    def _raw_event(self, record: object, ts: datetime, source_id: str) -> RawEvent:
-        # Real Bolus records are dataclasses; basals are plain dicts. Keep the
-        # verbatim record where we can, else synthesize a minimal payload.
-        payload: dict[str, Any]
-        if isinstance(record, dict):
-            payload = record
-        else:
-            as_dict = getattr(record, "__dict__", None)
-            payload = dict(as_dict) if isinstance(as_dict, dict) else {"repr": repr(record)}
-        return RawEvent(source=self.source, source_id=source_id, source_ts=ts, payload=payload)
+    def _tconnect_region(self) -> str:
+        region = self._config.region.strip().upper()
+        return region if region in {"US", "EU"} else "US"

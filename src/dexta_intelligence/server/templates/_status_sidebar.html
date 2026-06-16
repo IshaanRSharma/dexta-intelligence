@@ -17,6 +17,20 @@
     {% endif %}
   </div>
 
+  {% if sidebar.stream_counts is defined %}
+  <div class="side-panel">
+    <h3>Data loaded</h3>
+    <p class="small" style="margin:0">
+      {{ sidebar.stream_counts.glucose }} glucose
+      · {{ sidebar.stream_counts.insulin }} insulin
+      · {{ sidebar.stream_counts.meals }} meals
+    </p>
+    {% if sidebar.stream_counts.insulin == 0 %}
+    <p class="muted small" style="margin:8px 0 0">No pump data yet — connect a source in Settings and tap <strong>Sync now</strong>.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div class="side-panel">
     <h3>Capabilities</h3>
     <p class="small muted" style="margin:0 0 10px">{{ sidebar.unlocked_count }} unlocked</p>
@@ -35,6 +49,16 @@
   <div class="side-panel">
     <h3>Last sync</h3>
     <p class="small" style="margin:0">{{ sidebar.last_sync }}</p>
+  </div>
+  {% endif %}
+
+  {% if sidebar.storage %}
+  <div class="side-panel">
+    <h3>Storage</h3>
+    <p class="small" style="margin:0"><strong>{{ sidebar.storage.backend }}</strong> · {{ sidebar.storage.detail }}</p>
+    {% if sidebar.storage.path %}
+    <p class="side-meta mono" style="margin:4px 0 0;word-break:break-all">{{ sidebar.storage.path }}{% if sidebar.storage.size %} · {{ sidebar.storage.size }}{% endif %}</p>
+    {% endif %}
   </div>
   {% endif %}
 </aside>

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
-from dexta_intelligence.config import env_override_for
+from dexta_intelligence.config import env_override_for, secret_is_set
 from dexta_intelligence.server.settings_schema import (
     FieldKind,
     FieldSchema,
@@ -80,15 +80,27 @@ def panel_to_view(
     freshness: datetime | None = None,
     saved: bool = False,
     error: str | None = None,
+    sync_msg: str | None = None,
+    sync_ok: bool | None = None,
 ) -> dict[str, Any]:
     section = getattr(cfg, spec.section)
     fields = [
         field_to_view(spec.section, f, section, editable=editable) for f in spec.fields
     ]
-    env_keys = [
-        {"name": var, "label": label, "set": bool(os.environ.get(var))}
-        for var, label in spec.env_keys
-    ]
+    env_keys = []
+    for var, label in spec.env_keys:
+        is_set = secret_is_set(var)
+        mask = mask_secret(os.environ[var]) if is_set else ""
+        placeholder = f"{mask} — leave blank to keep" if mask else "Paste API key"
+        env_keys.append(
+            {
+                "name": var,
+                "label": label,
+                "set": is_set,
+                "mask": mask,
+                "placeholder": placeholder,
+            }
+        )
     setup_flows = [list(flow) for flow in spec.setup_flows]
     setup_links = [{"label": link.label, "url": link.url} for link in spec.setup_links]
     return {
@@ -106,6 +118,8 @@ def panel_to_view(
         "editable": editable,
         "saved": saved,
         "error": error,
+        "sync_msg": sync_msg,
+        "sync_ok": sync_ok,
         "fields": fields,
         "env_keys": env_keys,
         "setup_flows": setup_flows,

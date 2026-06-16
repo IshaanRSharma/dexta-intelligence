@@ -707,8 +707,11 @@ class TestMain:
         assert exc.value.code == 2
 
     def _hermetic_db(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        """A migrated db under tmp_path; chdir away from any stray dexta.toml."""
+        """A migrated db under tmp_path, fully isolated from the developer's real
+        config: chdir away from any stray ./dexta.toml and point HOME at tmp so
+        ``~/.dexta/secrets.env`` (real provider keys) never leaks into a run."""
         monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
         db = tmp_path / "main.db"
         SQLiteStore(db).migrate()
         return db

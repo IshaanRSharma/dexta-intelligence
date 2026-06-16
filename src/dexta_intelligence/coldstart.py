@@ -55,7 +55,7 @@ class CapabilitySet:
         if not self.has_insulin:
             notes.append(
                 "insulin/pump data absent — treatment tools disabled "
-                "(connect Nightscout treatments)"
+                "(connect Tandem or Nightscout, then Sync now)"
             )
         if not self.has_meals:
             notes.append("carb entries absent — meal tools disabled (log carbs in Nightscout)")

@@ -148,9 +148,11 @@ def test_wiki_page_renders_markdown(tmp_path: Path) -> None:
     )
     config = Config.model_validate({"wiki": {"path": str(wiki_root)}})
     body = _client(store, config).get("/wiki").text
+    assert "wiki-shell" in body
+    assert "wiki-nav" in body
     assert "<h1>dexta wiki</h1>" in body
     assert "<strong>10 days</strong>" in body
-    assert "<table>" in body
+    assert "wiki-table-wrap" in body
     assert 'href="/wiki/topics/lows"' in body
     store.close()
 
@@ -195,7 +197,69 @@ def test_goals_empty_state(tmp_path: Path) -> None:
     store = _store(tmp_path)
     body = _client(store).get("/goals").text
     assert "No goals yet" in body
-    assert "dexta goals add" in body
+    assert "Add goal" in body
+    assert 'name="statement"' in body
+    store.close()
+
+
+def test_goals_post_creates_goal(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    resp = client.post(
+        "/goals",
+        data={"statement": "Reduce overnight lows", "target": "5"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/goals?saved=1"
+    body = client.get("/goals?saved=1").text
+    assert "Goal added." in body
+    assert "Reduce overnight lows" in body
+    assert store.get_goals()[0].target == 5.0
+    store.close()
+
+
+def test_goals_post_rejects_empty_statement(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).post("/goals", data={"statement": "   "})
+    assert resp.status_code == 200
+    assert "Describe what you want to improve" in resp.text
+    assert not store.get_goals()
+    store.close()
+
+
+def test_goals_post_rejects_duplicate_active_statement(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    assert (
+        client.post(
+            "/goals",
+            data={"statement": "Increase time in range"},
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+    resp = client.post("/goals", data={"statement": "increase time in range"})
+    assert resp.status_code == 200
+    assert "already have an active goal" in resp.text
+    assert len(store.get_goals()) == 1
+    store.close()
+
+
+def test_goals_abandon_hides_from_page(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    goal_id = store.insert_goal(
+        Goal(
+            statement="Reduce overnight lows",
+            metric=GoalMetric.NOCTURNAL_TBR,
+            direction="decrease",
+        )
+    )
+    client = _client(store)
+    resp = client.post(f"/goals/{goal_id}/abandon", follow_redirects=False)
+    assert resp.status_code == 303
+    body = client.get("/goals").text
+    assert "Reduce overnight lows" not in body
     store.close()
 
 
@@ -472,3 +536,34 @@ def test_serve_no_warning_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
     out = io.StringIO()
     cmd_serve(config=Config(), db_path=None, out=out, host="127.0.0.1", port=8787)
     assert "WARNING" not in out.getvalue()
+
+
+# ── CSV upload ────────────────────────────────────────────────────────────────
+
+
+def test_upload_csv_ingests_glucose(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    fixture = Path(__file__).parent / "fixtures" / "clarity_sample.csv"
+    with fixture.open("rb") as fh:
+        resp = client.post(
+            "/actions/upload",
+            files={"file": ("clarity_sample.csv", fh, "text/csv")},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303
+    assert "upload_ok" in resp.headers["location"]
+    assert store.coverage().n_glucose > 0
+    store.close()
+
+
+def test_upload_empty_file_flashes(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).post(
+        "/actions/upload",
+        files={"file": ("empty.csv", b"", "text/csv")},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "upload_empty" in resp.headers["location"]
+    store.close()

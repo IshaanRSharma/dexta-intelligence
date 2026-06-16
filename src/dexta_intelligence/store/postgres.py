@@ -23,11 +23,13 @@ so the two backends are observationally indistinguishable through the port.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.models import (
     ActivityEvent,
+    ChatTurn,
     CoverageStats,
     Finding,
     FindingStats,
@@ -43,6 +45,7 @@ from dexta_intelligence.models import (
     InsulinKind,
     MealEvent,
     PredictionEvent,
+    RawEvent,
     RecoveryEvent,
     Rollup,
     RollupPeriod,
@@ -50,11 +53,11 @@ from dexta_intelligence.models import (
 )
 
 if TYPE_CHECKING:
-    from dexta_intelligence.models import DeviceEvent, RawEvent
+    from dexta_intelligence.models import DeviceEvent
 
 __all__ = ["PostgresStore"]
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SECONDS_PER_DAY = 86400.0
 _CGM_SLOT_SECONDS = 300.0  # expected 5-minute CGM cadence
@@ -225,6 +228,15 @@ CREATE TABLE IF NOT EXISTS goal_checkpoints (
     note TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_goal_checkpoints_goal ON goal_checkpoints (goal_id, ts);
+
+CREATE TABLE IF NOT EXISTS chat_turns (
+    id BIGSERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    ts TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns (session_id, id);
 """
 
 
@@ -307,6 +319,42 @@ class PostgresStore:
                 rows,
             )
         return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def replace_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
+        if not events:
+            return {}
+        rows = [
+            (e.source, e.source_id, _to_utc(e.source_ts), self._jsonb(e.payload))
+            for e in events
+        ]
+        with self._conn, self._conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO raw_events (source, source_id, source_ts, payload) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT (source, source_id) DO UPDATE SET "
+                "source_ts = EXCLUDED.source_ts, payload = EXCLUDED.payload",
+                rows,
+            )
+        return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def get_raw_event(self, source: str, source_id: str) -> RawEvent | None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT source, source_id, source_ts, payload FROM raw_events "
+                "WHERE source = %s AND source_id = %s",
+                (source, source_id),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        payload = row[3]
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        return RawEvent(
+            source=row[0],
+            source_id=row[1],
+            source_ts=_to_utc(row[2]),
+            payload=payload if isinstance(payload, dict) else json.loads(payload),
+        )
 
     def existing_raw_ids(self, events: list[RawEvent]) -> dict[str, int]:
         if not events:
@@ -886,6 +934,36 @@ class PostgresStore:
             GoalCheckpoint(
                 id=r[0], goal_id=r[1], ts=_to_utc(r[2]), metric_value=r[3], note=r[4]
             )
+            for r in fetched
+        ]
+
+    # ── chat history ─────────────────────────────────────────────────────────
+
+    def append_chat_turn(self, turn: ChatTurn) -> int:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO chat_turns (session_id, role, content, ts) "
+                "VALUES (%s, %s, %s, %s) RETURNING id",
+                (turn.session_id, turn.role, turn.content, _to_utc(turn.ts)),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def get_chat_turns(self, session_id: str, *, limit: int = 50) -> list[ChatTurn]:
+        with self._conn.cursor() as cur:
+            # Take the most-recent `limit` rows (id DESC), then re-order ascending
+            # so the result is chronological (oldest→newest).
+            cur.execute(
+                "SELECT id, session_id, role, content, ts FROM ("
+                "SELECT id, session_id, role, content, ts FROM chat_turns "
+                "WHERE session_id = %s ORDER BY id DESC LIMIT %s"
+                ") sub ORDER BY id ASC",
+                (session_id, limit),
+            )
+            fetched = cur.fetchall()
+        return [
+            ChatTurn(id=r[0], session_id=r[1], role=r[2], content=r[3], ts=_to_utc(r[4]))
             for r in fetched
         ]
 

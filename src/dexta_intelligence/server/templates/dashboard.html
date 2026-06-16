@@ -23,8 +23,16 @@
   <form method="post" action="/actions/analyze" class="btn-row">
     <button type="submit" class="btn-secondary" {% if below_floor %}disabled title="Need at least 3 days of data"{% endif %}>Run analyze</button>
   </form>
+  <form method="post" action="/actions/upload" enctype="multipart/form-data" class="btn-row upload-row">
+    <label class="btn btn-secondary upload-label">
+      Upload CSV
+      <input type="file" name="file" accept=".csv,text/csv" required
+             onchange="this.form.requestSubmit()" hidden />
+    </label>
+  </form>
   <a class="btn btn-ghost" href="/chat">Ask a question →</a>
 </div>
+<p class="muted small" style="margin:-6px 0 0">Upload a Dexcom Clarity or LibreView CSV export — parsed locally, no upload off your machine.</p>
 
 <div class="layout-split">
   <section>

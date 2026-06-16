@@ -165,6 +165,14 @@ def _get_iob(r: dict[str, Any]) -> TraceLine:
     )
 
 
+def _get_insulin_profile(r: dict[str, Any]) -> TraceLine:
+    if r.get("error"):
+        return TraceLine("treatment", "checked insulin profile — not synced")
+    name = _get(r, "active_profile", "?")
+    n_seg = len(r.get("active_segments") or [])
+    return TraceLine("treatment", f"checked insulin profile — {name!r} ({n_seg} segments)")
+
+
 def _get_cob(r: dict[str, Any]) -> TraceLine:
     return TraceLine(
         "treatment",
@@ -206,6 +214,7 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], TraceLine]] = {
     "get_boluses": _get_boluses,
     "get_basal_timeline": _get_basal_timeline,
     "get_iob": _get_iob,
+    "get_insulin_profile": _get_insulin_profile,
     "get_cob": _get_cob,
     "find_spikes": _find_spikes,
     "find_similar_events": _find_similar_events,

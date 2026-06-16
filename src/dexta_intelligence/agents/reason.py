@@ -92,6 +92,7 @@ class ReasoningResult:
     steps: list[ToolCall] = field(default_factory=list)
     evidence: dict[str, Any] = field(default_factory=dict)
     stopped_reason: str = "answered"
+    error_detail: str = ""
 
 
 def run_reasoning_loop(
@@ -132,10 +133,14 @@ def run_reasoning_loop(
     for _ in range(max_steps):
         try:
             response = bound.invoke(messages)
-        except Exception:
+        except Exception as exc:
             logger.warning("reasoning: model.invoke failed", exc_info=True)
             return ReasoningResult(
-                answer="", steps=steps, evidence=evidence, stopped_reason="model_error"
+                answer="",
+                steps=steps,
+                evidence=evidence,
+                stopped_reason="model_error",
+                error_detail=_model_error_message(exc),
             )
 
         tool_calls = list(getattr(response, "tool_calls", None) or [])
@@ -182,6 +187,33 @@ def run_reasoning_loop(
         evidence=evidence,
         stopped_reason="max_steps",
     )
+
+
+def _model_error_message(exc: Exception) -> str:
+    """Turn provider failures into something actionable in chat."""
+    body = str(exc).strip()
+    lowered = body.lower()
+    if "credit balance is too low" in lowered or (
+        "insufficient" in lowered and "credit" in lowered
+    ):
+        return (
+            "Your Anthropic account has no API credits. Add billing at "
+            "https://console.anthropic.com/settings/billing, or switch Settings → "
+            "LLM provider to OpenRouter/Ollama."
+        )
+    if "invalid x-api-key" in lowered or "authentication" in lowered or "401" in body:
+        return (
+            "The API key was rejected. Check Settings → LLM provider and update "
+            "your key in ~/.dexta/secrets.env."
+        )
+    if "model" in lowered and ("not found" in lowered or "does not exist" in lowered):
+        return (
+            "The configured model is no longer available from Anthropic. "
+            "Update Settings → LLM provider → Model to claude-sonnet-4-6."
+        )
+    if body:
+        return f"The language model call failed: {body[:240]}"
+    return "The language model is unavailable right now."
 
 
 def _emit(on_event: Callable[[ReasoningEvent], None] | None, event: ReasoningEvent) -> None:

@@ -58,7 +58,7 @@ access_token = ""  # personal access token (or OURA_ACCESS_TOKEN)
 
 [llm]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 # Per-role overrides live under [llm.roles.<role>] (optional).
 
 [analysis]

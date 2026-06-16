@@ -2,8 +2,9 @@
 
 Vanilla contract: ``dexta init`` writes ``~/.dexta/dexta.toml`` with exactly
 two values the user must supply (Nightscout URL + token); every other key
-has a default good enough to run. Secrets (API keys) live in ``~/.dexta/secrets.env`` (or shell env vars), never
-in the TOML file, so configs are safe to share when asking for help.
+has a default good enough to run. Secrets (API keys) live in
+``~/.dexta/secrets.env`` (or shell env vars), never in the TOML file, so
+configs are safe to share when asking for help.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ __all__ = [
     "LibreConfig",
     "LibreRegion",
     "OuraConfig",
+    "ServerConfig",
     "TandemConfig",
     "TidepoolConfig",
     "WhoopConfig",
@@ -38,10 +40,10 @@ __all__ = [
     "env_override_for",
     "load_config",
     "load_secrets_env",
+    "save_config_values",
     "save_secret",
     "secret_is_set",
     "secrets_path_for",
-    "save_config_values",
 ]
 
 DEFAULT_CONFIG_PATH = Path("~/.dexta/dexta.toml")
@@ -153,7 +155,9 @@ class TandemConfig(_Section):
     email: str = ""
     password: str = ""
     region: str = "us"
-    """``us`` (t:connect) or ``eu`` (t:connect EU host)."""
+    """``us`` (Tandem Source US) or ``eu`` (Tandem Source EU)."""
+    pump_serial: str = ""
+    """Optional pump serial; empty selects the pump with the most recent data."""
 
 
 class CareLinkConfig(_Section):
@@ -194,7 +198,7 @@ class LLMConfig(_Section):
     """Any LangChain provider (``anthropic``, ``openai``, ``ollama``, …) or
     ``openrouter`` — one OPENROUTER_API_KEY unlocks every hosted model, the
     lowest-friction BYOM path (model names like ``anthropic/claude-sonnet-4``)."""
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4-6"
     roles: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """Per-role overrides, e.g. ``roles.skeptic = {provider="ollama", model="llama3"}``."""
 
@@ -244,6 +248,15 @@ class WikiConfig(_Section):
     """Commit each generation so ``git log`` is the forensic belief history."""
 
 
+class ServerConfig(_Section):
+    auto_sync_minutes: int = 0
+    """When > 0, ``dexta serve`` runs a background sync every N minutes so the GUI
+    alone keeps the local DB fresh (0 = off). It reuses the configured connectors
+    and storage backend, so any source the user sets up — Nightscout, a pump, or a
+    self-hosted Postgres — is covered without extra wiring. For the full cadence
+    (sync + monitor + goal ticks) use ``dexta daemon`` instead."""
+
+
 class Config(_Section):
     data: DataConfig = Field(default_factory=DataConfig)
     nightscout: NightscoutConfig = Field(default_factory=NightscoutConfig)
@@ -259,6 +272,7 @@ class Config(_Section):
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     evidence: EvidenceConfig = Field(default_factory=EvidenceConfig)
     wiki: WikiConfig = Field(default_factory=WikiConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
     lens: dict[str, LensConfig] = Field(default_factory=dict)
 
 
@@ -395,6 +409,8 @@ def _apply_pump_env(raw: dict[str, Any]) -> None:
         raw.setdefault("tandem", {})["password"] = tandem_password
     if tandem_region := os.environ.get("TANDEM_REGION"):
         raw.setdefault("tandem", {})["region"] = tandem_region.lower()
+    if tandem_serial := os.environ.get("TANDEM_PUMP_SERIAL"):
+        raw.setdefault("tandem", {})["pump_serial"] = tandem_serial.strip()
     if carelink_username := os.environ.get("CARELINK_USERNAME"):
         raw.setdefault("carelink", {})["username"] = carelink_username
     if carelink_password := os.environ.get("CARELINK_PASSWORD"):
@@ -445,6 +461,7 @@ ENV_OVERRIDES: dict[tuple[str, str], str] = {
     ("tandem", "email"): "TANDEM_EMAIL",
     ("tandem", "password"): "TANDEM_PASSWORD",
     ("tandem", "region"): "TANDEM_REGION",
+    ("tandem", "pump_serial"): "TANDEM_PUMP_SERIAL",
     ("carelink", "username"): "CARELINK_USERNAME",
     ("carelink", "password"): "CARELINK_PASSWORD",
     ("carelink", "country"): "CARELINK_COUNTRY",

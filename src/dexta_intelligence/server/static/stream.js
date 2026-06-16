@@ -82,11 +82,77 @@
     }
   }
 
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function inlineMarkdown(text) {
+    let out = escapeHtml(text);
+    out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+    out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    out = out.replace(/(?<![*\w])\*([^*]+)\*(?![*\w])/g, "<em>$1</em>");
+    return out;
+  }
+
+  /** Safe subset renderer — mirrors server ``markdown_to_html`` enough for chat. */
+  function renderMarkdown(md) {
+    const lines = String(md || "").replace(/\r\n/g, "\n").split("\n");
+    const out = [];
+    let inList = false;
+    function closeList() {
+      if (inList) {
+        out.push("</ul>");
+        inList = false;
+      }
+    }
+    for (const raw of lines) {
+      const line = raw.trimEnd();
+      if (!line.trim()) {
+        closeList();
+        continue;
+      }
+      const heading = line.match(/^(#{1,6})\s+(.*)$/);
+      if (heading) {
+        closeList();
+        const level = heading[1].length;
+        out.push("<h" + level + ">" + inlineMarkdown(heading[2]) + "</h" + level + ">");
+        continue;
+      }
+      const bullet = line.match(/^\s*-\s+(.*)$/);
+      if (bullet) {
+        if (!inList) {
+          out.push("<ul>");
+          inList = true;
+        }
+        out.push("<li>" + inlineMarkdown(bullet[1]) + "</li>");
+        continue;
+      }
+      closeList();
+      out.push("<p>" + inlineMarkdown(line.trim()) + "</p>");
+    }
+    closeList();
+    return out.join("\n");
+  }
+
+  function setProseHtml(node, payload) {
+    if (payload && payload.html) {
+      node.innerHTML = payload.html;
+    } else if (payload && payload.text) {
+      node.innerHTML = renderMarkdown(payload.text);
+    } else {
+      node.textContent = "(no answer produced)";
+    }
+  }
+
   function addAnswer(view, payload) {
     view.status.remove();
     const answer = el("div", "answer-body");
     const text = el("div", "prose");
-    text.textContent = payload.text || "(no answer produced)";
+    setProseHtml(text, payload);
     answer.appendChild(text);
     if (payload.faithful === false) {
       answer.appendChild(el("p", "answer-warn small", "Not all claims could be traced to evidence."));
@@ -160,6 +226,43 @@
     };
   }
 
+  // Restore this tab's conversation when returning to the chat page. The server
+  // keeps per-session turns in memory; we re-render the completed Q&A pairs so
+  // navigating away and back does not lose the thread. (An in-flight ask still
+  // ends when you leave the page — only finished turns are restored.)
+  function renderHistoryTurn(question, turn) {
+    const run = el("article", "card run");
+    run.appendChild(el("p", "qline muted", question));
+    const answer = el("div", "answer-body");
+    const prose = el("div", "prose");
+    setProseHtml(prose, turn);
+    answer.appendChild(prose);
+    run.appendChild(answer);
+    root.appendChild(run);
+  }
+
+  function loadHistory() {
+    fetch("/api/history?sid=" + encodeURIComponent(sid))
+      .then(function (r) {
+        return r.ok ? r.json() : null;
+      })
+      .then(function (data) {
+        if (!data || !data.turns || !data.turns.length) return;
+        let pendingQ = null;
+        for (const t of data.turns) {
+          if (t.role === "user") pendingQ = t.content;
+          else if (t.role === "assistant") {
+            renderHistoryTurn(pendingQ || "", t);
+            pendingQ = null;
+          }
+        }
+        if (root.lastElementChild) {
+          root.lastElementChild.scrollIntoView({ block: "nearest" });
+        }
+      })
+      .catch(function () {});
+  }
+
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     const q = input.value.trim();
@@ -167,4 +270,6 @@
     input.value = "";
     ask(q);
   });
+
+  loadHistory();
 })();

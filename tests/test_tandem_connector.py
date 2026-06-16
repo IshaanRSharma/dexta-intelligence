@@ -19,13 +19,50 @@ import pytest
 from dexta_intelligence.config import TandemConfig
 from dexta_intelligence.connectors.base import Connector, RealtimeConnector
 from dexta_intelligence.connectors.tandem import (
+    PROFILE_SOURCE_ID,
     TandemConnector,
     basal_to_event,
     bolus_to_events,
+    format_insulin_profile,
 )
 from dexta_intelligence.models import InsulinKind
 
 CONFIG = TandemConfig(email="user@example.com", password="hunter2", region="us")
+
+_SAMPLE_PUMP_SETTINGS: dict[str, Any] = {
+    "profiles": {
+        "activeIdp": 1,
+        "profile": [
+            {
+                "name": "Weekday",
+                "idp": 1,
+                "insulinDuration": 300,
+                "maxBolus": 5000,
+                "carbEntry": 1,
+                "tDependentSegs": [
+                    {
+                        "startTime": 0,
+                        "basalRate": 800,
+                        "isf": 50,
+                        "carbRatio": 10000,
+                        "targetBg": 100,
+                    },
+                    {
+                        "startTime": 420,
+                        "basalRate": 900,
+                        "isf": 45,
+                        "carbRatio": 9000,
+                        "targetBg": 110,
+                    },
+                ],
+            }
+        ],
+    },
+    "cgmSettings": {
+        "highGlucoseAlert": {"mgPerDl": 250, "enabled": 1, "duration": 60, "status": 0},
+        "lowGlucoseAlert": {"mgPerDl": 70, "enabled": 1, "duration": 15, "status": 0},
+    },
+}
 
 # tconnectsync formats device-local times with an offset; "-04:00" stands in.
 _TZ = timezone(timedelta(hours=-4))
@@ -199,35 +236,140 @@ class TestBasalToEvent:
 
 
 @dataclass
-class _StubControlIQ:
-    timeline: dict[str, Any]
+class _StubTandemSource:
+    pumps: list[dict[str, Any]]
+    events: list[Any] | None = None
     raise_on_call: Exception | None = None
-    calls: list[tuple[str, str]] | None = None
+    calls: list[tuple[str, ...]] | None = None
 
-    def therapy_timeline(self, start_date: str, end_date: str) -> dict[str, Any]:
-        if self.calls is not None:
-            self.calls.append((start_date, end_date))
+    def pump_event_metadata(self) -> list[dict[str, Any]]:
         if self.raise_on_call is not None:
             raise self.raise_on_call
-        return self.timeline
+        return self.pumps
+
+    def pump_events(
+        self,
+        tconnect_device_id: str,
+        min_date: str | None = None,
+        max_date: str | None = None,
+        *,
+        fetch_all_event_types: bool = False,
+    ) -> list[Any]:
+        if self.calls is not None:
+            self.calls.append(("pump_events", tconnect_device_id, min_date, max_date))
+        if self.raise_on_call is not None:
+            raise self.raise_on_call
+        return list(self.events or [])
+
+
+@dataclass
+class _StubSourceBolusCompleted:
+    bolusid: int
+    insulindelivered: float
+    eventTimestamp: datetime
+    seqNum: int = 1
+
+
+@dataclass
+class _StubSourceBolusRequested1:
+    bolusid: int
+    carbamount: int
+    eventTimestamp: datetime
+    seqNum: int = 2
+    BG: int = 0
+
+
+@dataclass
+class _StubBasalDelivery:
+    commandedRateSourceRaw: int
+    commandedRate: int
+    eventTimestamp: datetime
+    seqNum: int = 3
+    profileBasalRate: int = 0
+    algorithmRate: int = 0
+    tempRate: int = 0
+
+
+@dataclass
+class _StubPumpingSuspended:
+    eventTimestamp: datetime
+    seqNum: int = 4
+    rpatimeout: int | None = None
+
+
+def _source_events_from_fixtures(
+    boluses: list[_StubBolus] | None,
+    basals: list[dict[str, Any]] | None,
+) -> list[Any]:
+    events: list[Any] = []
+    bid = 1
+    for bolus in boluses or []:
+        ts = datetime.fromisoformat(bolus.completion_time or bolus.request_time)
+        carbs = int(float(bolus.carbs or 0))
+        if carbs > 0:
+            events.append(
+                _StubSourceBolusRequested1(bolusid=bid, carbamount=carbs, eventTimestamp=ts)
+            )
+        units = float(bolus.insulin or 0)
+        if units > 0:
+            events.append(
+                _StubSourceBolusCompleted(
+                    bolusid=bid, insulindelivered=units, eventTimestamp=ts, seqNum=bid * 10
+                )
+            )
+        bid += 1
+    source_map = {"Profile": 1, "TempRate": 2, "Algorithm": 3}
+    for basal in basals or []:
+        ts = datetime.fromisoformat(str(basal["time"]))
+        delivery_type = str(basal.get("delivery_type", ""))
+        if delivery_type == "Suspension":
+            events.append(
+                _StubPumpingSuspended(
+                    eventTimestamp=ts,
+                    rpatimeout=int(basal["duration_mins"]) if basal.get("duration_mins") else None,
+                )
+            )
+            continue
+        rate = float(basal.get("basal_rate", 1.0))
+        events.append(
+            _StubBasalDelivery(
+                commandedRateSourceRaw=source_map.get(delivery_type, 2),
+                commandedRate=int(rate * 1000),
+                eventTimestamp=ts,
+            )
+        )
+    return sorted(events, key=lambda e: e.eventTimestamp)
 
 
 @dataclass
 class _StubTConnectClient:
     """Stands in for tconnectsync's ``TConnectApi``."""
 
-    controliq: _StubControlIQ
+    tandemsource: _StubTandemSource
 
 
 def _client(
     *,
     bolus: list[_StubBolus] | None = None,
     basal: list[dict[str, Any]] | None = None,
+    pumps: list[dict[str, Any]] | None = None,
     raise_on_call: Exception | None = None,
 ) -> _StubTConnectClient:
-    timeline: dict[str, Any] = {"bolus": bolus or [], "basal": basal or []}
+    now = datetime.now(tz=UTC)
+    default_pumps = pumps if pumps is not None else [
+        {
+            "serialNumber": "12345678",
+            "tconnectDeviceId": "dev-1",
+            "maxDateWithEvents": now.isoformat(),
+            "lastUpload": {"settings": _SAMPLE_PUMP_SETTINGS},
+        }
+    ]
     return _StubTConnectClient(
-        controliq=_StubControlIQ(timeline=timeline, raise_on_call=raise_on_call, calls=[])
+        tandemsource=_StubTandemSource(
+            pumps=default_pumps,
+            events=_source_events_from_fixtures(bolus, basal),
+            raise_on_call=raise_on_call,
+        ),
     )
 
 
@@ -249,24 +391,47 @@ class TestTandemConnector:
 
     def test_check_ok_reports_latest_event(self) -> None:
         ts = datetime.now(tz=UTC) - timedelta(hours=2)
-        client = _client(bolus=[_bolus(insulin="3", completion=ts)])
+        client = _client(
+            pumps=[{"serialNumber": "12345678", "maxDateWithEvents": ts.isoformat()}]
+        )
         report = _connector(client).check()
         assert report.ok is True
         assert report.source == "tandem"
-        assert "session" in report.detail
+        assert "Tandem Source connected" in report.detail
         assert report.latest_data_ts == ts
 
     def test_check_ok_without_data(self) -> None:
-        report = _connector(_client()).check()
+        report = _connector(_client(pumps=[{"serialNumber": "12345678"}])).check()
         assert report.ok is True
         assert report.latest_data_ts is None
 
+    def test_check_no_pumps_is_not_ok(self) -> None:
+        report = _connector(_client(pumps=[])).check()
+        assert report.ok is False
+        assert "No pumps found" in report.detail
+
     def test_check_auth_failure_is_not_ok(self) -> None:
         client = _client(raise_on_call=Exception("Invalid login credentials"))
-        report = _connector(client).check()
+        report = _connector(client).check(timeout_s=5)
         assert report.ok is False
         assert report.source == "tandem"
         assert "Invalid login credentials" in report.detail
+
+    def test_check_timeout(self) -> None:
+        class _SlowTandemSource:
+            def pump_event_metadata(self) -> list[dict[str, Any]]:
+                import time  # noqa: PLC0415
+
+                time.sleep(2)
+                return []
+
+            def pump_events(self, *_args: object, **_kwargs: object) -> list[Any]:
+                return []
+
+        slow = _StubTConnectClient(tandemsource=_SlowTandemSource())  # type: ignore[arg-type]
+        report = _connector(slow).check(timeout_s=0.2)
+        assert report.ok is False
+        assert "did not respond" in report.detail
 
     # -- pull ------------------------------------------------------------------
 
@@ -296,8 +461,25 @@ class TestTandemConnector:
         assert len(batch.meals) == 1
         assert batch.meals[0].carbs_g == 40.0
         assert all(r.source == "tandem" for r in batch.raw)
-        # one raw per emitted event: 2 bolus units + 1 meal + 2 basal = 5
-        assert len(batch.raw) == 5
+        # one raw per emitted event + profile snapshot
+        assert len(batch.raw) == 6
+        profile = next(r for r in batch.raw if r.source_id == PROFILE_SOURCE_ID)
+        assert profile.payload["active_profile"] == "Weekday"
+        assert profile.payload["profiles"][0]["segments"][0]["basal_u_hr"] == 0.8
+
+    def test_format_insulin_profile_converts_milliunits(self) -> None:
+        ts = datetime(2026, 6, 5, tzinfo=UTC)
+        profile = format_insulin_profile(
+            _SAMPLE_PUMP_SETTINGS,
+            pump_serial="923983",
+            as_of=ts,
+        )
+        assert profile["active_profile"] == "Weekday"
+        assert profile["pump_serial"] == "923983"
+        assert profile["profiles"][0]["dia_hr"] == 5.0
+        assert profile["profiles"][0]["segments"][1]["time"] == "07:00"
+        assert profile["profiles"][0]["segments"][1]["carb_ratio"] == 9.0
+        assert profile["cgm_alerts"]["high_mg_dl"] == 250
 
     def test_pull_source_ids_stable_and_distinct(self) -> None:
         now = datetime.now(tz=UTC)
@@ -342,15 +524,9 @@ class TestTandemConnector:
 
     def test_pull_accepts_nested_basal_events(self) -> None:
         now = datetime.now(tz=UTC)
-        nested = {
-            "bolus": [],
-            "basal": {
-                "events": [
-                    _basal(delivery_type="Profile", time=now - timedelta(hours=1), basal_rate=0.7)
-                ]
-            },
-        }
-        client = _StubTConnectClient(controliq=_StubControlIQ(timeline=nested, calls=[]))
+        client = _client(
+            basal=[_basal(delivery_type="Profile", time=now - timedelta(hours=1), basal_rate=0.7)]
+        )
         batch = _connector(client).pull(now - timedelta(days=1))
         assert len(batch.insulin) == 1
         assert batch.insulin[0].kind == InsulinKind.BASAL
@@ -363,7 +539,7 @@ class TestTandemConnector:
         assert all(r.source_ts.tzinfo == UTC for r in batch.raw)
 
     def test_pull_empty_timeline(self) -> None:
-        batch = _connector(_client()).pull(datetime.now(tz=UTC) - timedelta(days=1))
+        batch = _connector(_client(pumps=[])).pull(datetime.now(tz=UTC) - timedelta(days=1))
         assert batch.insulin == []
         assert batch.meals == []
         assert batch.raw == []

@@ -230,6 +230,9 @@ def _inspect_treatments(
         limitations.append("no carb entries logged anywhere in the record")
     if caps.has_insulin:
         boluses = step("get_boluses", {}, toolkit.get_boluses())
+        gap = toolkit._treatment_gap_note()
+        if gap:
+            limitations.append(gap)
         bolus_delay = _delay_of_nearest_bolus(boluses, ts)
         if bolus_delay is not None:
             evidence.append(f"Bolus: {bolus_delay:g} min after meal entry")
@@ -244,6 +247,7 @@ def _inspect_treatments(
         )
     else:
         limitations.append(NO_TREATMENT_DISCLAIMER)
+        limitations.append("Run Sync now in Settings if Tandem/Nightscout is connected.")
     if caps.has_meals:
         cob = step("get_cob", {"timestamp": ts.isoformat()}, toolkit.get_cob(ts.isoformat()))
         if cob.get("cob_g"):
@@ -278,6 +282,13 @@ def _attribute(  # noqa: PLR0911 — one return per allowed contributor pattern
     comparator = " than basal drift" if basal_stable else ""
     n_carbs = carbs.get("n_entries", 0)
     n_boluses = boluses.get("n_boluses", 0)
+    if boluses.get("note", "").startswith("pump/insulin data in dexta ends"):
+        return (
+            "Glucose rose in this window, but pump/insulin data in dexta does not cover it — "
+            "upload recent pump history to Tandem Source and Sync now before inferring "
+            "bolus/meal causes.",
+            False,
+        )
     if not basal_stable:
         return (
             "The window includes temp-basal/suspend activity — the pattern is "

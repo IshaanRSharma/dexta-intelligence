@@ -10,6 +10,7 @@ import pytest
 from dexta_intelligence.connectors.base import Connector, HealthReport, NormalizedBatch
 from dexta_intelligence.models import (
     ActivityEvent,
+    ChatTurn,
     CoverageStats,
     DeviceEvent,
     Finding,
@@ -74,6 +75,7 @@ class FakeStore:
         self.hypotheses: list[Hypothesis] = []
         self.goals: list[Goal] = []
         self.goal_checkpoints: list[GoalCheckpoint] = []
+        self.chat_turns: list[ChatTurn] = []
 
     def migrate(self) -> None:
         return None
@@ -93,6 +95,18 @@ class FakeStore:
                 self._next_raw_id += 1
                 self.raw_ids[key] = self._next_raw_id
         return {e.source_id: self.raw_ids[(e.source, e.source_id)] for e in events}
+
+    def replace_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
+        for event in events:
+            key = (event.source, event.source_id)
+            if key not in self.raw_ids:
+                self._next_raw_id += 1
+                self.raw_ids[key] = self._next_raw_id
+            self.raw[key] = event
+        return {e.source_id: self.raw_ids[(e.source, e.source_id)] for e in events}
+
+    def get_raw_event(self, source: str, source_id: str) -> RawEvent | None:
+        return self.raw.get((source, source_id))
 
     def get_watermark(self, source: str) -> datetime | None:
         stamps = [e.source_ts for e in self.raw.values() if e.source == source]
@@ -256,6 +270,14 @@ class FakeStore:
 
     def get_goal_checkpoints(self, goal_id: int) -> list[GoalCheckpoint]:
         return [c for c in self.goal_checkpoints if c.goal_id == goal_id]
+
+    def append_chat_turn(self, turn: ChatTurn) -> int:
+        self.chat_turns.append(turn)
+        return len(self.chat_turns)
+
+    def get_chat_turns(self, session_id: str, *, limit: int = 50) -> list[ChatTurn]:
+        turns = [t for t in self.chat_turns if t.session_id == session_id]
+        return turns[-limit:]
 
 
 @dataclass

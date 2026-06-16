@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.models import (
     ActivityEvent,
+    ChatTurn,
     CoverageStats,
     Finding,
     FindingStats,
@@ -60,6 +61,7 @@ from dexta_intelligence.models import (
     InsulinKind,
     MealEvent,
     PredictionEvent,
+    RawEvent,
     RecoveryEvent,
     Rollup,
     RollupPeriod,
@@ -67,11 +69,11 @@ from dexta_intelligence.models import (
 )
 
 if TYPE_CHECKING:
-    from dexta_intelligence.models import DeviceEvent, RawEvent
+    from dexta_intelligence.models import DeviceEvent
 
 __all__ = ["SQLiteStore"]
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SECONDS_PER_DAY = 86400.0
 _CGM_SLOT_SECONDS = 300.0  # expected 5-minute CGM cadence
@@ -237,6 +239,15 @@ CREATE TABLE IF NOT EXISTS goal_checkpoints (
     note TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_goal_checkpoints_goal ON goal_checkpoints (goal_id, ts);
+
+CREATE TABLE IF NOT EXISTS chat_turns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    ts TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns (session_id, id);
 """
 
 
@@ -336,6 +347,37 @@ class SQLiteStore:
                 rows,
             )
         return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def replace_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
+        if not events:
+            return {}
+        rows = [
+            (e.source, e.source_id, _dt_to_text(e.source_ts), json.dumps(e.payload))
+            for e in events
+        ]
+        with self._conn:
+            self._conn.executemany(
+                "INSERT INTO raw_events (source, source_id, source_ts, payload) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(source, source_id) DO UPDATE SET "
+                "source_ts = excluded.source_ts, payload = excluded.payload",
+                rows,
+            )
+        return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def get_raw_event(self, source: str, source_id: str) -> RawEvent | None:
+        row = self._conn.execute(
+            "SELECT source, source_id, source_ts, payload FROM raw_events "
+            "WHERE source = ? AND source_id = ?",
+            (source, source_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return RawEvent(
+            source=row[0],
+            source_id=row[1],
+            source_ts=_text_to_dt(row[2]),
+            payload=json.loads(row[3]),
+        )
 
     def existing_raw_ids(self, events: list[RawEvent]) -> dict[str, int]:
         if not events:
@@ -894,6 +936,30 @@ class SQLiteStore:
                 id=r[0], goal_id=r[1], ts=_text_to_dt(r[2]), metric_value=r[3], note=r[4]
             )
             for r in cursor.fetchall()
+        ]
+
+    # ── chat history ─────────────────────────────────────────────────────────
+
+    def append_chat_turn(self, turn: ChatTurn) -> int:
+        with self._conn:
+            cursor = self._conn.execute(
+                "INSERT INTO chat_turns (session_id, role, content, ts) VALUES (?, ?, ?, ?)",
+                (turn.session_id, turn.role, turn.content, _dt_to_text(turn.ts)),
+            )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def get_chat_turns(self, session_id: str, *, limit: int = 50) -> list[ChatTurn]:
+        cursor = self._conn.execute(
+            "SELECT id, session_id, role, content, ts FROM chat_turns "
+            "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+            (session_id, limit),
+        )
+        rows = cursor.fetchall()
+        rows.reverse()  # newest-N fetched DESC, return chronological (oldest→newest)
+        return [
+            ChatTurn(id=r[0], session_id=r[1], role=r[2], content=r[3], ts=_text_to_dt(r[4]))
+            for r in rows
         ]
 
     # ── internals ────────────────────────────────────────────────────────────

@@ -47,9 +47,9 @@ INVESTIGATION_DOCTRINE = """An INVESTIGATION is a line of inquiry you COMPOSE to
 defensible conclusion — never a single tool call. Its shape: orient (list_segments) → locate \
 and narrow (set_window, find_spikes, zoom_event) → inspect treatment context (get_carb_entries, \
 get_boluses, get_iob, get_cob, get_basal_timeline) → compare against history \
-(find_similar_events, tod_compare, groupby_compare, basal_overnight, meal_response, \
-correction_outcome) → conclude with the most consistent contributor, the evidence behind it, \
-and what you could not check.
+(find_similar_events; tod_compare / groupby_compare / basal_overnight only on windows with \
+enough days — never on a single-day set_window) → conclude with the most consistent contributor, \
+the evidence behind it, and what you could not check.
 
 There is NO fixed menu of investigations — you BUILD the one the question needs from these \
 instruments and pivot as the evidence directs. For a few common cases a certified shortcut \
@@ -146,7 +146,7 @@ class OrchestratorAgent:
     """
 
     model: BaseChatModel
-    max_steps: int = 8
+    max_steps: int = 12
     target_low: int = 70
     target_high: int = 180
 

@@ -69,6 +69,10 @@ DEFAULT_LOOKBACK = timedelta(days=30)
 #: storage makes the re-pull free.
 OVERLAP_MARGIN = timedelta(minutes=15)
 
+#: Raw ``source_id`` values that are singleton snapshots — upserted with
+#: replace-on-conflict so each sync refreshes the payload.
+_SNAPSHOT_RAW_IDS = frozenset({"tandem:profile:active"})
+
 
 @dataclass(frozen=True, slots=True)
 class SyncReport:
@@ -131,8 +135,12 @@ def sync(
     since = watermark - overlap if watermark is not None else until - default_lookback
 
     batch = connector.pull(since)
-    existing_before = store.existing_raw_ids(batch.raw)
-    id_map = store.upsert_raw_events(batch.raw)
+    snapshot_raw = [r for r in batch.raw if r.source_id in _SNAPSHOT_RAW_IDS]
+    event_raw = [r for r in batch.raw if r.source_id not in _SNAPSHOT_RAW_IDS]
+    existing_before = store.existing_raw_ids(event_raw)
+    id_map = store.upsert_raw_events(event_raw)
+    if snapshot_raw:
+        id_map.update(store.replace_raw_events(snapshot_raw))
     raw_new = sum(1 for sid in id_map if sid not in existing_before)
 
     ts_to_raw_id = _unambiguous_ts_index(batch.raw, id_map)

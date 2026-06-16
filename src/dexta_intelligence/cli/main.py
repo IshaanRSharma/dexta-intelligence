@@ -181,6 +181,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=8787,
         help="Port to listen on (default: 8787)",
     )
+    serve_p.add_argument(
+        "--sync-every",
+        type=int,
+        default=None,
+        metavar="MIN",
+        help="Re-sync data sources every MIN minutes in the background "
+        "(default: the [server] auto_sync_minutes config, or off)",
+    )
 
     return parser
 
@@ -320,6 +328,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: PLR0911, PLR0912
             host=args.host,
             port=args.port,
             config_path=args.config,
+            sync_every=args.sync_every,
         )
 
     if args.command == "upload":

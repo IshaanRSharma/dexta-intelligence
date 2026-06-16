@@ -102,10 +102,13 @@ def _finish(
     tools_used = tuple(step.name for step in result.steps)
     trace = tuple(render_trace(result.steps))
     if not result.answer:
-        fallback = {
-            "model_error": "The language model is unavailable right now.",
-            "max_steps": "I ran out of reasoning steps before reaching a confident answer.",
-        }.get(result.stopped_reason, "I could not produce an answer.")
+        if result.stopped_reason == "model_error" and result.error_detail:
+            fallback = result.error_detail
+        else:
+            fallback = {
+                "model_error": "The language model is unavailable right now.",
+                "max_steps": "I ran out of reasoning steps before reaching a confident answer.",
+            }.get(result.stopped_reason, "I could not produce an answer.")
         return ChatAnswer(
             fallback, tools_used, faithful=True, stopped_reason=result.stopped_reason, trace=trace
         )

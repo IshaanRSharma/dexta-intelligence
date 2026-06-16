@@ -5,6 +5,44 @@
   <h1>Goals</h1>
   <p class="page-sub">Track what you want to improve — progress arcs update as the system ticks.</p>
 </div>
+
+{% if saved %}<div class="flash">Goal added.</div>{% endif %}
+{% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+<article class="card goal-add">
+  <h2>New goal</h2>
+  <form method="post" action="/goals" class="settings-form">
+    <div class="fields">
+      <div class="field">
+        <label class="field-label" for="goal-statement">What do you want to improve?</label>
+        <input id="goal-statement" name="statement" type="text" required
+               placeholder="e.g. reduce my overnight lows" autocomplete="off" />
+        <p class="field-hint">Plain language is fine — dexta picks a measurable metric and investigation plan.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="goal-target">Target <span class="field-opt">optional</span></label>
+        <input id="goal-target" name="target" type="number" step="any"
+               placeholder="e.g. 5 for 5% overnight below range" autocomplete="off" />
+        <p class="field-hint">When set, the goal auto-marks achieved once the metric crosses it.</p>
+      </div>
+    </div>
+    <div class="card-actions">
+      <button type="submit" id="goal-submit">Add goal</button>
+    </div>
+  </form>
+</article>
+<script>
+(function () {
+  const form = document.querySelector(".goal-add form");
+  const btn = document.getElementById("goal-submit");
+  if (!form || !btn) return;
+  form.addEventListener("submit", function () {
+    btn.disabled = true;
+    btn.textContent = "Adding…";
+  });
+})();
+</script>
+
 {% if cards %}
 <div class="cards">
   {% for g in cards %}
@@ -23,16 +61,19 @@
         {% if g.latest_value is not none %}<strong>{{ "%.1f"|format(g.latest_value) }}</strong> · {% endif %}{{ g.latest_note }}
       </p>
     {% else %}
-      <p class="muted">No checkpoints yet — they accrue as the background agent ticks.</p>
+      <p class="muted">No checkpoints yet — run <code>dexta goals tick</code> or <code>dexta daemon</code> to advance.</p>
+    {% endif %}
+    {% if g.status == 'active' %}
+    <form method="post" action="/goals/{{ g.id }}/abandon" class="goal-abandon">
+      <button type="submit" class="btn-secondary btn-sm">Remove</button>
+    </form>
     {% endif %}
   </article>
   {% endfor %}
 </div>
 {% else %}
 <div class="empty">
-  <p>No goals yet.</p>
-  <p class="hint">Describe what you want to improve — e.g. “reduce my overnight lows”.</p>
-  <p class="hint small">Goal creation in the GUI is coming next. For now: <code>dexta goals add "…"</code></p>
+  <p>No goals yet — add one above.</p>
 </div>
 {% endif %}
 {% endblock %}

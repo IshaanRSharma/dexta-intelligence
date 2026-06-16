@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     from dexta_intelligence.models import (
         ActivityEvent,
+        ChatTurn,
         CoverageStats,
         DeviceEvent,
         Finding,
@@ -73,6 +74,18 @@ class StoragePort(Protocol):
         Bounded to the given keys (never a full-table scan). The sync workflow
         snapshots this before an upsert to count genuinely-new rows.
         """
+        ...
+
+    def replace_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
+        """Upsert raw events, overwriting ``source_ts`` and ``payload`` on conflict.
+
+        For singleton snapshots (e.g. the active pump insulin profile) whose
+        ``source_id`` is stable but whose contents change every sync.
+        """
+        ...
+
+    def get_raw_event(self, source: str, source_id: str) -> RawEvent | None:
+        """Fetch one raw row by ``(source, source_id)``, or ``None`` if absent."""
         ...
 
     def get_watermark(self, source: str) -> datetime | None:
@@ -136,3 +149,13 @@ class StoragePort(Protocol):
     def set_goal_status(self, goal_id: int, status: GoalStatus) -> None: ...
     def insert_goal_checkpoint(self, checkpoint: GoalCheckpoint) -> int: ...
     def get_goal_checkpoints(self, goal_id: int) -> list[GoalCheckpoint]: ...
+
+    # ── chat history ─────────────────────────────────────────────────────────
+
+    def append_chat_turn(self, turn: ChatTurn) -> int:
+        """Persist one chat turn; returns its id."""
+        ...
+
+    def get_chat_turns(self, session_id: str, *, limit: int = 50) -> list[ChatTurn]:
+        """Turns for a session, oldest→newest, capped to the most-recent ``limit``."""
+        ...

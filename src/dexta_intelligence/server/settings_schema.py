@@ -313,11 +313,138 @@ SETTINGS_PANELS: tuple[PanelSchema, ...] = (
         ),
     ),
     PanelSchema(
+        key="tandem",
+        title="Tandem",
+        subtitle="t:connect",
+        section="tandem",
+        connector="tandem",
+        tier="unofficial",
+        note="Direct t:slim X2 / Mobi access via the reverse-engineered t:connect cloud — "
+        "no Nightscout required.",
+        setup_flows=(("Tandem t:slim X2 / Mobi", "t:connect cloud", "tconnectsync", "Dexta"),),
+        setup_links=(
+            SetupLink("tconnectsync (library we use)", "https://github.com/jwoglom/tconnectsync"),
+            SetupLink("pumpx2 (Tandem BT protocol)", "https://github.com/jwoglom/pumpx2"),
+            SetupLink(
+                "Tandem Source",
+                "https://www.tandemdiabetes.com/products/software-apps/tandem-source",
+            ),
+        ),
+        fields=(
+            FieldSchema(
+                "email",
+                "Email",
+                kind=FieldKind.EMAIL,
+                placeholder="you@example.com",
+                autocomplete="email",
+            ),
+            FieldSchema(
+                "password",
+                "Password",
+                kind=FieldKind.PASSWORD,
+                secret=True,
+                autocomplete="current-password",
+            ),
+            FieldSchema(
+                "region",
+                "Region",
+                kind=FieldKind.SELECT,
+                options=(
+                    ("us", "Tandem Source (US)"),
+                    ("eu", "Tandem Source (EU)"),
+                ),
+                hint="Which Tandem Source region the account is registered against.",
+            ),
+            FieldSchema(
+                "pump_serial",
+                "Pump serial (optional)",
+                placeholder="12345678",
+                hint="Numeric serial on the pump label; leave blank to use the most "
+                "recently active pump.",
+            ),
+        ),
+    ),
+    PanelSchema(
+        key="carelink",
+        title="CareLink",
+        subtitle="Medtronic",
+        section="carelink",
+        connector="carelink",
+        tier="unofficial",
+        note="Medtronic pump + CGM via the CareLink cloud — direct, no Nightscout. Region-split "
+        "auth is fragile. The MiniMed 780G exposes no live unofficial API (CareLink export only).",
+        setup_flows=(("Medtronic pump + CGM", "CareLink cloud", "carelink connector", "Dexta"),),
+        setup_links=(
+            SetupLink("CareLink", "https://carelink.minimed.com/"),
+            SetupLink(
+                "carelink-python-client (community)",
+                "https://github.com/ondrej1024/carelink-python-client",
+            ),
+        ),
+        fields=(
+            FieldSchema(
+                "username",
+                "Username",
+                placeholder="CareLink username",
+                autocomplete="username",
+            ),
+            FieldSchema(
+                "password",
+                "Password",
+                kind=FieldKind.PASSWORD,
+                secret=True,
+                autocomplete="current-password",
+            ),
+            FieldSchema(
+                "country",
+                "Country",
+                placeholder="us",
+                hint="ISO country code the CareLink account is registered in.",
+            ),
+            FieldSchema(
+                "patient",
+                "Patient",
+                optional=True,
+                hint="Care-partner accounts: the patient username to pull; empty = your own "
+                "account.",
+            ),
+        ),
+    ),
+    PanelSchema(
+        key="dexcom_api",
+        title="Dexcom",
+        subtitle="official API",
+        section="dexcom_api",
+        connector="dexcom_api",
+        tier="official",
+        note="Dexcom's sanctioned OAuth /egvs API — ToS-clean, ~1-3h delayed. Complements Dexcom "
+        "Share for users who want the official integration.",
+        setup_links=(
+            SetupLink("Dexcom Developer", "https://developer.dexcom.com/"),
+            SetupLink(
+                "Dexcom v3 endpoints",
+                "https://developer.dexcom.com/docs/dexcomv3/endpoint-overview/",
+            ),
+        ),
+        fields=(
+            FieldSchema("access_token", "Access token", kind=FieldKind.PASSWORD, secret=True),
+            FieldSchema("refresh_token", "Refresh token", kind=FieldKind.PASSWORD, secret=True),
+            FieldSchema("client_id", "Client ID"),
+            FieldSchema("client_secret", "Client secret", kind=FieldKind.PASSWORD, secret=True),
+            FieldSchema(
+                "sandbox",
+                "Use sandbox host",
+                kind=FieldKind.CHECKBOX,
+                hint="Target Dexcom's sandbox host instead of production.",
+            ),
+        ),
+    ),
+    PanelSchema(
         key="llm",
         title="LLM provider",
         section="llm",
         category="intelligence",
-        note="API keys live in the environment, never in this file.",
+        note="API keys save to ~/.dexta/secrets.env (never in this file).",
         env_keys=(
             ("ANTHROPIC_API_KEY", "Anthropic models"),
             ("OPENROUTER_API_KEY", "OpenRouter (any hosted model)"),
@@ -338,8 +465,8 @@ SETTINGS_PANELS: tuple[PanelSchema, ...] = (
             FieldSchema(
                 "model",
                 "Model",
-                placeholder="claude-sonnet-4-20250514",
-                hint="Model slug for the provider (e.g. ``anthropic/claude-sonnet-4`` on "
+                placeholder="claude-sonnet-4-6",
+                hint="Model slug for the provider (e.g. ``anthropic/claude-sonnet-4-6`` on "
                 "OpenRouter).",
             ),
         ),
@@ -389,6 +516,12 @@ SETTINGS_OVERVIEW: tuple[dict[str, Any], ...] = (
         "title": "Direct",
         "examples": "Dexcom Share, LibreLinkUp, Tidepool JSON export",
         "panel": None,
+    },
+    {
+        "title": "Omnipod (DIY only)",
+        "examples": "Omnipod DASH via DIY Loop / AAPS → Nightscout; Omnipod 5 is a closed "
+        "ecosystem (no integration)",
+        "panel": "nightscout",
     },
 )
 

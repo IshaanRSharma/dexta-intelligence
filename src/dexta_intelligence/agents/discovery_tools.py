@@ -23,8 +23,20 @@ from dexta_intelligence.agents.reason import ToolSpec
 from dexta_intelligence.agents.time_tools import time_tool_specs
 from dexta_intelligence.analytics.oref import carbs_on_board, insulin_totals
 from dexta_intelligence.coldstart import CapabilitySet
+from dexta_intelligence.connectors.tandem import PROFILE_SOURCE_ID
 from dexta_intelligence.models import HypothesisStatus, InsulinKind
-from dexta_intelligence.stats.core import cohen_d, mean, stdev
+from dexta_intelligence.stats.core import (
+    cliffs_delta,
+    cohen_d,
+    mann_whitney_u,
+    mean,
+    pearson_r,
+    spearman_rho,
+    stdev,
+    student_t_two_sided_p,
+    summarize,
+    welch_t_test,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -45,6 +57,19 @@ _MIN_READINGS_PER_DAY = 12
 #: Minimum readings on each side of an event for a pre/post pair.
 _MIN_READINGS_PER_SIDE = 2
 _WEEKEND = (5, 6)
+#: Glucose Management Indicator (Bergenstal 2018): GMI% = 3.31 + 0.02392·mean(mg/dL).
+_GMI_INTERCEPT = 3.31
+_GMI_SLOPE = 0.02392
+
+
+def _percentile(sorted_vals: list[float], q: float) -> float:
+    """Linear-interpolation quantile of an already-sorted, non-empty list (q in 0-100)."""
+    if len(sorted_vals) == 1:
+        return sorted_vals[0]
+    pos = (q / 100.0) * (len(sorted_vals) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(sorted_vals) - 1)
+    return sorted_vals[lo] * (1.0 - (pos - lo)) + sorted_vals[hi] * (pos - lo)
 
 #: Default spike threshold (mg/dL) for find_spikes / find_similar_events.
 _SPIKE_THRESHOLD = 200.0
@@ -63,6 +88,7 @@ _TOOL_NEEDS: dict[str, str] = {
     "get_boluses": "insulin",
     "get_basal_timeline": "insulin",
     "get_iob": "insulin",
+    "get_insulin_profile": "insulin",
     "correction_outcome": "insulin",
     "get_carb_entries": "meals",
     "get_cob": "meals",
@@ -153,20 +179,25 @@ REQUIRED before claiming a likely cause for a spike/high/meal/correction):
     Insulin-on-board / carbs-on-board at an ISO datetime (computed, oref0
     curves, tier B — analysis context only, never dosing).
 
-16. find_spikes(threshold=200, top_n=10)
+16. get_insulin_profile()
+    Pump-reported basal/ISF/carb-ratio/target segments for the active profile
+    (and all stored profiles). Synced from Tandem on pull; tier B — analysis
+    context only, never dosing.
+
+17. find_spikes(threshold=200, top_n=10)
     Excursion peaks inside the ACTIVE window: [{ts, peak_mg_dl, duration_min}],
     largest first. Locates the spike when the user names a day but not a time.
 
-17. find_similar_events(timestamp, threshold=200)
+18. find_similar_events(timestamp, threshold=200)
     Recurrence over the WHOLE record: same-time-of-day events (carb entries
     when logged) with per-event peak, spiked flag, and bolus_delay_min →
     n_similar, n_spiking, mean bolus delays spiking vs not.
 
 CALENDAR TOOLS (always available — never compute dates in your head):
 
-18. get_current_time(timezone)   what "now"/"today" is, with weekday
-19. get_weekday(date)            weekday for any ISO date
-20. parse_relative_date(expression, timezone)
+19. get_current_time(timezone)   what "now"/"today" is, with weekday
+20. get_weekday(date)            weekday for any ISO date
+21. parse_relative_date(expression, timezone)
     "last Tuesday" / "yesterday" / "3 days ago" → concrete ISO date for
     set_window / zoom_event arguments.
 
@@ -247,6 +278,9 @@ class DiscoveryToolkit:
         self._bolus_ts = [i.ts for i in self._insulin if i.kind is InsulinKind.BOLUS]
         #: Nights touched by temp-basal / suspend events (excluded from drift when insulin exists).
         self._has_insulin = bool(self._insulin)
+        self._last_insulin_ts = self._insulin[-1].ts if self._insulin else None
+        self._last_meal_ts = self._meals[-1].ts if self._meals else None
+        self._last_glucose_ts = self._glucose_ts[-1] if self._glucose_ts else None
         self._basal_intervention_dates: set[date] = {
             self._ld(i.ts)
             for i in self._insulin
@@ -256,6 +290,13 @@ class DiscoveryToolkit:
             self._n_predictions = len(ctx.store.get_predictions(start, end))
         except (AttributeError, NotImplementedError):  # minimal/partial stores
             self._n_predictions = 0
+        self._insulin_profile: dict[str, Any] | None = None
+        try:
+            profile_raw = ctx.store.get_raw_event("tandem", PROFILE_SOURCE_ID)
+        except (AttributeError, NotImplementedError):
+            profile_raw = None
+        if profile_raw is not None:
+            self._insulin_profile = dict(profile_raw.payload)
 
     # ── local-time helpers (bucket in the patient's zone, slice the UTC arrays) ──
 
@@ -325,17 +366,45 @@ class DiscoveryToolkit:
 
     # ── context for the planner ──────────────────────────────────────────────
 
+    def _insulin_in_active_window(self) -> bool:
+        return any(self._active_start <= i.ts <= self._active_end for i in self._insulin)
+
+    def _treatment_gap_note(self) -> str | None:
+        """Explain when glucose spans the active window but pump data does not."""
+        if not self._has_insulin or self._last_insulin_ts is None:
+            return None
+        if self._insulin_in_active_window():
+            return None
+        if self._last_insulin_ts >= self._active_start:
+            return None
+        local = self._last_insulin_ts.astimezone(self._tz).strftime("%b %d %H:%M")
+        return (
+            f"pump/insulin data in dexta ends {local} — before this window. "
+            "CGM may be newer than Tandem uploads; open t:connect/Tandem Source on your "
+            "phone to upload recent pump history, then Sync now."
+        )
+
     def data_summary(self) -> str:
         """One block the planner reads before proposing hypotheses."""
         days = sorted(self._daily)
         span = f"{days[0].isoformat()} → {days[-1].isoformat()}" if days else "no data"
-        return (
-            f"- glucose days with enough readings: {len(self._daily)} ({span})\n"
-            f"- sleep-scored days: {len(self._sleep_score)}\n"
-            f"- activity events: {len(self._activity_ts)}"
-            f" · meals logged: {len(self._meal_ts)}"
-            f" · boluses logged: {len(self._bolus_ts)}"
-        )
+        lines = [
+            f"- glucose days with enough readings: {len(self._daily)} ({span})",
+            f"- sleep-scored days: {len(self._sleep_score)}",
+            (
+                f"- activity events: {len(self._activity_ts)}"
+                f" · meals logged: {len(self._meal_ts)}"
+                f" · boluses logged: {len(self._bolus_ts)}"
+            ),
+        ]
+        if self._last_glucose_ts and self._last_insulin_ts:
+            g = self._last_glucose_ts.astimezone(self._tz).strftime("%b %d %H:%M")
+            ins = self._last_insulin_ts.astimezone(self._tz).strftime("%b %d %H:%M")
+            lines.append(f"- latest glucose: {g} · latest pump/insulin: {ins}")
+        gap = self._treatment_gap_note()
+        if gap:
+            lines.append(f"- treatment gap: {gap}")
+        return "\n".join(lines)
 
     # ── dispatch ─────────────────────────────────────────────────────────────
 
@@ -396,8 +465,18 @@ class DiscoveryToolkit:
         group_b = tuple(series[d] for d in ordered if d not in in_a)
         return _two_group("groupby_compare", args, group_a, group_b, labels)
 
+    def _active_day_count(self) -> int:
+        lo, hi = self._ld(self._active_start), self._ld(self._active_end)
+        return (hi - lo).days + 1
+
     def _tod_compare(self, hours_a: tuple[int, int], hours_b: tuple[int, int]) -> ToolResult:
         args = {"hours_a": list(hours_a), "hours_b": list(hours_b)}
+        if self._active_day_count() < 2:
+            return _error(
+                "tod_compare",
+                args,
+                "need at least 2 days in the active window — widen with set_window first",
+            )
         group_a = self._daily_window_means(hours_a)
         group_b = self._daily_window_means(hours_b)
         labels = (f"{hours_a[0]:02d}-{hours_a[1]:02d}h", f"{hours_b[0]:02d}-{hours_b[1]:02d}h")
@@ -564,6 +643,131 @@ class DiscoveryToolkit:
         hi = bisect.bisect_right(self._glucose_ts, end)
         return self._glucose_vals[lo:hi]
 
+    def glucose_stats(
+        self, *, day: str = "", hours: tuple[int, int] | None = None
+    ) -> dict[str, Any]:
+        """Descriptive stats over a window — the answer to "what was my mean / SD /
+        variance / CV / TIR for <period>". Defaults to the ACTIVE window; ``day``
+        (ISO date) scopes to one local calendar day; ``hours`` = [start, end) filters
+        to a local time-of-day band. All bucketing is patient-local; never raises."""
+        if day:
+            try:
+                d = date.fromisoformat(day)
+            except ValueError:
+                return {"error": f"bad day {day!r}; expected an ISO date like 2026-06-15"}
+            start, end = self._day_bounds(d)
+            scope: dict[str, Any] = {"day": d.isoformat()}
+        else:
+            start, end = self._active_start, self._active_end
+            scope = {
+                "start": start.astimezone(self._tz).date().isoformat(),
+                "end": end.astimezone(self._tz).date().isoformat(),
+            }
+        lo = bisect.bisect_left(self._glucose_ts, start)
+        hi = bisect.bisect_right(self._glucose_ts, end)
+        ts_list = self._glucose_ts[lo:hi]
+        vals = self._glucose_vals[lo:hi]
+        if hours is not None:
+            h0, h1 = hours
+            vals = [v for ts, v in zip(ts_list, vals, strict=True) if h0 <= self._lh(ts) < h1]
+            scope["hours"] = [h0, h1]
+
+        n = len(vals)
+        if n == 0:
+            return {**scope, "n": 0, "note": "no readings in this window"}
+
+        s = summarize(vals)
+        ordered = sorted(vals)
+        lo_t, hi_t = self._target
+        out: dict[str, Any] = {
+            **scope,
+            "n": n,
+            "mean": round(s.mean, 1) if s.mean is not None else None,
+            "sd": round(s.sd, 1) if s.sd is not None else None,
+            "variance": round(s.sd**2, 1) if s.sd is not None else None,
+            "cv_pct": round(s.cv_pct, 1) if s.cv_pct is not None else None,
+            "median": round(s.median, 1) if s.median is not None else None,
+            "p10": round(_percentile(ordered, 10), 1),
+            "p25": round(_percentile(ordered, 25), 1),
+            "p75": round(_percentile(ordered, 75), 1),
+            "p90": round(_percentile(ordered, 90), 1),
+            "minimum": round(s.minimum, 1) if s.minimum is not None else None,
+            "maximum": round(s.maximum, 1) if s.maximum is not None else None,
+            "tir_pct": round(100.0 * sum(1 for v in vals if lo_t <= v <= hi_t) / n, 1),
+            "tbr_pct": round(100.0 * sum(1 for v in vals if v < lo_t) / n, 1),
+            "tar_pct": round(100.0 * sum(1 for v in vals if v > hi_t) / n, 1),
+            "tbr54_pct": round(100.0 * sum(1 for v in vals if v < 54) / n, 1),
+            "tar250_pct": round(100.0 * sum(1 for v in vals if v > 250) / n, 1),
+            "target_range": [lo_t, hi_t],
+        }
+        if s.mean is not None:
+            out["gmi_pct"] = round(_GMI_INTERCEPT + _GMI_SLOPE * s.mean, 1)
+        return out
+
+    # ── correlation ──────────────────────────────────────────────────────────
+
+    _CORRELATE_METRICS = ("mean_glucose", "tir", "tbr", "cv", "sleep_score")
+
+    def _per_day_metric(self, key: str) -> dict[date, float]:
+        """Per-day series of ``key`` over the ACTIVE window, keyed by local date."""
+        if key == "sleep_score":
+            lo, hi = self._ld(self._active_start), self._ld(self._active_end)
+            return {d: v for d, v in self._sleep_score.items() if lo <= d <= hi}
+        by_day: dict[date, list[float]] = {}
+        ts_list, vals_list = self._active_glucose()
+        for ts, val in zip(ts_list, vals_list, strict=True):
+            by_day.setdefault(self._ld(ts), []).append(val)
+        out: dict[date, float] = {}
+        for d, vals in by_day.items():
+            if len(vals) < _MIN_READINGS_PER_DAY:
+                continue
+            out[d] = self._daily_metric(key, vals)
+        return out
+
+    def correlate(self, x: str, y: str) -> dict[str, Any]:
+        """Correlate two per-day metrics across the ACTIVE window (inner-join on
+        local date). Supported keys: mean_glucose|tir|tbr|cv|sleep_score. Requires
+        n >= 4 paired days; never raises."""
+        for key in (x, y):
+            if key not in self._CORRELATE_METRICS:
+                return {"x": x, "y": y, "error": f"unknown metric {key!r}"}
+        sx, sy = self._per_day_metric(x), self._per_day_metric(y)
+        days = sorted(set(sx) & set(sy))
+        n = len(days)
+        if n < 4:
+            return {
+                "x": x,
+                "y": y,
+                "n": n,
+                "note": "fewer than 4 overlapping days — not enough to correlate",
+            }
+        xs = [sx[d] for d in days]
+        ys = [sy[d] for d in days]
+        r = pearson_r(xs, ys)
+        rho = spearman_rho(xs, ys)
+        if r is None or abs(r) >= 1.0 or n < 3:
+            p: float | None = 0.0 if r is not None and abs(r) >= 1.0 else None
+        else:
+            t = r * ((n - 2) / (1.0 - r * r)) ** 0.5
+            p = student_t_two_sided_p(t, n - 2)
+        if r is None:
+            direction = "none"
+        elif r > 0:
+            direction = "positive"
+        elif r < 0:
+            direction = "negative"
+        else:
+            direction = "none"
+        return {
+            "x": x,
+            "y": y,
+            "n": n,
+            "pearson_r": round(r, 3) if r is not None else None,
+            "spearman_rho": round(rho, 3) if rho is not None else None,
+            "p": round(p, 4) if p is not None else None,
+            "direction": direction,
+        }
+
     # ── insulin / meal instruments ───────────────────────────────────────────
 
     def _basal_overnight(self, hours: tuple[int, int]) -> ToolResult:
@@ -571,6 +775,13 @@ class DiscoveryToolkit:
         second half of the run. Nights touched by temp-basal/suspend are excluded
         when insulin data exists (overnight basal effect, not algorithm overrides)."""
         args = {"hours": list(hours)}
+        if self._active_day_count() < 4:
+            return _error(
+                "basal_overnight",
+                args,
+                "need at least 4 nights in the active window — widen with set_window "
+                "(e.g. 14+ days)",
+            )
         drift: list[tuple[date, float]] = []
         for night, vals in sorted(self._overnight_segments(hours).items()):
             if self._has_insulin and night in self._basal_intervention_dates:
@@ -660,12 +871,19 @@ class DiscoveryToolkit:
             if self._active_start <= m.ts <= self._active_end and m.carbs_g is not None
         ]
         if not meals:
-            return {
+            out: dict[str, Any] = {
                 "n_entries": 0,
                 "entries": [],
-                "note": "no carb entries in the active window — widen with set_window "
-                "or treat this as a possible missing-carb-entry pattern",
             }
+            gap = self._treatment_gap_note()
+            if gap:
+                out["note"] = gap
+            else:
+                out["note"] = (
+                    "no carb entries in the active window — widen with set_window "
+                    "or treat this as a possible missing-carb-entry pattern"
+                )
+            return out
         entries = [
             {
                 "ts": m.ts.isoformat(),
@@ -676,7 +894,7 @@ class DiscoveryToolkit:
             }
             for m in meals[:_MAX_LISTED_EVENTS]
         ]
-        out: dict[str, Any] = {
+        out = {
             "n_entries": len(meals),
             "total_carbs_g": round(sum(float(m.carbs_g or 0.0) for m in meals), 1),
             "entries": entries,
@@ -694,12 +912,19 @@ class DiscoveryToolkit:
             if i.kind is InsulinKind.BOLUS and self._active_start <= i.ts <= self._active_end
         ]
         if not boluses:
-            return {
+            out: dict[str, Any] = {
                 "n_boluses": 0,
                 "boluses": [],
-                "note": "no boluses in the active window — widen with set_window; "
-                "if a meal is present this may be a missed-bolus pattern",
             }
+            gap = self._treatment_gap_note()
+            if gap:
+                out["note"] = gap
+            else:
+                out["note"] = (
+                    "no boluses in the active window — widen with set_window; "
+                    "if a meal is present this may be a missed-bolus pattern"
+                )
+            return out
         rows: list[dict[str, Any]] = []
         for b in boluses[:_MAX_LISTED_EVENTS]:
             row: dict[str, Any] = {"ts": b.ts.isoformat()}
@@ -711,7 +936,7 @@ class DiscoveryToolkit:
             if delay is not None:
                 row["minutes_after_carb_entry"] = delay
             rows.append(row)
-        out: dict[str, Any] = {
+        out = {
             "n_boluses": len(boluses),
             "total_units": round(sum(float(b.units) for b in boluses if b.units is not None), 2),
             "boluses": rows,
@@ -752,11 +977,36 @@ class DiscoveryToolkit:
             "events": rows,
         }
         if not events:
-            out["note"] = (
+            gap = self._treatment_gap_note()
+            out["note"] = gap or (
                 "no basal records in the active window — basal context unavailable here"
             )
         if len(events) > _MAX_LISTED_EVENTS:
             out["note"] = f"showing first {_MAX_LISTED_EVENTS} of {len(events)}"
+        return out
+
+    def get_insulin_profile(self) -> dict[str, Any]:
+        """Pump-reported basal/ISF/carb-ratio/target segments (Tandem sync).
+
+        Tier B — analysis context only, never dosing."""
+        if self._insulin_profile is None:
+            return {
+                "error": "no insulin profile synced",
+                "note": (
+                    "Connect Tandem in Settings and Sync now — profile is captured "
+                    "from pump settings on each sync"
+                ),
+            }
+        active = next(
+            (p for p in self._insulin_profile.get("profiles") or [] if p.get("active")),
+            None,
+        )
+        out: dict[str, Any] = {
+            **self._insulin_profile,
+            "active_segments": (active or {}).get("segments") or [],
+            "tier": "B",
+            "method": "pump-reported settings from Tandem Source (sync snapshot)",
+        }
         return out
 
     def get_iob(self, timestamp_iso: str) -> dict[str, Any]:
@@ -1062,6 +1312,10 @@ def _two_group(
         return _error(tool, args, msg)
     mean_a, mean_b = mean(group_a), mean(group_b)
     d = cohen_d(group_a, group_b)
+    welch = welch_t_test(group_a, group_b)
+    mw = mann_whitney_u(group_a, group_b)
+    delta_c = cliffs_delta(group_a, group_b)
+    p_welch = round(welch.p_two_sided, 4) if welch is not None else None
     summary: dict[str, Any] = {
         "label_a": labels[0],
         "label_b": labels[1],
@@ -1072,6 +1326,13 @@ def _two_group(
         "delta": round(mean_a - mean_b, 1),
         "cohen_d": round(d, 3) if d is not None else None,
         "interpretation": _interpret(d),
+        "welch_t": round(welch.t, 3) if welch is not None else None,
+        "welch_df": round(welch.df, 1) if welch is not None else None,
+        "p_welch": p_welch,
+        "mann_whitney_p": round(mw.p_two_sided, 4) if mw is not None else None,
+        "rank_biserial": round(mw.rank_biserial, 3) if mw is not None else None,
+        "cliffs_delta": round(delta_c, 3) if delta_c is not None else None,
+        "significant": p_welch is not None and p_welch < 0.05,
     }
     return ToolResult(
         ok=True, tool=tool, args=args, summary=summary, group_a=group_a, group_b=group_b
@@ -1232,6 +1493,27 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             numbers["mean_value"] = result["mean_value"]
         return result, numbers
 
+    def glucose_stats(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        raw = args.get("hours")
+        hours = (
+            (int(raw[0]), int(raw[1]))
+            if isinstance(raw, (list, tuple)) and len(raw) == 2
+            else None
+        )
+        result = toolkit.glucose_stats(day=str(args.get("day", "")), hours=hours)
+        return result, _numbers(
+            result,
+            (
+                "n", "mean", "sd", "variance", "cv_pct", "median", "p10", "p25",
+                "p75", "p90", "minimum", "maximum", "tir_pct", "tbr_pct", "tar_pct",
+                "tbr54_pct", "tar250_pct", "gmi_pct",
+            ),
+        )
+
+    def correlate(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        result = toolkit.correlate(str(args.get("x", "")), str(args.get("y", "")))
+        return result, _numbers(result, ("n", "pearson_r", "spearman_rho", "p"))
+
     def coverage(_args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
         cov = ctx.store.coverage()
         numbers = {
@@ -1243,6 +1525,13 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             "n_activity": cov.n_activity,
         }
         out: dict[str, Any] = {"summary": toolkit.data_summary(), **numbers}
+        if toolkit._last_glucose_ts:
+            out["last_glucose_ts"] = toolkit._last_glucose_ts.isoformat()
+        if toolkit._last_insulin_ts:
+            out["last_insulin_ts"] = toolkit._last_insulin_ts.isoformat()
+        gap = toolkit._treatment_gap_note()
+        if gap:
+            out["treatment_gap"] = gap
         missing = toolkit.capabilities().missing_notes()
         if missing:
             out["unavailable"] = missing
@@ -1335,10 +1624,55 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             fn=daily_series,
         ),
         ToolSpec(
+            name="glucose_stats",
+            description=(
+                "Descriptive stats over one window: n, mean, SD, variance, CV, median, "
+                "p10/25/75/90, min, max, TIR/TBR/TAR %, GMI. Use this for any "
+                "'what was my mean/variance/SD/TIR/GMI for <period>' question — never "
+                "estimate these from a raw trace. Defaults to the ACTIVE window; pass "
+                "day (ISO date) for one local day and/or hours [start,end) for a "
+                "time-of-day band (evening=[17,24], overnight=[0,6], morning=[6,11])."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "day": {
+                        "type": "string",
+                        "description": "ISO date for one local day, e.g. 2026-06-15",
+                    },
+                    "hours": _HOURS_PAIR,
+                },
+            },
+            fn=glucose_stats,
+        ),
+        ToolSpec(
+            name="correlate",
+            description=(
+                "Correlate two per-day metrics across the active window "
+                "(Pearson + Spearman + p). metrics: mean_glucose|tir|tbr|cv|sleep_score."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "x": {
+                        "type": "string",
+                        "enum": ["mean_glucose", "tir", "tbr", "cv", "sleep_score"],
+                    },
+                    "y": {
+                        "type": "string",
+                        "enum": ["mean_glucose", "tir", "tbr", "cv", "sleep_score"],
+                    },
+                },
+                "required": ["x", "y"],
+            },
+            fn=correlate,
+        ),
+        ToolSpec(
             name="groupby_compare",
             description=(
                 "Compare a daily metric between two groups of days. "
-                "group_by: weekend|sleep_bucket|workout_day. target: mean_glucose|tir_pct."
+                "group_by: weekend|sleep_bucket|workout_day. target: mean_glucose|tir_pct. "
+                "Returns a p-value (p_welch) and effect sizes (cohen_d, cliffs_delta)."
             ),
             parameters={
                 "type": "object",
@@ -1357,7 +1691,8 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             name="tod_compare",
             description=(
                 "Compare mean glucose between two time-of-day windows. "
-                "hours_a/hours_b are [start,end) hours 0-24."
+                "hours_a/hours_b are [start,end) hours 0-24. "
+                "Returns a p-value (p_welch) and effect sizes (cohen_d, cliffs_delta)."
             ),
             parameters={
                 "type": "object",
@@ -1478,6 +1813,18 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
         result = toolkit.get_iob(str(args.get("timestamp", "")))
         return result, _numbers(result, ("iob_units", "n_recent_boluses"))
 
+    def get_insulin_profile(_args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        result = toolkit.get_insulin_profile()
+        active = next(
+            (p for p in result.get("profiles") or [] if p.get("active")),
+            None,
+        )
+        numbers = _numbers(result, ("pump_serial",))
+        if active:
+            numbers["active_dia_hr"] = active.get("dia_hr")
+            numbers["n_active_segments"] = len(active.get("segments") or [])
+        return result, numbers
+
     def get_cob(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
         result = toolkit.get_cob(str(args.get("timestamp", "")))
         return result, _numbers(result, ("cob_g", "absorbed_g", "n_carb_entries"))
@@ -1552,6 +1899,16 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
                 "required": ["timestamp"],
             },
             fn=get_iob,
+        ),
+        ToolSpec(
+            name="get_insulin_profile",
+            description=(
+                "Pump-reported basal/ISF/carb-ratio/target segments for the active "
+                "profile (and all stored profiles). Synced from Tandem; tier B — "
+                "analysis context only, never dosing."
+            ),
+            parameters={"type": "object", "properties": {}},
+            fn=get_insulin_profile,
         ),
         ToolSpec(
             name="get_cob",

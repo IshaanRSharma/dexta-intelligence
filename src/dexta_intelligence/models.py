@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 __all__ = [
     "ActivityEvent",
+    "ChatTurn",
     "CoverageStats",
     "DeviceEvent",
     "Finding",
@@ -347,6 +348,27 @@ class GoalCheckpoint(_FrozenModel):
     ts: datetime
     metric_value: float | None
     note: str
+    id: int | None = None
+
+    _utc = field_validator("ts")(_require_utc)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Chat — durable GUI conversation history
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class ChatTurn(_FrozenModel):
+    """One persisted message in a GUI chat session.
+
+    Durable so a conversation survives a server restart; ``session_id`` scopes a
+    conversation, ``role`` is the speaker (e.g. ``"user"`` / ``"assistant"``).
+    """
+
+    session_id: str
+    role: str
+    content: str
+    ts: datetime
     id: int | None = None
 
     _utc = field_validator("ts")(_require_utc)

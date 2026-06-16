@@ -23,12 +23,16 @@ from dexta_intelligence.cli._common import (
     _analysis_window,
     build_connectors,
     discovery_model,
+    is_carelink_configured,
+    is_dexcom_api_configured,
     is_dexcom_configured,
     is_libre_configured,
     is_nightscout_configured,
     is_oura_configured,
+    is_tandem_configured,
     is_tidepool_configured,
     is_whoop_configured,
+    model_for_role,
     open_sqlite_store,
 )
 from dexta_intelligence.coldstart import CAPABILITY_GATES, HARD_FLOOR_DAYS, ColdStartReport
@@ -40,7 +44,7 @@ from dexta_intelligence.config import (
     secrets_path_for,
 )
 from dexta_intelligence.connectors.base import HealthReport
-from dexta_intelligence.models import FindingStatus
+from dexta_intelligence.models import ChatTurn, FindingStatus
 from dexta_intelligence.server.render import markdown_to_html, sparkline_svg
 from dexta_intelligence.server.settings_render import field_to_view, panel_to_view
 from dexta_intelligence.server.settings_schema import (
@@ -58,11 +62,11 @@ from dexta_intelligence.server.settings_schema import (
 # types must live here at import time. They are an optional extra, so a missing
 # install degrades to ``None`` and ``create_app`` raises a friendly RuntimeError.
 try:
-    from fastapi import FastAPI, Form, HTTPException, Request
+    from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
     from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 except ModuleNotFoundError:  # pragma: no cover - exercised only without the extra
     FastAPI = Form = HTTPException = Request = HTMLResponse = RedirectResponse = None  # type: ignore[assignment,misc]
-    StreamingResponse = None  # type: ignore[assignment,misc]
+    StreamingResponse = File = UploadFile = None  # type: ignore[assignment,misc]
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -89,6 +93,9 @@ _SOURCE_CONFIGURED: dict[str, Callable[[Config], bool]] = {
     "whoop": is_whoop_configured,
     "oura": is_oura_configured,
     "tidepool": is_tidepool_configured,
+    "tandem": is_tandem_configured,
+    "carelink": is_carelink_configured,
+    "dexcom_api": is_dexcom_api_configured,
 }
 
 
@@ -131,11 +138,10 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     app = FastAPI(title="dexta", docs_url=None, redoc_url=None)
     app.state.config_path = settings_path
     app.state.bind_host = host
-    #: In-memory chat history per session id (localhost, single-user). Lets GUI
-    #: follow-ups carry conversational context across asks.
-    app.state.sessions = {}
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     templates = Jinja2Templates(directory=str(templates_dir))
+    _static_stamps = [f.stat().st_mtime for f in static_dir.iterdir() if f.is_file()]
+    templates.env.globals["static_version"] = str(int(max(_static_stamps, default=0)))
     templates.env.globals["nav_items"] = (
         ("/", "Dashboard"),
         ("/wiki", "Wiki"),
@@ -183,7 +189,11 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
 
-        active_findings = [f for f in findings if f.status == FindingStatus.ACTIVE]
+        active_findings = [
+            f
+            for f in findings
+            if f.status == FindingStatus.ACTIVE and f.kind not in _INTERNAL_FINDING_KINDS
+        ]
         graveyard = [
             f
             for f in findings
@@ -234,6 +244,36 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             flash = "analyze_fail"
         return RedirectResponse(f"/?flash={flash}", status_code=303)
 
+    @app.post("/actions/upload")
+    async def action_upload(file: UploadFile = File(...)) -> Any:  # noqa: B008 - FastAPI idiom
+        """Ingest a Dexcom Clarity / LibreView CSV export through the same sync
+        path as a live connector (format auto-detected; re-uploading is safe)."""
+        import tempfile  # noqa: PLC0415
+
+        from dexta_intelligence.connectors.csv_upload import CSVUploadConnector  # noqa: PLC0415
+        from dexta_intelligence.workflows.sync import sync  # noqa: PLC0415
+
+        data = await file.read()
+        if not data:
+            return RedirectResponse("/?flash=upload_empty", status_code=303)
+
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = Path(tmp.name)
+        store = store_opener(config, None)
+        try:
+            connector = CSVUploadConnector(
+                tmp_path, format="auto", tz=config.analysis.timezone
+            )
+            report = sync(connector, store)
+            flash = f"upload_ok:{report.inserted.get('glucose', 0)}"
+        except Exception:
+            flash = "upload_fail"
+        finally:
+            _close(store, store_opener)
+            tmp_path.unlink(missing_ok=True)
+        return RedirectResponse(f"/?flash={flash}", status_code=303)
+
     # ── wiki ──────────────────────────────────────────────────────────────────
 
     @app.get("/wiki", response_class=HTMLResponse)
@@ -252,22 +292,120 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         # sibling dir sharing the root's string prefix (or ``..``) can't escape.
         contained = md_path == root or md_path.is_relative_to(root)
         if not contained or not md_path.is_file():
-            return _render("wiki.html", request, "/wiki", body=None, slug=slug, root=str(root))
-        body = markdown_to_html(md_path.read_text(encoding="utf-8"))
-        body = _rewrite_wiki_links(body)
-        return _render("wiki.html", request, "/wiki", body=body, slug=slug, root=str(root))
+            return _render(
+                "wiki.html",
+                request,
+                "/wiki",
+                body=None,
+                slug=slug,
+                root=str(root),
+                nav=_wiki_nav(root, slug),
+            )
+        raw_md = md_path.read_text(encoding="utf-8")
+        body = _rewrite_wiki_links(_wrap_wiki_tables(markdown_to_html(raw_md)))
+        return _render(
+            "wiki.html",
+            request,
+            "/wiki",
+            body=body,
+            slug=slug,
+            root=str(root),
+            nav=_wiki_nav(root, slug),
+            title=_wiki_title(raw_md, slug),
+        )
 
     # ── goals ─────────────────────────────────────────────────────────────────
 
-    @app.get("/goals", response_class=HTMLResponse)
-    def goals(request: Request) -> Any:
+    def _goals_page(
+        request: Request,
+        *,
+        saved: bool = False,
+        error: str | None = None,
+    ) -> Any:
+        from dexta_intelligence.models import GoalStatus  # noqa: PLC0415
+
         store = store_opener(config, None)
         try:
-            all_goals = store.get_goals()
-            cards = [_goal_card(store, g) for g in all_goals]
+            cards = [
+                _goal_card(store, g)
+                for g in store.get_goals()
+                if g.status in (GoalStatus.ACTIVE, GoalStatus.ACHIEVED)
+            ]
         finally:
             _close(store, store_opener)
-        return _render("goals.html", request, "/goals", cards=cards)
+        return _render(
+            "goals.html",
+            request,
+            "/goals",
+            cards=cards,
+            saved=saved,
+            error=error,
+        )
+
+    @app.get("/goals", response_class=HTMLResponse)
+    def goals(request: Request) -> Any:
+        qp = request.query_params
+        return _goals_page(
+            request,
+            saved=qp.get("saved") == "1",
+            error=qp.get("error"),
+        )
+
+    @app.post("/goals", response_class=HTMLResponse)
+    async def goals_add(request: Request) -> Any:
+        from dexta_intelligence.models import GoalStatus  # noqa: PLC0415
+        from dexta_intelligence.workflows.goals import compose_goal  # noqa: PLC0415
+
+        form = await request.form()
+        raw_statement = form.get("statement")
+        statement = raw_statement.strip() if isinstance(raw_statement, str) else ""
+        if not statement:
+            return _goals_page(request, error="Describe what you want to improve.")
+
+        target: float | None = None
+        raw_target = form.get("target")
+        if isinstance(raw_target, str) and raw_target.strip():
+            try:
+                target = float(raw_target.strip())
+            except ValueError:
+                return _goals_page(request, error="Target must be a number.")
+
+        store = store_opener(config, None)
+        try:
+            normalized = statement.casefold()
+            if any(
+                g.statement.strip().casefold() == normalized
+                for g in store.get_goals(status=GoalStatus.ACTIVE)
+            ):
+                return _goals_page(
+                    request,
+                    error="You already have an active goal with that statement.",
+                )
+            goal = compose_goal(
+                statement,
+                model=model_for_role(config, "plan"),
+                now=datetime.now(tz=UTC),
+                target=target,
+            )
+            store.insert_goal(goal)
+        finally:
+            _close(store, store_opener)
+        return RedirectResponse("/goals?saved=1", status_code=303)
+
+    @app.post("/goals/{goal_id}/abandon", response_class=HTMLResponse)
+    def goals_abandon(request: Request, goal_id: int) -> Any:
+        from dexta_intelligence.models import GoalStatus  # noqa: PLC0415
+
+        store = store_opener(config, None)
+        try:
+            match = next((g for g in store.get_goals() if g.id == goal_id), None)
+            if match is None:
+                raise HTTPException(status_code=404)
+            if match.status is GoalStatus.ACTIVE:
+                store.set_goal_status(goal_id, GoalStatus.ABANDONED)
+        finally:
+            _close(store, store_opener)
+        return RedirectResponse("/goals", status_code=303)
 
     # ── chat ──────────────────────────────────────────────────────────────────
 
@@ -311,12 +449,15 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             request,
             question=question,
             answer=answer.text,
+            answer_html=markdown_to_html(answer.text),
             tools=list(answer.tools_used),
             faithful=answer.faithful,
         )
 
     @app.get("/api/ask/stream")
-    async def api_ask_stream(request: Request, q: str, sid: str | None = None) -> Any:
+    async def api_ask_stream(  # noqa: PLR0915 - queue + worker + drain in one handler
+        request: Request, q: str, sid: str | None = None
+    ) -> Any:
         """Stream an orchestrator run to the browser as Server-Sent Events.
 
         The orchestrator is synchronous and calls the model synchronously, so it
@@ -329,8 +470,6 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         so follow-ups carry context, and this turn is appended after it answers.
         """
         question = q.strip()
-        sessions = request.app.state.sessions
-        history = list(sessions.get(sid, [])) if sid else None
         model = getattr(request.app.state, "chat_model", None) or discovery_model(config)
         if model is None:
 
@@ -373,6 +512,10 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                     target_low=config.analysis.target_low,
                     target_high=config.analysis.target_high,
                 )
+                history = None
+                if sid:
+                    prior = store.get_chat_turns(sid, limit=_MAX_SESSION_MESSAGES)
+                    history = [{"role": t.role, "content": t.content} for t in prior]
 
                 def _sink(event: Any) -> None:
                     # Drop the loop's raw answer — the audited final answer is
@@ -387,18 +530,20 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                         "kind": "answer",
                         "payload": {
                             "text": answer.text,
+                            "html": markdown_to_html(answer.text),
                             "tools": list(answer.tools_used),
                             "faithful": answer.faithful,
                         },
                     }
                 )
                 if sid:
-                    turns = [
-                        *(history or []),
-                        {"role": "user", "content": question},
-                        {"role": "assistant", "content": answer.text},
-                    ]
-                    sessions[sid] = turns[-_MAX_SESSION_MESSAGES:]
+                    now = datetime.now(UTC)
+                    store.append_chat_turn(
+                        ChatTurn(session_id=sid, role="user", content=question, ts=now)
+                    )
+                    store.append_chat_turn(
+                        ChatTurn(session_id=sid, role="assistant", content=answer.text, ts=now)
+                    )
             except Exception as exc:
                 events.put(
                     {
@@ -427,6 +572,28 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                 yield _sse(item)
 
         return StreamingResponse(_drain(), media_type="text/event-stream")
+
+    @app.get("/api/history")
+    def api_history(sid: str | None = None) -> Any:
+        """Past turns for a session so returning to Chat restores the conversation.
+        Durable: read from the storage backend, so it survives a server restart."""
+        if not sid:
+            return {"turns": []}
+        store = store_opener(config, None)
+        try:
+            turns = store.get_chat_turns(sid, limit=_MAX_SESSION_MESSAGES)
+        finally:
+            _close(store, store_opener)
+        return {
+            "turns": [
+                {
+                    "role": t.role,
+                    "content": t.content,
+                    "html": markdown_to_html(t.content) if t.role == "assistant" else "",
+                }
+                for t in turns
+            ]
+        }
 
     # ── settings ──────────────────────────────────────────────────────────────
 
@@ -625,10 +792,46 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         if connector is None:
             return _render("_settings_test.html", request, report=None)
         try:
+            # Tandem's check() already defaults to a 25s timeout; the protocol's
+            # check() takes no args, so call it plainly for every connector.
             report = connector.check()
         except Exception as exc:
             report = HealthReport(ok=False, source=spec.connector, detail=str(exc))
         return _render("_settings_test.html", request, report=report)
+
+    @app.post("/settings/{source_key}/sync", response_class=HTMLResponse)
+    def sync_source(request: Request, source_key: str) -> Any:
+        from dexta_intelligence.workflows.sync import sync  # noqa: PLC0415
+
+        spec = PANELS_BY_KEY.get(source_key)
+        if spec is None or spec.connector is None:
+            raise HTTPException(status_code=404)
+        cfg = _settings_cfg()
+        connector = next(
+            (c for c in build_connectors(cfg) if c.source == spec.connector), None
+        )
+        if connector is None:
+            card = _card_view(spec, cfg, error="Save credentials first, then sync.")
+            return _render("_settings_card.html", request, status_code=400, card=card)
+        store = store_opener(cfg, None)
+        try:
+            report = sync(connector, store)
+            if report.ok:
+                parts = [f"{k}={v}" for k, v in sorted(report.inserted.items()) if v]
+                detail = ", ".join(parts) if parts else "no new rows"
+                sync_msg = f"Sync OK · {detail}"
+            else:
+                sync_msg = report.errors[0] if report.errors else "Sync failed"
+            card = _card_view(
+                spec,
+                cfg,
+                freshness=_freshness_map().get(spec.connector),
+                sync_msg=sync_msg,
+                sync_ok=report.ok,
+            )
+        finally:
+            _close(store, store_opener)
+        return _render("_settings_card.html", request, card=card)
 
     return app
 
@@ -642,6 +845,9 @@ _SOURCE_LABELS: dict[str, str] = {
     "whoop": "Whoop",
     "oura": "Oura",
     "tidepool": "Tidepool",
+    "tandem": "Tandem",
+    "carelink": "CareLink",
+    "dexcom_api": "Dexcom API",
 }
 
 
@@ -658,10 +864,19 @@ def _status_pill_text(coverage: Any) -> str:
     return f"Local only · {days} day{suffix}"
 
 
+#: Coordinator investigation receipts (kind="investigation") are planning memory
+#: — recalled to avoid re-running the same belt — not user-facing findings.
+_INTERNAL_FINDING_KINDS = frozenset({"investigation"})
+
+
 def _hero_metrics(
     store: StoragePort, config: Config, coverage: Any, findings: list[Any]
 ) -> dict[str, Any]:
-    active = sum(1 for f in findings if f.status == FindingStatus.ACTIVE)
+    active = sum(
+        1
+        for f in findings
+        if f.status == FindingStatus.ACTIVE and f.kind not in _INTERNAL_FINDING_KINDS
+    )
     span = coverage.span_days if coverage.n_glucose else None
     cov_pct = coverage.glucose_coverage_pct if coverage.n_glucose else None
     tir = _recent_tir(store, config, coverage) if coverage.n_glucose else None
@@ -710,6 +925,18 @@ def _dashboard_banners(
     if flash in flash_msgs:
         kind, message = flash_msgs[flash]
         banners.append({"kind": kind, "message": message})
+    elif flash and flash.startswith("upload_ok"):
+        n = flash.split(":", 1)[1] if ":" in flash else "0"
+        banners.append({"kind": "ok", "message": f"Imported {n} glucose rows from CSV."})
+    elif flash == "upload_fail":
+        banners.append(
+            {
+                "kind": "bad",
+                "message": "CSV import failed — expected a Dexcom Clarity or LibreView export.",
+            }
+        )
+    elif flash == "upload_empty":
+        banners.append({"kind": "bad", "message": "No file was selected to upload."})
 
     if coverage.n_glucose == 0:
         banners.append(
@@ -775,6 +1002,35 @@ def _status_sidebar(
         "pending": pending,
         "unlocked_count": unlocked_count,
         "last_sync": last_sync,
+        "stream_counts": {
+            "glucose": coverage.n_glucose,
+            "insulin": coverage.n_insulin,
+            "meals": coverage.n_meals,
+        },
+        "storage": _storage_view(config),
+    }
+
+
+def _storage_view(config: Config) -> dict[str, str]:
+    """Where data actually lives — so 'is my DB local?' has a visible answer."""
+    if config.data.backend == "sqlite":
+        path = config.data.sqlite_path.expanduser()
+        try:
+            kb = path.stat().st_size / 1024
+            size = f"{kb / 1024:.1f} MB" if kb >= 1024 else f"{kb:.0f} KB"
+        except OSError:
+            size = "new"
+        return {
+            "backend": "SQLite",
+            "detail": "local file · no server",
+            "path": str(path),
+            "size": size,
+        }
+    return {
+        "backend": "PostgreSQL",
+        "detail": "external server",
+        "path": config.data.database_url or "(DATABASE_URL)",
+        "size": "",
     }
 
 
@@ -810,6 +1066,8 @@ def _card_view(
     freshness: datetime | None = None,
     saved: bool = False,
     error: str | None = None,
+    sync_msg: str | None = None,
+    sync_ok: bool | None = None,
 ) -> dict[str, Any]:
     return panel_to_view(
         spec,
@@ -819,6 +1077,8 @@ def _card_view(
         freshness=freshness,
         saved=saved,
         error=error,
+        sync_msg=sync_msg,
+        sync_ok=sync_ok,
     )
 
 
@@ -939,3 +1199,49 @@ def _rewrite_wiki_links(body: str) -> str:
         return f'href="/wiki/{target}"'
 
     return re.sub(r'href="([^"]+)"', repl, body)
+
+
+def _wrap_wiki_tables(html: str) -> str:
+    """Scrollable card wrapper so wide belief tables don't blow the layout."""
+    import re  # noqa: PLC0415
+
+    return re.sub(
+        r"<table>",
+        '<div class="wiki-table-wrap"><table class="wiki-table">',
+        html,
+    ).replace("</table>", "</table></div>")
+
+
+def _wiki_title(raw_md: str, slug: str) -> str:
+    for line in raw_md.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return slug.replace("/", " · ").replace("-", " ").title()
+
+
+def _wiki_nav(root: Path, slug: str) -> list[dict[str, Any]]:
+    """Sidebar links for pages that exist under the wiki root."""
+    pages: list[tuple[str, str, str]] = [
+        ("index", "/wiki", "Overview"),
+        ("hypotheses", "/wiki/hypotheses", "Hypotheses"),
+        ("graveyard", "/wiki/graveyard", "Graveyard"),
+        ("goals", "/wiki/goals", "Goals"),
+    ]
+    nav: list[dict[str, Any]] = []
+    for key, href, label in pages:
+        if not (root / f"{key}.md").is_file():
+            continue
+        nav.append({"href": href, "label": label, "active": slug == key})
+    topics = root / "topics"
+    if topics.is_dir():
+        for path in sorted(topics.glob("*.md")):
+            key = f"topics/{path.stem}"
+            nav.append(
+                {
+                    "href": f"/wiki/{key}",
+                    "label": path.stem.replace("-", " ").title(),
+                    "active": slug == key,
+                    "topic": True,
+                }
+            )
+    return nav

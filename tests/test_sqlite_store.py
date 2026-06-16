@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from dexta_intelligence.connectors.tandem import PROFILE_SOURCE_ID
 from dexta_intelligence.models import (
     ActivityEvent,
     DeviceEvent,
@@ -140,6 +141,30 @@ class TestRawEvents:
     def test_upsert_empty_batch(self, store: SQLiteStore) -> None:
         assert store.upsert_raw_events([]) == {}
         assert store.existing_raw_ids([]) == {}
+
+    def test_replace_raw_events_overwrites_payload(self, store: SQLiteStore) -> None:
+        event = RawEvent(
+            source="tandem",
+            source_id=PROFILE_SOURCE_ID,
+            source_ts=T0,
+            payload={"active_profile": "A"},
+        )
+        store.replace_raw_events([event])
+        updated = RawEvent(
+            source="tandem",
+            source_id=PROFILE_SOURCE_ID,
+            source_ts=T0 + timedelta(hours=1),
+            payload={"active_profile": "B"},
+        )
+        ids = store.replace_raw_events([updated])
+        assert len(ids) == 1
+        loaded = store.get_raw_event("tandem", PROFILE_SOURCE_ID)
+        assert loaded is not None
+        assert loaded.payload["active_profile"] == "B"
+        assert loaded.source_ts == T0 + timedelta(hours=1)
+
+    def test_get_raw_event_missing_returns_none(self, store: SQLiteStore) -> None:
+        assert store.get_raw_event("tandem", "missing") is None
 
     def test_watermark_none_when_empty(self, store: SQLiteStore) -> None:
         assert store.get_watermark("nightscout") is None

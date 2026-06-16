@@ -6,7 +6,7 @@ power users override per role in ``dexta.toml``::
 
     [llm]
     provider = "anthropic"
-    model = "claude-sonnet-4-20250514"
+    model = "claude-sonnet-4-6"
 
     [llm.roles.skeptic]
     provider = "ollama"

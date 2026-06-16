@@ -126,6 +126,7 @@ def test_stream_emits_events_in_order_ending_with_answer(
 
     final = events[-1]
     assert final["payload"]["text"] == "Your TIR was 68%."
+    assert "<p>" in final["payload"]["html"]
     assert "tir_snapshot" in final["payload"]["tools"]
     assert final["payload"]["faithful"] is True
     # The loop's raw answer never reaches the client.
@@ -212,6 +213,31 @@ def test_session_carries_history_across_asks(
     # The second ask sees the first turn threaded in.
     assert {"role": "user", "content": "why did I spike Tuesday"} in second
     assert {"role": "assistant", "content": "answer to why did I spike Tuesday"} in second
+    store.close()
+
+
+def test_history_endpoint_returns_session_turns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    _HistoryCapturingAgent.seen_history = []
+    _patch_model_and_agent(monkeypatch, _HistoryCapturingAgent)
+    client = _client(store)
+
+    client.get("/api/ask/stream?q=why did I spike Tuesday&sid=s1")
+    data = client.get("/api/history?sid=s1").json()
+
+    assert [t["role"] for t in data["turns"]] == ["user", "assistant"]
+    assert data["turns"][0]["content"] == "why did I spike Tuesday"
+    assert data["turns"][1]["html"]  # assistant turn carries rendered html
+    store.close()
+
+
+def test_history_endpoint_empty_without_session(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    assert client.get("/api/history").json() == {"turns": []}
+    assert client.get("/api/history?sid=unknown").json() == {"turns": []}
     store.close()
 
 
