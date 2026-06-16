@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -94,13 +94,8 @@ class ReasoningResult:
     stopped_reason: str = "answered"
 
 
-class _ChatModel(Protocol):
-    def bind_tools(self, tools: Sequence[dict[str, Any]]) -> _ChatModel: ...
-    def invoke(self, messages: list[Any]) -> Any: ...
-
-
 def run_reasoning_loop(
-    model: _ChatModel,
+    model: Any,  # any LangChain chat model — duck-typed on .bind_tools/.invoke
     tools: Sequence[ToolSpec],
     *,
     system: str,

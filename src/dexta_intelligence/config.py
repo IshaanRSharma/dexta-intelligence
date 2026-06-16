@@ -2,9 +2,8 @@
 
 Vanilla contract: ``dexta init`` writes ``~/.dexta/dexta.toml`` with exactly
 two values the user must supply (Nightscout URL + token); every other key
-has a default good enough to run. Secrets (API keys) come from the
-environment, never from the TOML file, so configs are safe to share when
-asking for help.
+has a default good enough to run. Secrets (API keys) live in ``~/.dexta/secrets.env`` (or shell env vars), never
+in the TOML file, so configs are safe to share when asking for help.
 """
 
 from __future__ import annotations
@@ -38,10 +37,24 @@ __all__ = [
     "WikiConfig",
     "env_override_for",
     "load_config",
+    "load_secrets_env",
+    "save_secret",
+    "secret_is_set",
+    "secrets_path_for",
     "save_config_values",
 ]
 
 DEFAULT_CONFIG_PATH = Path("~/.dexta/dexta.toml")
+SECRETS_FILENAME = "secrets.env"
+
+#: Keys the Settings UI may persist via :func:`save_secret`.
+PANEL_SECRET_VARS: frozenset[str] = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "OPENROUTER_API_KEY",
+        "OPENEVIDENCE_API_KEY",
+    }
+)
 
 
 class _Section(BaseModel):
@@ -190,6 +203,11 @@ class AnalysisConfig(_Section):
     target_low: int = 70
     target_high: int = 180
     deep_analysis_window_days: int = 90
+    timezone: str = "UTC"
+    """IANA zone for date/time-of-day bucketing (e.g. ``America/New_York``).
+    Storage stays UTC; this only sets how days and clock-hours are grouped, so
+    "dinner"/"overnight"/per-day analysis lands at the patient's local time. Set
+    it to your zone in ``dexta.toml``; unknown values fall back to UTC."""
 
 
 class LensConfig(_Section):
@@ -244,14 +262,97 @@ class Config(_Section):
     lens: dict[str, LensConfig] = Field(default_factory=dict)
 
 
+def secrets_path_for(config_path: Path | None = None) -> Path:
+    """``secrets.env`` beside the config file (default ``~/.dexta/secrets.env``)."""
+    return (config_path or DEFAULT_CONFIG_PATH).expanduser().parent / SECRETS_FILENAME
+
+
+def _parse_secrets_line(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    if stripped.startswith("export "):
+        stripped = stripped[7:].strip()
+    if "=" not in stripped:
+        return None
+    key, _, value = stripped.partition("=")
+    key = key.strip()
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1]
+    if not key:
+        return None
+    return key, value
+
+
+def load_secrets_env(path: Path | None = None) -> None:
+    """Load ``secrets.env`` into ``os.environ`` without overriding existing vars."""
+    resolved = (path or secrets_path_for()).expanduser()
+    if not resolved.is_file():
+        return
+    for line in resolved.read_text(encoding="utf-8").splitlines():
+        parsed = _parse_secrets_line(line)
+        if parsed is None:
+            continue
+        key, value = parsed
+        if key not in os.environ:
+            os.environ[key] = value
+
+
+def secret_is_set(name: str) -> bool:
+    return bool(os.environ.get(name))
+
+
+def save_secret(name: str, value: str, *, path: Path | None = None) -> None:
+    """Persist one secret to ``secrets.env`` (mode 0600) and refresh ``os.environ``."""
+    if name not in PANEL_SECRET_VARS:
+        msg = f"unknown secret {name!r}"
+        raise ValueError(msg)
+    resolved = (path or secrets_path_for()).expanduser()
+    secrets: dict[str, str] = {}
+    if resolved.is_file():
+        for line in resolved.read_text(encoding="utf-8").splitlines():
+            parsed = _parse_secrets_line(line)
+            if parsed is None:
+                continue
+            key, existing = parsed
+            secrets[key] = existing
+    if value:
+        secrets[name] = value
+        os.environ[name] = value
+    else:
+        secrets.pop(name, None)
+        os.environ.pop(name, None)
+    lines = [
+        "# Dexta Intelligence secrets — mode 0600, never commit or share",
+        "# Edit here or paste keys in Settings → LLM / Literature",
+        "",
+    ]
+    for key in sorted(secrets):
+        lines.append(f"{key}={_toml_value(secrets[key])}")
+    text = "\n".join(lines) + "\n"
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=resolved.parent, prefix=".secrets.env.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, resolved)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def load_config(path: Path | None = None) -> Config:
     """Load config from TOML with environment overrides applied.
 
-    Precedence (highest wins): environment variables → TOML file → defaults.
+    Precedence (highest wins): shell environment → ``secrets.env`` → TOML → defaults.
     A missing file is not an error — defaults make the library usable
     programmatically without any setup.
     """
     resolved = (path or DEFAULT_CONFIG_PATH).expanduser()
+    load_secrets_env(secrets_path_for(resolved))
     raw: dict[str, Any] = {}
     if resolved.is_file():
         with resolved.open("rb") as fh:

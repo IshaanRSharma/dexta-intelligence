@@ -29,9 +29,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from langchain_core.language_models.chat_models import BaseChatModel
 
 __all__ = ["ROLE_DEFAULTS", "ModelSpec", "RoleDefaults", "get_model"]
@@ -100,13 +102,16 @@ def get_model(spec: ModelSpec) -> BaseChatModel:
     try:
         # Deliberately lazy: LLM support is an optional extra and deterministic
         # agents must be importable without it.
-        from langchain.chat_models import init_chat_model  # noqa: PLC0415
+        from langchain.chat_models import init_chat_model as _init  # noqa: PLC0415
     except ImportError as exc:  # pragma: no cover - import-path guard
         msg = (
             "LLM support is not installed. "
             "Install it with: pip install 'dexta-intelligence[llm]'"
         )
         raise RuntimeError(msg) from exc
+
+    # init_chat_model is typed -> Any; pin the return so callers get BaseChatModel.
+    init_chat_model = cast("Callable[..., BaseChatModel]", _init)
 
     kwargs: dict[str, Any] = {}
     if spec.temperature is not None:
@@ -128,6 +133,36 @@ def get_model(spec: ModelSpec) -> BaseChatModel:
             spec.model,
             model_provider="openai",
             base_url="https://openrouter.ai/api/v1",
+            api_key=key,
+            **kwargs,
+        )
+
+    if spec.provider == "anthropic":
+        key = os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            msg = (
+                "provider 'anthropic' requires the ANTHROPIC_API_KEY "
+                "environment variable (https://console.anthropic.com/settings/keys)"
+            )
+            raise RuntimeError(msg)
+        return init_chat_model(
+            spec.model,
+            model_provider=spec.provider,
+            api_key=key,
+            **kwargs,
+        )
+
+    if spec.provider == "openai":
+        key = os.environ.get("OPENAI_API_KEY")
+        if not key:
+            msg = (
+                "provider 'openai' requires the OPENAI_API_KEY "
+                "environment variable (https://platform.openai.com/api-keys)"
+            )
+            raise RuntimeError(msg)
+        return init_chat_model(
+            spec.model,
+            model_provider=spec.provider,
             api_key=key,
             **kwargs,
         )

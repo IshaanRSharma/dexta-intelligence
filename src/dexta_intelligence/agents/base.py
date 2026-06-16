@@ -58,6 +58,8 @@ class AgentContext:
     window: tuple[date, date]
     gates: ColdStartReport
     run_id: str
+    timezone: str = "UTC"
+    """IANA zone for local date/time-of-day bucketing (storage stays UTC)."""
 
 
 @runtime_checkable

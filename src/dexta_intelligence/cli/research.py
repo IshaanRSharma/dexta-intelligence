@@ -64,7 +64,10 @@ def cmd_nof1(
             return 1
         end_date = coverage.last_ts.date() if coverage.last_ts is not None else None
         window = _analysis_window(config, end_date)
-        ctx = AgentContext(store=store, window=window, gates=gates, run_id=str(uuid.uuid4()))
+        ctx = AgentContext(
+            store=store, window=window, gates=gates, run_id=str(uuid.uuid4()),
+            timezone=config.analysis.timezone,
+        )
         result = run_nof1(ctx, hypothesis, seed=seed)
         persisted_id = store.insert_finding(result_to_finding(result, ctx)) if save else None
     finally:

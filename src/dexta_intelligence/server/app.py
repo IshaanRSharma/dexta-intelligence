@@ -32,7 +32,13 @@ from dexta_intelligence.cli._common import (
     open_sqlite_store,
 )
 from dexta_intelligence.coldstart import CAPABILITY_GATES, HARD_FLOOR_DAYS, ColdStartReport
-from dexta_intelligence.config import env_override_for, load_config, save_config_values
+from dexta_intelligence.config import (
+    env_override_for,
+    load_config,
+    save_config_values,
+    save_secret,
+    secrets_path_for,
+)
 from dexta_intelligence.connectors.base import HealthReport
 from dexta_intelligence.models import FindingStatus
 from dexta_intelligence.server.render import markdown_to_html, sparkline_svg
@@ -290,6 +296,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                 window=_analysis_window(config, end),
                 gates=gates,
                 run_id="gui",
+                timezone=config.analysis.timezone,
             )
             agent = ChatAgent(
                 model=model,
@@ -359,6 +366,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                     window=_analysis_window(config, end),
                     gates=gates,
                     run_id="gui-stream",
+                    timezone=config.analysis.timezone,
                 )
                 agent = OrchestratorAgent(
                     model=model,
@@ -566,6 +574,20 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             raise HTTPException(status_code=404)
 
         form = await request.form()
+        secrets_path = secrets_path_for(request.app.state.config_path)
+        for var, _label in spec.env_keys:
+            raw = form.get(f"env__{var}")
+            if raw is None:
+                continue
+            value = raw.strip() if isinstance(raw, str) else ""
+            if not value:
+                continue
+            try:
+                save_secret(var, value, path=secrets_path)
+            except ValueError as exc:
+                card = _card_view(spec, _settings_cfg(), error=str(exc))
+                return _render("_settings_card.html", request, status_code=400, card=card)
+
         updates: dict[str, Any] = {}
         for f in spec.fields:
             if env_override_for(spec.section, f.name) is not None:

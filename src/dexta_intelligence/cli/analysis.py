@@ -97,7 +97,10 @@ def cmd_investigate(
             return 1
         end_date = coverage.last_ts.date() if coverage.last_ts is not None else None
         window = _analysis_window(config, end_date)
-        ctx = AgentContext(store=store, window=window, gates=gates, run_id=str(uuid.uuid4()))
+        ctx = AgentContext(
+            store=store, window=window, gates=gates, run_id=str(uuid.uuid4()),
+            timezone=config.analysis.timezone,
+        )
 
         target = f'goal: "{goal}"' if goal else "the whole record"
         out.write(f"\nInvestigating {target} (run {ctx.run_id})…\n")
@@ -159,6 +162,7 @@ def cmd_analyze(
             window=window,
             gates=gates,
             run_id=str(uuid.uuid4()),
+            timezone=config.analysis.timezone,
         )
 
         out.write(f"\nRunning {len(agents)} agent(s) (run {ctx.run_id})…\n")

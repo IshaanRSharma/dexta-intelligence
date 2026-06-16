@@ -33,7 +33,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-llm = ["langchain>=0.3", "langchain-core>=0.3"]
+llm = [
+  "langchain>=0.3",
+  "langchain-core>=0.3",
+  "langchain-anthropic>=0.3",
+  "langchain-openai>=0.3",
+]
 nightscout = ["httpx>=0.27"]
 dexcom = ["pydexcom>=0.4"]
 libre = ["pylibrelinkup>=0.10"]

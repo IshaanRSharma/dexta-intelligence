@@ -17,6 +17,7 @@ import bisect
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dexta_intelligence.agents.reason import ToolSpec
 from dexta_intelligence.agents.time_tools import time_tool_specs
@@ -215,8 +216,12 @@ class DiscoveryToolkit:
         target_low: int = 70,
         target_high: int = 180,
     ) -> None:
-        start = datetime.combine(ctx.window[0], time.min, tzinfo=UTC)
-        end = datetime.combine(ctx.window[1], time.max, tzinfo=UTC)
+        #: Patient-local zone for all date/time-of-day bucketing. Storage stays
+        #: UTC; "dinner", "overnight", and per-day grouping are computed in this
+        #: zone so they land at the patient's clock time, not UTC's.
+        self._tz = _resolve_tz(getattr(ctx, "timezone", "UTC"))
+        start = datetime.combine(ctx.window[0], time.min, tzinfo=self._tz).astimezone(UTC)
+        end = datetime.combine(ctx.window[1], time.max, tzinfo=self._tz).astimezone(UTC)
         self._target = (target_low, target_high)
         #: Full ctx.window bounds — the active sub-window can never exceed these.
         self._full_start = start
@@ -232,7 +237,7 @@ class DiscoveryToolkit:
         self._sleep_score: dict[date, float] = {}
         for s in ctx.store.get_sleep(start, end):
             if s.score is not None:
-                self._sleep_score[s.ts_end.date()] = float(s.score)
+                self._sleep_score[self._ld(s.ts_end)] = float(s.score)
         self._activity_ts = [a.ts for a in ctx.store.get_activity(start, end)]
         self._meals: list[MealEvent] = sorted(ctx.store.get_meals(start, end), key=lambda m: m.ts)
         self._meal_ts = [m.ts for m in self._meals]
@@ -243,7 +248,7 @@ class DiscoveryToolkit:
         #: Nights touched by temp-basal / suspend events (excluded from drift when insulin exists).
         self._has_insulin = bool(self._insulin)
         self._basal_intervention_dates: set[date] = {
-            i.ts.date()
+            self._ld(i.ts)
             for i in self._insulin
             if i.kind in (InsulinKind.TEMP_BASAL, InsulinKind.SUSPEND)
         }
@@ -251,6 +256,27 @@ class DiscoveryToolkit:
             self._n_predictions = len(ctx.store.get_predictions(start, end))
         except (AttributeError, NotImplementedError):  # minimal/partial stores
             self._n_predictions = 0
+
+    # ── local-time helpers (bucket in the patient's zone, slice the UTC arrays) ──
+
+    def _ld(self, ts: datetime) -> date:
+        """Calendar date of ``ts`` in the patient's local zone."""
+        return ts.astimezone(self._tz).date()
+
+    def _lh(self, ts: datetime) -> int:
+        """Hour-of-day of ``ts`` in the patient's local zone (0-23)."""
+        return ts.astimezone(self._tz).hour
+
+    def _day_bounds(self, day: date) -> tuple[datetime, datetime]:
+        """UTC instants bracketing one local calendar ``day`` (for bisecting)."""
+        start = datetime.combine(day, time.min, tzinfo=self._tz).astimezone(UTC)
+        end = datetime.combine(day, time.max, tzinfo=self._tz).astimezone(UTC)
+        return start, end
+
+    @property
+    def tzinfo(self) -> ZoneInfo:
+        """The patient-local zone used for all bucketing (callers localize for display)."""
+        return self._tz
 
     def capabilities(self) -> CapabilitySet:
         """Which streams exist in this window — drives tool exposure."""
@@ -279,9 +305,9 @@ class DiscoveryToolkit:
 
     @property
     def _daily(self) -> dict[date, tuple[float, float]]:
-        """The full-window daily frame filtered to the active sub-window."""
-        lo, hi = self._active_start.date(), self._active_end.date()
-        if lo == self._full_start.date() and hi == self._full_end.date():
+        """The full-window daily frame filtered to the active sub-window (local dates)."""
+        lo, hi = self._ld(self._active_start), self._ld(self._active_end)
+        if lo == self._ld(self._full_start) and hi == self._ld(self._full_end):
             return self._daily_full
         return {d: v for d, v in self._daily_full.items() if lo <= d <= hi}
 
@@ -359,7 +385,7 @@ class DiscoveryToolkit:
             series = {d: v for d, v in series.items() if d in scored}
             labels = ("poorer_sleep", "better_sleep")
         elif group_by == "workout_day":
-            workout_days = {ts.date() for ts in self._activity_ts}
+            workout_days = {self._ld(ts) for ts in self._activity_ts}
             in_a = {d for d in series if d in workout_days}
             labels = ("workout_day", "rest_day")
         else:
@@ -405,23 +431,25 @@ class DiscoveryToolkit:
         """Re-scope the active window to ISO dates; clamp to available data.
 
         Returns what was actually selected so the model sees the clamp. Never
-        raises: bad ISO strings come back as an ``error`` dict."""
+        raises: bad ISO strings come back as an ``error`` dict. Dates are the
+        patient's local calendar days."""
         try:
-            start = datetime.combine(date.fromisoformat(start_iso), time.min, tzinfo=UTC)
-            end = datetime.combine(date.fromisoformat(end_iso), time.max, tzinfo=UTC)
+            d0, d1 = date.fromisoformat(start_iso), date.fromisoformat(end_iso)
         except (TypeError, ValueError) as exc:
             return {"error": f"bad date: {exc}"}
-        if start > end:
-            start, end = end, start
+        if d0 > d1:
+            d0, d1 = d1, d0
+        start, _ = self._day_bounds(d0)
+        _, end = self._day_bounds(d1)
         lo, hi = self.set_active_window(start, end)
         ts_list, _ = self._active_glucose()
         note = None
         if lo > start or hi < end:
             note = "clamped to available data"
         out: dict[str, Any] = {
-            "active_start": lo.date().isoformat(),
-            "active_end": hi.date().isoformat(),
-            "n_days": (hi.date() - lo.date()).days + 1,
+            "active_start": self._ld(lo).isoformat(),
+            "active_end": self._ld(hi).isoformat(),
+            "n_days": (self._ld(hi) - self._ld(lo)).days + 1,
             "n_readings": len(ts_list),
         }
         if note:
@@ -501,7 +529,7 @@ class DiscoveryToolkit:
         by_day: dict[date, list[float]] = {}
         ts_list, vals_list = self._active_glucose()
         for ts, val in zip(ts_list, vals_list, strict=True):
-            by_day.setdefault(ts.date(), []).append(val)
+            by_day.setdefault(self._ld(ts), []).append(val)
         series: list[dict[str, Any]] = []
         values: list[float] = []
         for d in sorted(by_day):
@@ -530,9 +558,8 @@ class DiscoveryToolkit:
         return 100.0 * stdev(vals) / m if m else 0.0
 
     def _day_values(self, day: date) -> list[float]:
-        """All readings for one calendar day (over the full loaded series)."""
-        start = datetime.combine(day, time.min, tzinfo=UTC)
-        end = datetime.combine(day, time.max, tzinfo=UTC)
+        """All readings for one local calendar day (over the full loaded series)."""
+        start, end = self._day_bounds(day)
         lo = bisect.bisect_left(self._glucose_ts, start)
         hi = bisect.bisect_right(self._glucose_ts, end)
         return self._glucose_vals[lo:hi]
@@ -874,21 +901,24 @@ class DiscoveryToolkit:
         if anchor is None:
             return {"error": f"bad timestamp: {timestamp_iso!r}"}
         band_min = 90
-        anchor_min = anchor.hour * 60 + anchor.minute
+        anchor_local = anchor.astimezone(self._tz)
+        anchor_min = anchor_local.hour * 60 + anchor_local.minute
         if self._meals:
             anchors = [
                 m.ts
                 for m in self._meals
                 if m.carbs_g is not None
-                and abs(m.ts.hour * 60 + m.ts.minute - anchor_min) <= band_min
+                and abs(self._lh(m.ts) * 60 + m.ts.astimezone(self._tz).minute - anchor_min)
+                <= band_min
             ]
-            basis = "carb entries at the same time of day"
+            basis = "carb entries at the same local time of day"
         else:
-            days = sorted({ts.date() for ts in self._glucose_ts})
+            days = sorted({self._ld(ts) for ts in self._glucose_ts})
+            clock = time(anchor_local.hour, anchor_local.minute)
             anchors = [
-                datetime.combine(d, time(anchor.hour, anchor.minute), tzinfo=UTC) for d in days
+                datetime.combine(d, clock, tzinfo=self._tz).astimezone(UTC) for d in days
             ]
-            basis = "same clock time each day (no carb entries logged)"
+            basis = "same local clock time each day (no carb entries logged)"
         events: list[dict[str, Any]] = []
         delays_spiking: list[float] = []
         delays_other: list[float] = []
@@ -974,10 +1004,10 @@ class DiscoveryToolkit:
     # ── frame builders ───────────────────────────────────────────────────────
 
     def _build_daily(self, glucose: Sequence[Any]) -> dict[date, tuple[float, float]]:
-        """date → (mean mg/dL, TIR %) for days with enough readings."""
+        """local date → (mean mg/dL, TIR %) for days with enough readings."""
         by_day: dict[date, list[float]] = {}
         for g in glucose:
-            by_day.setdefault(g.ts.date(), []).append(float(g.mg_dl))
+            by_day.setdefault(self._ld(g.ts), []).append(float(g.mg_dl))
         lo, hi = self._target
         out: dict[date, tuple[float, float]] = {}
         for day, vals in by_day.items():
@@ -991,8 +1021,9 @@ class DiscoveryToolkit:
         ts_list, vals_list = self._active_glucose()
         by_day: dict[date, list[float]] = {}
         for ts, val in zip(ts_list, vals_list, strict=True):
-            if hours[0] <= ts.hour < hours[1]:
-                by_day.setdefault(ts.date(), []).append(val)
+            local = ts.astimezone(self._tz)
+            if hours[0] <= local.hour < hours[1]:
+                by_day.setdefault(local.date(), []).append(val)
         return tuple(
             mean(vals) for _, vals in sorted(by_day.items()) if len(vals) >= 3
         )
@@ -1010,8 +1041,9 @@ class DiscoveryToolkit:
         out: dict[date, list[float]] = {}
         ts_list, vals_list = self._active_glucose()
         for ts, val in zip(ts_list, vals_list, strict=True):
-            if hours[0] <= ts.hour < hours[1]:
-                out.setdefault(ts.date(), []).append(val)
+            local = ts.astimezone(self._tz)
+            if hours[0] <= local.hour < hours[1]:
+                out.setdefault(local.date(), []).append(val)
         return out
 
 
@@ -1070,6 +1102,14 @@ def _hours(raw: Any) -> tuple[int, int]:
 def _numbers(result: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
     """Pull the guard-auditable numeric fields out of a tool result dict."""
     return {k: result[k] for k in keys if isinstance(result.get(k), (int, float))}
+
+
+def _resolve_tz(name: str) -> ZoneInfo:
+    """Resolve an IANA zone name, falling back to UTC on anything empty/unknown."""
+    try:
+        return ZoneInfo(name or "UTC")
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return ZoneInfo("UTC")
 
 
 def _parse_ts(timestamp_iso: str) -> datetime | None:

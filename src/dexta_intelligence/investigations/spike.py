@@ -155,7 +155,7 @@ def gather_spike_evidence(
         boluses=boluses,
         basal=basal,
         bolus_delay=bolus_delay,
-        spike_ts=ts,
+        spike_ts=ts.astimezone(toolkit.tzinfo),  # local time for overnight check + display
         peak=peak,
     )
     confidence = _confidence(

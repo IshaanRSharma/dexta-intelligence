@@ -278,7 +278,7 @@ def _keyword_route(question: str) -> Route:
 
 @dataclass
 class RouterAgent:
-    model: BaseChatModel
+    model: BaseChatModel | None
     max_steps: int = 6
     target_low: int = 70
     target_high: int = 180

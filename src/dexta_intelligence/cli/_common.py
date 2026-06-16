@@ -230,5 +230,6 @@ def _ctx_for(config: Config, store: StoragePort) -> AgentContext:
         store=store,
         window=_analysis_window(config, end_date),
         gates=gates,
+        timezone=config.analysis.timezone,
         run_id=str(uuid.uuid4()),
     )

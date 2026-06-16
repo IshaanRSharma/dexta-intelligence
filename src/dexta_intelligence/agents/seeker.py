@@ -77,7 +77,7 @@ class GoalSeekingAgent:
     pool did not grow, when the round repeats the prior round's tool sequence,
     or when the reflection cannot name a real exposed tool."""
 
-    model: BaseChatModel
+    model: BaseChatModel | None
     max_rounds: int = 2
     max_steps: int = 6
     target_low: int = 70

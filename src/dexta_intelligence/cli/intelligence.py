@@ -64,7 +64,10 @@ def cmd_ask(
             return 1
         end_date = coverage.last_ts.date() if coverage.last_ts is not None else None
         window = _analysis_window(config, end_date)
-        ctx = AgentContext(store=store, window=window, gates=gates, run_id=str(uuid.uuid4()))
+        ctx = AgentContext(
+            store=store, window=window, gates=gates, run_id=str(uuid.uuid4()),
+            timezone=config.analysis.timezone,
+        )
         low, high = config.analysis.target_low, config.analysis.target_high
         if seek:
             answer = GoalSeekingAgent(
@@ -146,7 +149,10 @@ def cmd_explain(
             coverage.first_ts.date() if coverage.first_ts else datetime.now(tz=UTC).date(),
             coverage.last_ts.date() if coverage.last_ts else datetime.now(tz=UTC).date(),
         )
-        ctx = AgentContext(store=store, window=window, gates=gates, run_id=str(uuid.uuid4()))
+        ctx = AgentContext(
+            store=store, window=window, gates=gates, run_id=str(uuid.uuid4()),
+            timezone=config.analysis.timezone,
+        )
         polish_model = model if model is not None else model_for_role(config, "explain")
         report = explain_spike(
             ctx,
