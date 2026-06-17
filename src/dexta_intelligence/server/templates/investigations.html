@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}dexta · investigations{% endblock %}
+{% block content %}
+{% set runs = runs|default([]) %}
+
+<div class="page-head">
+  <h1>Investigations</h1>
+  <p class="page-sub">Every investigation dexta runs, with the plan it followed, the trace of what it did, and the findings it produced.</p>
+</div>
+
+{% if runs %}
+<div class="cards">
+  {% for r in runs %}
+  <article class="card run-card">
+    <div class="card-head">
+      <h2>{{ r.question }}</h2>
+      <span class="badge {{ 'ok' if r.status == 'completed' else 'neutral' }}">{{ r.status }}</span>
+    </div>
+    <div class="meta">
+      <span class="chip">{{ r.kind }}</span>
+      <span class="mono">{{ r.window }}</span>
+      <span class="muted">{{ r.when }}</span>
+      <span class="muted">{{ r.n_findings }} finding(s)</span>
+    </div>
+
+    <div class="run-section">
+      <h3>Plan</h3>
+      <div class="run-plan">
+        {% for p in r.plan %}<span class="chip">{{ p }}</span>{% endfor %}
+      </div>
+    </div>
+
+    <div class="run-section">
+      <h3>Trace</h3>
+      <ol class="run-trace">
+        {% for line in r.trace %}<li>{{ line }}</li>{% endfor %}
+      </ol>
+    </div>
+
+    {% if r.findings %}
+    <div class="run-section">
+      <h3>Findings</h3>
+      <ul class="run-findings">
+        {% for f in r.findings %}
+        <li>
+          <span class="run-finding-head">{{ f.headline }}</span>
+          <span class="meta">
+            <span class="mono">{{ f.kind }}</span>
+            <span class="chip">{{ f.confidence_pct }}%</span>
+            {% if f.status != 'active' %}<span class="badge neutral">{{ f.status }}</span>{% endif %}
+          </span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <p>No investigations yet.</p>
+  <p class="hint">Ask a question in the dashboard "Investigate a question" box, or run analyze, to start one.</p>
+  <a class="btn btn-secondary" href="/" style="margin-top:14px">Go to dashboard</a>
+</div>
+{% endif %}
+{% endblock %}

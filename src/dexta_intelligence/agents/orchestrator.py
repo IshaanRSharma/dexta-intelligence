@@ -146,7 +146,7 @@ class OrchestratorAgent:
     """
 
     model: BaseChatModel
-    max_steps: int = 12
+    max_steps: int = 20
     target_low: int = 70
     target_high: int = 180
 

@@ -24,7 +24,7 @@ from dexta_intelligence.agents.time_tools import time_tool_specs
 from dexta_intelligence.analytics.oref import carbs_on_board, insulin_totals
 from dexta_intelligence.coldstart import CapabilitySet
 from dexta_intelligence.connectors.tandem import PROFILE_SOURCE_ID
-from dexta_intelligence.models import HypothesisStatus, InsulinKind
+from dexta_intelligence.models import FindingStatus, HypothesisStatus, InsulinKind
 from dexta_intelligence.stats.core import (
     cliffs_delta,
     cohen_d,
@@ -1983,7 +1983,9 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
     candidates = [
         f
         for f in ctx.store.get_findings(limit=50)
-        if f.agent != "synthesis" and f.kind != "investigation"
+        if f.agent != "synthesis"
+        and f.kind != "investigation"
+        and f.status != FindingStatus.STALE
     ]
     q = query.strip()
     if q and candidates:

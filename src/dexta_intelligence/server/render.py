@@ -238,6 +238,7 @@ def emit_toml(config: Config) -> str:
         "[analysis]",
         f"target_low = {a.target_low}",
         f"target_high = {a.target_high}",
+        f"max_reasoning_steps = {a.max_reasoning_steps}",
         f"deep_analysis_window_days = {a.deep_analysis_window_days}",
         "",
         "[wiki]",

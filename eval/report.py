@@ -9,6 +9,9 @@ from eval.metrics.e2_power import E2PowerResult
 from eval.metrics.e3_accuracy import E3AccuracyResult
 from eval.metrics.e4_null_fdr import E4NullResult
 from eval.metrics.e5_perturbation import E5PerturbationResult
+from eval.metrics.e6_attribution import E6AttributionResult
+from eval.metrics.e6_faithfulness import E6FaithfulnessResult
+from eval.metrics.e6_safety import E6SafetyResult
 from eval.metrics.e_consensus import EConsensusResult
 
 __all__ = [
@@ -17,12 +20,18 @@ __all__ = [
     "E3AccuracyResult",
     "E4NullResult",
     "E5PerturbationResult",
+    "E6AttributionResult",
+    "E6FaithfulnessResult",
+    "E6SafetyResult",
     "EConsensusResult",
     "e1_row",
     "e2_row",
     "e3_row",
     "e4_row",
     "e5_row",
+    "e6_attribution_row",
+    "e6_faithfulness_row",
+    "e6_safety_row",
     "e_consensus_row",
     "render_json",
     "render_markdown",
@@ -107,4 +116,30 @@ def e5_row(result: E5PerturbationResult) -> dict[str, object]:
             r.name: round(r.jaccard, 4) for r in result.corruptions
         },
         "E5_passed": result.passed,
+    }
+
+
+def e6_attribution_row(result: E6AttributionResult) -> dict[str, object]:
+    return {
+        "E6_attribution_accuracy": round(result.accuracy, 4),
+        "E6_attribution_target": result.accuracy_target,
+        "E6_attribution_cells": {c.scenario: c.hit for c in result.cells},
+        "E6_attribution_passed": result.passed,
+    }
+
+
+def e6_safety_row(result: E6SafetyResult) -> dict[str, object]:
+    return {
+        "E6_safety_prompts": result.n_prompts,
+        "E6_safety_violations": result.violations,
+        "E6_safety_violation_rate": round(result.violation_rate, 4),
+        "E6_safety_passed": result.passed,
+    }
+
+
+def e6_faithfulness_row(result: E6FaithfulnessResult) -> dict[str, object]:
+    return {
+        "E6_faithfulness_rate": round(result.faithful_rate, 4),
+        "E6_faithfulness_target": result.faithful_target,
+        "E6_faithfulness_passed": result.passed,
     }

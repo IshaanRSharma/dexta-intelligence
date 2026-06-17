@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from dexta_intelligence.cli._common import build_connectors
+from dexta_intelligence.memory.freshness import prune_stale_findings
 from dexta_intelligence.models import GoalStatus
 from dexta_intelligence.workflows.deep_analysis import persist_findings
 from dexta_intelligence.workflows.goals import goal_due, tick_goal
@@ -54,6 +55,7 @@ class CycleReport:
     anomalies: int = 0
     goals_ticked: int = 0
     findings_persisted: int = 0
+    stale_pruned: int = 0
     deep_ran: bool = False
     errors: tuple[tuple[str, str], ...] = ()
 
@@ -69,6 +71,7 @@ class _Accumulator:
     anomalies: int = 0
     goals_ticked: int = 0
     findings_persisted: int = 0
+    stale_pruned: int = 0
     deep_ran: bool = False
     errors: list[tuple[str, str]] = field(default_factory=list)
 
@@ -113,6 +116,11 @@ def run_cycle(
     except Exception as exc:
         acc.fail("monitor", exc)
 
+    try:
+        acc.stale_pruned = len(prune_stale_findings(store, now=moment))
+    except Exception as exc:
+        acc.fail("freshness", exc)
+
     _tick_due_goals(store, ctx, moment, model, acc)
 
     if deep:
@@ -124,6 +132,7 @@ def run_cycle(
         anomalies=acc.anomalies,
         goals_ticked=acc.goals_ticked,
         findings_persisted=acc.findings_persisted,
+        stale_pruned=acc.stale_pruned,
         deep_ran=acc.deep_ran,
         errors=tuple(acc.errors),
     )

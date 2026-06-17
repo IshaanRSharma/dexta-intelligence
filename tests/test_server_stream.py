@@ -68,8 +68,9 @@ class _ScriptedAgent:
             on_event(ReasoningEvent("tool_result", {"name": "tir_snapshot", "ok": True}))
             on_event(ReasoningEvent("tool_call", {"name": "find_spikes", "args": {"day": "x"}}))
             on_event(ReasoningEvent("tool_result", {"name": "find_spikes", "ok": False}))
-            # The loop's own raw answer must be suppressed by the endpoint.
-            on_event(ReasoningEvent("answer", {"text": "raw loop text"}))
+            on_event(ReasoningEvent("answer_start", {}))
+            on_event(ReasoningEvent("answer_delta", {"delta": "Your TIR was "}))
+            on_event(ReasoningEvent("answer_delta", {"delta": "68%."}))
         return ChatAnswer(
             text="Your TIR was 68%.",
             tools_used=("tir_snapshot", "find_spikes"),
@@ -118,11 +119,19 @@ def test_stream_emits_events_in_order_ending_with_answer(
     events = _read_sse(resp.text)
 
     kinds = [e["kind"] for e in events]
-    assert kinds == ["tool_call", "tool_result", "tool_call", "tool_result", "answer"]
+    assert kinds[:4] == ["tool_call", "tool_result", "tool_call", "tool_result"]
+    assert "answer_start" in kinds
+    assert kinds.count("answer_delta") == 2
+    assert kinds[-1] == "answer"
 
     assert events[0]["payload"]["name"] == "tir_snapshot"
     assert events[1]["payload"]["ok"] is True
     assert events[3]["payload"]["ok"] is False
+
+    streamed = "".join(
+        e["payload"]["delta"] for e in events if e["kind"] == "answer_delta"
+    )
+    assert streamed == "Your TIR was 68%."
 
     final = events[-1]
     assert final["payload"]["text"] == "Your TIR was 68%."
@@ -238,6 +247,60 @@ def test_history_endpoint_empty_without_session(tmp_path: Path) -> None:
     client = _client(store)
     assert client.get("/api/history").json() == {"turns": []}
     assert client.get("/api/history?sid=unknown").json() == {"turns": []}
+    store.close()
+
+
+def test_sessions_endpoint_lists_distinct_sessions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    _HistoryCapturingAgent.seen_history = []
+    _patch_model_and_agent(monkeypatch, _HistoryCapturingAgent)
+    client = _client(store)
+
+    client.get("/api/ask/stream?q=why did I spike Tuesday&sid=s1")
+    client.get("/api/ask/stream?q=what about my sleep&sid=s2")
+
+    sessions = client.get("/api/sessions").json()["sessions"]
+    by_id = {s["session_id"]: s for s in sessions}
+    assert set(by_id) == {"s1", "s2"}
+    assert by_id["s1"]["preview"] == "why did I spike Tuesday"
+    assert by_id["s2"]["preview"] == "what about my sleep"
+    assert by_id["s1"]["turn_count"] == 2  # one user + one assistant turn
+    # Newest-active first: s2 was asked last.
+    assert sessions[0]["session_id"] == "s2"
+    store.close()
+
+
+def test_sessions_endpoint_empty_without_turns(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    assert _client(store).get("/api/sessions").json() == {"sessions": []}
+    store.close()
+
+
+def test_delete_session_removes_turns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _store(tmp_path)
+    _patch_model_and_agent(monkeypatch, _HistoryCapturingAgent)
+    client = _client(store)
+
+    client.get("/api/ask/stream?q=first question&sid=s1")
+    client.get("/api/ask/stream?q=second question&sid=s2")
+    assert len(client.get("/api/sessions").json()["sessions"]) == 2
+
+    resp = client.delete("/api/sessions/s1")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "deleted": 2}
+    sessions = client.get("/api/sessions").json()["sessions"]
+    assert len(sessions) == 1
+    assert sessions[0]["session_id"] == "s2"
+    assert client.get("/api/history?sid=s1").json() == {"turns": []}
+    store.close()
+
+
+def test_delete_missing_session_returns_404(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).delete("/api/sessions/ghost")
+    assert resp.status_code == 404
     store.close()
 
 

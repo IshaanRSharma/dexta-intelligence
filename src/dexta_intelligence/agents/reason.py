@@ -36,10 +36,10 @@ _DEFAULT_MAX_STEPS = 6
 class ReasoningEvent:
     """One streamed step of the loop, for live surfaces (SSE, CLI trace).
 
-    ``kind`` is ``tool_call`` (the agent is about to run a tool), ``tool_result``
-    (it came back), or ``answer`` (final prose). ``payload`` is JSON-serializable
-    so a surface can forward it verbatim; it mirrors the run → tool-call →
-    tool-result → text shape of agent-UI streaming protocols.
+    ``kind`` is ``tool_call`` / ``tool_result`` (tool work), ``answer_start`` /
+    ``answer_delta`` (token/chunk streaming of the final prose), or ``answer``
+    (legacy full-text; prefer deltas for live surfaces). ``payload`` is
+    JSON-serializable so a surface can forward it verbatim.
     """
 
     kind: str
@@ -131,10 +131,24 @@ def run_reasoning_loop(
     evidence: dict[str, Any] = {}
 
     for _ in range(max_steps):
+        chunks: list[Any] = []
+        answer_started = False
         try:
-            response = bound.invoke(messages)
+            stream_fn = getattr(bound, "stream", None)
+            if stream_fn is None:
+                response = bound.invoke(messages)
+            else:
+                for chunk in stream_fn(messages):
+                    chunks.append(chunk)
+                    delta = _chunk_text(chunk)
+                    if delta:
+                        if not answer_started:
+                            _emit(on_event, ReasoningEvent("answer_start", {}))
+                            answer_started = True
+                        _emit(on_event, ReasoningEvent("answer_delta", {"delta": delta}))
+                response = _merge_chunks(chunks) if chunks else bound.invoke(messages)
         except Exception as exc:
-            logger.warning("reasoning: model.invoke failed", exc_info=True)
+            logger.warning("reasoning: model call failed", exc_info=True)
             return ReasoningResult(
                 answer="",
                 steps=steps,
@@ -146,7 +160,9 @@ def run_reasoning_loop(
         tool_calls = list(getattr(response, "tool_calls", None) or [])
         if not tool_calls:
             answer = _text_of(response)
-            _emit(on_event, ReasoningEvent("answer", {"text": answer}))
+            if not answer_started and answer:
+                _emit(on_event, ReasoningEvent("answer_start", {}))
+                _emit(on_event, ReasoningEvent("answer_delta", {"delta": answer}))
             return ReasoningResult(
                 answer=answer,
                 steps=steps,
@@ -229,6 +245,43 @@ def _emit(on_event: Callable[[ReasoningEvent], None] | None, event: ReasoningEve
 def _merge_evidence(pool: dict[str, Any], name: str, idx: int, numbers: dict[str, Any]) -> None:
     if numbers:
         pool[f"{name}_{idx}"] = numbers
+
+
+def _chunk_text(chunk: Any) -> str:
+    """Incremental text from one streamed model chunk."""
+    content = getattr(chunk, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return ""
+
+
+def _merge_chunks(chunks: list[Any]) -> Any:
+    """Fold streamed chunks into one response-shaped object."""
+    if not chunks:
+        return type("_Empty", (), {"content": "", "tool_calls": []})()
+    merged = chunks[0]
+    for chunk in chunks[1:]:
+        add = getattr(merged, "__add__", None)
+        if callable(add):
+            try:
+                merged = add(chunk)
+                continue
+            except TypeError:
+                pass
+        break
+    else:
+        return merged
+    content = "".join(_chunk_text(c) for c in chunks)
+    tool_calls: list[Any] = []
+    for chunk in chunks:
+        tool_calls.extend(getattr(chunk, "tool_calls", None) or [])
+    return type("_Merged", (), {"content": content, "tool_calls": tool_calls})()
 
 
 def _text_of(response: Any) -> str:

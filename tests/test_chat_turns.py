@@ -78,3 +78,46 @@ class TestChatTurns:
         store.append_chat_turn(_turn("s1", "assistant", "after", T0 + timedelta(minutes=1)))
         got = store.get_chat_turns("s1")
         assert [t.content for t in got] == ["before", "after"]
+
+
+class TestChatSessions:
+    def test_empty_when_no_turns(self, store: SQLiteStore) -> None:
+        assert store.get_chat_sessions() == []
+
+    def test_groups_by_session_newest_active_first(self, store: SQLiteStore) -> None:
+        store.append_chat_turn(_turn("s1", "user", "first question", T0))
+        store.append_chat_turn(_turn("s1", "assistant", "answer one", T0 + timedelta(minutes=1)))
+        store.append_chat_turn(_turn("s2", "user", "later question", T0 + timedelta(hours=1)))
+
+        got = store.get_chat_sessions()
+        assert [s.session_id for s in got] == ["s2", "s1"]  # s2 is more recently active
+        by_id = {s.session_id: s for s in got}
+        assert by_id["s1"].turn_count == 2
+        assert by_id["s1"].preview == "first question"  # first user message
+        assert by_id["s2"].turn_count == 1
+        assert by_id["s2"].last_ts == T0 + timedelta(hours=1)
+
+    def test_preview_is_first_user_message(self, store: SQLiteStore) -> None:
+        store.append_chat_turn(_turn("s1", "assistant", "preamble", T0))
+        store.append_chat_turn(_turn("s1", "user", "the real question", T0 + timedelta(minutes=1)))
+        (got,) = store.get_chat_sessions()
+        assert got.preview == "the real question"
+
+    def test_limit_caps_session_count(self, store: SQLiteStore) -> None:
+        for i in range(4):
+            store.append_chat_turn(_turn(f"s{i}", "user", f"q{i}", T0 + timedelta(minutes=i)))
+        assert len(store.get_chat_sessions(limit=2)) == 2
+
+    def test_delete_removes_session_turns(self, store: SQLiteStore) -> None:
+        store.append_chat_turn(_turn("s1", "user", "keep me", T0))
+        store.append_chat_turn(_turn("s2", "user", "delete me", T0 + timedelta(hours=1)))
+        store.append_chat_turn(_turn("s2", "assistant", "gone", T0 + timedelta(hours=1, minutes=1)))
+
+        deleted = store.delete_chat_session("s2")
+        assert deleted == 2
+        assert store.get_chat_turns("s2") == []
+        assert len(store.get_chat_turns("s1")) == 1
+        assert [s.session_id for s in store.get_chat_sessions()] == ["s1"]
+
+    def test_delete_missing_session_is_noop(self, store: SQLiteStore) -> None:
+        assert store.delete_chat_session("missing") == 0

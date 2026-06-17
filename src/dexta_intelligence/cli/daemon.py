@@ -74,7 +74,7 @@ def _print_cycle(out: TextIO, report: CycleReport) -> None:
     out.write(
         f"[{report.started_at.isoformat()}] synced {report.sources_synced} src · "
         f"{report.anomalies} anomaly(ies) · {report.goals_ticked} goal(s) ticked · "
-        f"{report.findings_persisted} finding(s){deep}\n"
+        f"{report.findings_persisted} finding(s) · {report.stale_pruned} retired{deep}\n"
     )
     for step, msg in report.errors:
         out.write(f"  ! {step}: {msg}\n")

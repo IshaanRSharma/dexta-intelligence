@@ -69,13 +69,20 @@ def cmd_ask(
             timezone=config.analysis.timezone,
         )
         low, high = config.analysis.target_low, config.analysis.target_high
+        max_steps = config.analysis.max_reasoning_steps
         if seek:
             answer = GoalSeekingAgent(
-                model=chat_model, target_low=low, target_high=high
+                model=chat_model,
+                max_steps=max_steps,
+                target_low=low,
+                target_high=high,
             ).pursue(ctx, question)
         else:
             answer = OrchestratorAgent(
-                model=chat_model, target_low=low, target_high=high
+                model=chat_model,
+                max_steps=max_steps,
+                target_low=low,
+                target_high=high,
             ).ask(ctx, question)
     finally:
         _maybe_close_store(store, opener)

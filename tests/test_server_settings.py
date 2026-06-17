@@ -199,6 +199,7 @@ def test_general_save_preserves_card_credentials(tmp_path: Path) -> None:
         data={
             "target_low": "65",
             "target_high": "180",
+            "max_reasoning_steps": "24",
             "deep_analysis_window_days": "90",
             "path": str(tmp_path / "wiki"),
             "git": "off",
@@ -211,6 +212,7 @@ def test_general_save_preserves_card_credentials(tmp_path: Path) -> None:
     assert resp.status_code == 303
     reloaded = load_config(toml_path)
     assert reloaded.analysis.target_low == 65
+    assert reloaded.analysis.max_reasoning_steps == 24
     assert reloaded.oura.access_token == "oura-token-9876"
 
 

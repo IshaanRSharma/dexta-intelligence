@@ -14,6 +14,7 @@ import json
 import os
 import queue
 import threading
+import uuid
 from datetime import UTC, datetime, time
 from importlib import resources
 from pathlib import Path
@@ -63,7 +64,7 @@ from dexta_intelligence.server.settings_schema import (
 # install degrades to ``None`` and ``create_app`` raises a friendly RuntimeError.
 try:
     from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-    from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+    from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 except ModuleNotFoundError:  # pragma: no cover - exercised only without the extra
     FastAPI = Form = HTTPException = Request = HTMLResponse = RedirectResponse = None  # type: ignore[assignment,misc]
     StreamingResponse = File = UploadFile = None  # type: ignore[assignment,misc]
@@ -73,7 +74,7 @@ if TYPE_CHECKING:
 
     from dexta_intelligence.cli._common import StoreOpener
     from dexta_intelligence.config import Config
-    from dexta_intelligence.models import Finding, Goal
+    from dexta_intelligence.models import Finding, Goal, InvestigationRun
     from dexta_intelligence.store.port import StoragePort
 
 _INSTALL_HINT = (
@@ -144,6 +145,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     templates.env.globals["static_version"] = str(int(max(_static_stamps, default=0)))
     templates.env.globals["nav_items"] = (
         ("/", "Dashboard"),
+        ("/investigations", "Investigations"),
         ("/wiki", "Wiki"),
         ("/goals", "Goals"),
         ("/chat", "Chat"),
@@ -219,6 +221,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             below_floor=gates.below_hard_floor,
             cards=cards,
             graveyard=[_graveyard_row(f) for f in graveyard],
+            lenses=_lens_names(config),
         )
 
     @app.post("/actions/sync")
@@ -231,11 +234,14 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         return RedirectResponse(f"/?flash={flash}", status_code=303)
 
     @app.post("/actions/analyze")
-    def action_analyze() -> Any:
+    def action_analyze(lens: str = Form("analyze")) -> Any:
         from dexta_intelligence.cli.analysis import cmd_analyze  # noqa: PLC0415
 
         buf = io.StringIO()
-        code = cmd_analyze(config=config, db_path=None, out=buf)
+        try:
+            code = cmd_analyze(config=config, db_path=None, out=buf, lens=lens)
+        except ValueError:  # unknown lens — should not happen from the picker
+            return RedirectResponse("/?flash=analyze_fail", status_code=303)
         if code == 0:
             flash = "analyze_ok"
         elif "Need at least" in buf.getvalue():
@@ -243,6 +249,54 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         else:
             flash = "analyze_fail"
         return RedirectResponse(f"/?flash={flash}", status_code=303)
+
+    @app.post("/actions/investigate")
+    def action_investigate(question: str = Form(...)) -> Any:
+        from dexta_intelligence.agents.base import AgentContext  # noqa: PLC0415
+        from dexta_intelligence.agents.coordinator import CoordinatorAgent  # noqa: PLC0415
+        from dexta_intelligence.workflows.deep_analysis import persist_findings  # noqa: PLC0415
+
+        goal = question.strip()
+        if not goal:
+            return RedirectResponse("/?flash=investigate_empty", status_code=303)
+        store = store_opener(config, None)
+        try:
+            coverage = store.coverage()
+            gates = ColdStartReport.from_coverage(coverage)
+            if gates.below_hard_floor:
+                return RedirectResponse("/?flash=investigate_skip", status_code=303)
+            end = coverage.last_ts.date() if coverage.last_ts is not None else None
+            ctx = AgentContext(
+                store=store,
+                window=_analysis_window(config, end),
+                gates=gates,
+                run_id=f"gui-investigate-{uuid.uuid4()}",
+                timezone=config.analysis.timezone,
+            )
+            coordinator = CoordinatorAgent(model=discovery_model(config), config=config)
+            findings = coordinator.investigate(ctx, goal=goal)
+            persisted = persist_findings(store, findings)
+            flash = f"investigate_ok:{len(persisted)}"
+        except Exception:
+            flash = "investigate_fail"
+        finally:
+            _close(store, store_opener)
+        return RedirectResponse(f"/?flash={flash}", status_code=303)
+
+    @app.get("/investigations", response_class=HTMLResponse)
+    def investigations(request: Request) -> Any:
+        store = store_opener(config, None)
+        try:
+            runs = store.get_investigation_runs(limit=50)
+        finally:
+            _close(store, store_opener)
+        now = datetime.now(tz=UTC)
+        return _render(
+            "investigations.html",
+            request,
+            "/investigations",
+            runs=[_run_view(r, now) for r in runs],
+        )
 
     @app.post("/actions/upload")
     async def action_upload(file: UploadFile = File(...)) -> Any:  # noqa: B008 - FastAPI idiom
@@ -438,6 +492,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             )
             agent = ChatAgent(
                 model=model,
+                max_steps=config.analysis.max_reasoning_steps,
                 target_low=config.analysis.target_low,
                 target_high=config.analysis.target_high,
             )
@@ -509,6 +564,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                 )
                 agent = OrchestratorAgent(
                     model=model,
+                    max_steps=config.analysis.max_reasoning_steps,
                     target_low=config.analysis.target_low,
                     target_high=config.analysis.target_high,
                 )
@@ -518,13 +574,23 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                     history = [{"role": t.role, "content": t.content} for t in prior]
 
                 def _sink(event: Any) -> None:
-                    # Drop the loop's raw answer — the audited final answer is
-                    # emitted below once the guard/treatment rails have run.
+                    # Drop the loop's legacy full-text answer — the endpoint emits
+                    # audited prose after guard/treatment rails.
                     if event.kind == "answer":
                         return
                     events.put({"kind": event.kind, "payload": event.payload})
 
                 answer = agent.ask(ctx, question, on_event=_sink, history=history)
+                # Persist before signalling the answer so a session-list refresh
+                # triggered by the answer event already sees this conversation.
+                if sid:
+                    now = datetime.now(UTC)
+                    store.append_chat_turn(
+                        ChatTurn(session_id=sid, role="user", content=question, ts=now)
+                    )
+                    store.append_chat_turn(
+                        ChatTurn(session_id=sid, role="assistant", content=answer.text, ts=now)
+                    )
                 events.put(
                     {
                         "kind": "answer",
@@ -536,14 +602,6 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                         },
                     }
                 )
-                if sid:
-                    now = datetime.now(UTC)
-                    store.append_chat_turn(
-                        ChatTurn(session_id=sid, role="user", content=question, ts=now)
-                    )
-                    store.append_chat_turn(
-                        ChatTurn(session_id=sid, role="assistant", content=answer.text, ts=now)
-                    )
             except Exception as exc:
                 events.put(
                     {
@@ -571,7 +629,15 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                     break
                 yield _sse(item)
 
-        return StreamingResponse(_drain(), media_type="text/event-stream")
+        return StreamingResponse(
+            _drain(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.get("/api/history")
     def api_history(sid: str | None = None) -> Any:
@@ -594,6 +660,39 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                 for t in turns
             ]
         }
+
+    @app.get("/api/sessions")
+    def api_sessions() -> Any:
+        """Past conversations (newest-active first) for the chat history rail."""
+        store = store_opener(config, None)
+        try:
+            sessions = store.get_chat_sessions(limit=50)
+        finally:
+            _close(store, store_opener)
+        now = datetime.now(tz=UTC)
+        return {
+            "sessions": [
+                {
+                    "session_id": s.session_id,
+                    "preview": s.preview or "(no message)",
+                    "turn_count": s.turn_count,
+                    "relative": _relative_time(s.last_ts, now),
+                }
+                for s in sessions
+            ]
+        }
+
+    @app.delete("/api/sessions/{session_id}")
+    def api_delete_session(session_id: str) -> Any:
+        """Remove one chat conversation and all its turns."""
+        store = store_opener(config, None)
+        try:
+            deleted = store.delete_chat_session(session_id)
+        finally:
+            _close(store, store_opener)
+        if deleted == 0:
+            return JSONResponse({"ok": False, "deleted": 0}, status_code=404)
+        return {"ok": True, "deleted": deleted}
 
     # ── settings ──────────────────────────────────────────────────────────────
 
@@ -693,6 +792,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         request: Request,
         target_low: str = Form(...),
         target_high: str = Form(...),
+        max_reasoning_steps: str = Form(...),
         deep_analysis_window_days: str = Form(...),
         path: str = Form(...),
         git: str = Form("off"),
@@ -703,15 +803,19 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         try:
             low = _positive_int("target low", target_low)
             high = _positive_int("target high", target_high)
+            steps = _positive_int("max tool calls per question", max_reasoning_steps)
             window = _positive_int("analysis window (days)", deep_analysis_window_days)
             if low >= high:
                 raise _SettingsError("Target low must be below target high.")
+            if steps < 4 or steps > 64:
+                raise _SettingsError("Max tool calls per question must be between 4 and 64.")
             if backend not in ("sqlite", "postgres"):
                 raise _SettingsError("Storage backend must be sqlite or postgres.")
             updates: dict[str, dict[str, Any]] = {
                 "analysis": {
                     "target_low": low,
                     "target_high": high,
+                    "max_reasoning_steps": steps,
                     "deep_analysis_window_days": window,
                 },
                 "wiki": {"path": path, "git": git in ("on", "true", "1")},
@@ -851,6 +955,13 @@ _SOURCE_LABELS: dict[str, str] = {
 }
 
 
+def _lens_names(config: Config) -> list[str]:
+    """Lens picker options: built-ins overlaid with user ``[lens.*]`` entries."""
+    from dexta_intelligence.workflows.lenses import BUILTIN_LENSES  # noqa: PLC0415
+
+    return sorted({**BUILTIN_LENSES, **config.lens})
+
+
 def _sse(event: dict[str, Any]) -> str:
     """Serialize one ``{kind, payload}`` event as a Server-Sent Events frame."""
     return f"data: {json.dumps(event, default=str)}\n\n"
@@ -921,10 +1032,22 @@ def _dashboard_banners(
             f"Need at least {HARD_FLOOR_DAYS:.0f} days of data before analysis.",
         ),
         "analyze_fail": ("bad", "Analysis failed — see the CLI log for details."),
+        "investigate_skip": (
+            "setup",
+            f"Need at least {HARD_FLOOR_DAYS:.0f} days of data before an investigation.",
+        ),
+        "investigate_empty": ("bad", "Type a question to investigate."),
+        "investigate_fail": ("bad", "Investigation failed — see the CLI log for details."),
     }
     if flash in flash_msgs:
         kind, message = flash_msgs[flash]
         banners.append({"kind": kind, "message": message})
+    elif flash and flash.startswith("investigate_ok"):
+        n = flash.split(":", 1)[1] if ":" in flash else "0"
+        plural = "s" if n != "1" else ""
+        banners.append(
+            {"kind": "ok", "message": f"Investigation complete — {n} finding{plural} banked."}
+        )
     elif flash and flash.startswith("upload_ok"):
         n = flash.split(":", 1)[1] if ":" in flash else "0"
         banners.append({"kind": "ok", "message": f"Imported {n} glucose rows from CSV."})
@@ -1156,6 +1279,29 @@ def _finding_card(finding: Finding, active: list[Finding]) -> dict[str, Any]:
         "skeptic_notes": finding.skeptic_notes,
         "recurrence": recurrence + 1,
         "body_html": markdown_to_html(finding.body_md) if finding.body_md else "",
+    }
+
+
+def _run_view(run: InvestigationRun, now: datetime) -> dict[str, Any]:
+    """Shape one investigation run for the Investigations page."""
+    return {
+        "question": run.question or "Whole-record investigation",
+        "kind": run.kind,
+        "status": run.status,
+        "when": _relative_time(run.finished_at, now),
+        "window": f"{run.window_start.isoformat()} to {run.window_end.isoformat()}",
+        "plan": run.plan,
+        "trace": run.trace,
+        "n_findings": run.n_findings,
+        "findings": [
+            {
+                "headline": f.headline,
+                "kind": f.kind,
+                "confidence_pct": round(f.confidence * 100),
+                "status": f.status,
+            }
+            for f in run.findings
+        ],
     }
 
 

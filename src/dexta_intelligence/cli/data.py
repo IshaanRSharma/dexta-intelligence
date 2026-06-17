@@ -64,6 +64,7 @@ model = "claude-sonnet-4-6"
 [analysis]
 target_low = 70
 target_high = 180
+max_reasoning_steps = 20
 deep_analysis_window_days = 90
 """
 

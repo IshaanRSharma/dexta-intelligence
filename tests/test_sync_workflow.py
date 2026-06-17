@@ -10,6 +10,7 @@ import pytest
 from dexta_intelligence.connectors.base import Connector, HealthReport, NormalizedBatch
 from dexta_intelligence.models import (
     ActivityEvent,
+    ChatSession,
     ChatTurn,
     CoverageStats,
     DeviceEvent,
@@ -22,6 +23,7 @@ from dexta_intelligence.models import (
     Hypothesis,
     InsulinEvent,
     InsulinKind,
+    InvestigationRun,
     MealEvent,
     PredictionEvent,
     RawEvent,
@@ -76,6 +78,7 @@ class FakeStore:
         self.goals: list[Goal] = []
         self.goal_checkpoints: list[GoalCheckpoint] = []
         self.chat_turns: list[ChatTurn] = []
+        self.investigation_runs: list[InvestigationRun] = []
 
     def migrate(self) -> None:
         return None
@@ -278,6 +281,40 @@ class FakeStore:
     def get_chat_turns(self, session_id: str, *, limit: int = 50) -> list[ChatTurn]:
         turns = [t for t in self.chat_turns if t.session_id == session_id]
         return turns[-limit:]
+
+    def get_chat_sessions(self, *, limit: int = 50) -> list[ChatSession]:
+        by_session: dict[str, list[ChatTurn]] = {}
+        for turn in self.chat_turns:
+            by_session.setdefault(turn.session_id, []).append(turn)
+        sessions = [
+            ChatSession(
+                session_id=sid,
+                last_ts=turns[-1].ts,
+                turn_count=len(turns),
+                preview=next((t.content for t in turns if t.role == "user"), ""),
+            )
+            for sid, turns in by_session.items()
+        ]
+        sessions.sort(key=lambda s: s.last_ts, reverse=True)
+        return sessions[:limit]
+
+    def delete_chat_session(self, session_id: str) -> int:
+        before = len(self.chat_turns)
+        self.chat_turns = [t for t in self.chat_turns if t.session_id != session_id]
+        return before - len(self.chat_turns)
+
+    def insert_investigation_run(self, run: InvestigationRun) -> int:
+        self.investigation_runs.append(run)
+        return len(self.investigation_runs)
+
+    def get_investigation_runs(self, *, limit: int = 50) -> list[InvestigationRun]:
+        return list(reversed(self.investigation_runs))[:limit]
+
+    def get_investigation_run(self, run_db_id: int) -> InvestigationRun | None:
+        idx = run_db_id - 1
+        if 0 <= idx < len(self.investigation_runs):
+            return self.investigation_runs[idx]
+        return None
 
 
 @dataclass

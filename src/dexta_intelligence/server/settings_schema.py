@@ -560,6 +560,14 @@ ANALYSIS_PANEL: PanelSchema = PanelSchema(
         FieldSchema("target_low", "Target low (mg/dL)", kind=FieldKind.NUMBER, min=40, max=120),
         FieldSchema("target_high", "Target high (mg/dL)", kind=FieldKind.NUMBER, min=120, max=300),
         FieldSchema(
+            "max_reasoning_steps",
+            "Max tool calls per question",
+            kind=FieldKind.NUMBER,
+            min=4,
+            max=64,
+            hint="How many tools chat can call before stopping (orchestrator loop). Raise for complex multi-step questions.",
+        ),
+        FieldSchema(
             "deep_analysis_window_days",
             "Analysis window (days)",
             kind=FieldKind.NUMBER,

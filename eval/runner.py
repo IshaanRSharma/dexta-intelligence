@@ -10,6 +10,9 @@ from eval.metrics.e2_power import run_e2_power
 from eval.metrics.e3_accuracy import run_e3_accuracy
 from eval.metrics.e4_null_fdr import run_e4_null_fdr
 from eval.metrics.e5_perturbation import run_e5
+from eval.metrics.e6_attribution import run_e6_attribution
+from eval.metrics.e6_faithfulness import run_e6_faithfulness
+from eval.metrics.e6_safety import run_e6_safety
 from eval.metrics.e_consensus import run_e_consensus
 from eval.report import (
     e1_row,
@@ -17,6 +20,9 @@ from eval.report import (
     e3_row,
     e4_row,
     e5_row,
+    e6_attribution_row,
+    e6_faithfulness_row,
+    e6_safety_row,
     e_consensus_row,
     render_json,
     render_markdown,
@@ -56,6 +62,9 @@ def main(argv: list[str] | None = None) -> int:
     ec.add_argument("--days", type=int, default=14, help="Days of synthetic data")
     ec.add_argument("--seed", type=int, default=9100, help="RNG seed")
     ec.add_argument("--format", choices=("md", "json"), default="md")
+
+    e6 = sub.add_parser("e6", help="E6 end-to-end agentic eval (needs a model)")
+    e6.add_argument("--format", choices=("md", "json"), default="md")
 
     args = parser.parse_args(argv)
     handler = _HANDLERS.get(args.command)
@@ -146,6 +155,44 @@ def _cmd_consensus(args: argparse.Namespace) -> int:
     return 0 if result.passed else 1
 
 
+def _cmd_e6(args: argparse.Namespace) -> int:
+    """End-to-end agentic eval: attribution, faithfulness, safety. Needs a model.
+
+    Skippable without a key (returns 2 with a clear message) so the deterministic
+    evals stay key-free while E6 grades the real agent when a provider is set.
+    """
+    from dexta_intelligence.cli._common import discovery_model  # noqa: PLC0415
+    from dexta_intelligence.config import load_config  # noqa: PLC0415
+
+    model = discovery_model(load_config(None))
+    if model is None:
+        sys.stdout.write(
+            "E6 needs a language model. Set a provider and an API key, then retry.\n"
+        )
+        return 2
+
+    attribution = run_e6_attribution(model)
+    faithfulness = run_e6_faithfulness(model)
+    safety = run_e6_safety(model)
+    rows: dict[str, object] = {
+        **e6_attribution_row(attribution),
+        **e6_faithfulness_row(faithfulness),
+        **e6_safety_row(safety),
+    }
+    passed = attribution.passed and faithfulness.passed and safety.passed
+    status = "PASS" if passed else "FAIL"
+    _emit(
+        rows,
+        args.format,
+        f"\n**{status}** attribution {attribution.accuracy:.0%} "
+        f"(target >= {attribution.accuracy_target:.0%}), "
+        f"faithful {faithfulness.faithful_rate:.0%} "
+        f"(target >= {faithfulness.faithful_target:.0%}), "
+        f"dosing violations {safety.violations}/{safety.n_prompts} (target 0)",
+    )
+    return 0 if passed else 1
+
+
 _HANDLERS = {
     "e4-null": _cmd_e4,
     "e1": _cmd_e1,
@@ -153,6 +200,7 @@ _HANDLERS = {
     "e2": _cmd_e2,
     "e3": _cmd_e3,
     "consensus": _cmd_consensus,
+    "e6": _cmd_e6,
 }
 
 

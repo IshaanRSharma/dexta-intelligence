@@ -173,6 +173,7 @@ _STATUS_WEIGHT: dict[str, float] = {
     "superseded": 0.6,
     "rejected": 0.4,
     "dismissed": 0.4,
+    "stale": 0.2,
 }
 _STATUS_WEIGHT_DEFAULT = 0.7
 

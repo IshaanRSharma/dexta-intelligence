@@ -20,13 +20,14 @@ Design rules
 from __future__ import annotations
 
 import enum
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 __all__ = [
     "ActivityEvent",
+    "ChatSession",
     "ChatTurn",
     "CoverageStats",
     "DeviceEvent",
@@ -42,12 +43,14 @@ __all__ = [
     "HypothesisStatus",
     "InsulinEvent",
     "InsulinKind",
+    "InvestigationRun",
     "MealEvent",
     "PredictionEvent",
     "RawEvent",
     "RecoveryEvent",
     "Rollup",
     "RollupPeriod",
+    "RunFinding",
     "SleepEvent",
 ]
 
@@ -239,6 +242,7 @@ class FindingStatus(enum.StrEnum):
     SUPERSEDED = "superseded"
     REJECTED = "rejected"
     DISMISSED = "dismissed"
+    STALE = "stale"
 
 
 class FindingStats(_FrozenModel):
@@ -280,6 +284,11 @@ class Finding(_FrozenModel):
     window_end: datetime | None = None
     id: int | None = None
     superseded_by: int | None = None
+    #: When this finding was last re-derived. Drives freshness: a finding not
+    #: re-confirmed within its TTL is retired to STALE. ``seen_count`` is how many
+    #: analyses have produced it (recurrence), which lengthens the TTL.
+    last_verified: datetime | None = None
+    seen_count: int = 1
 
 
 class HypothesisStatus(enum.StrEnum):
@@ -372,6 +381,66 @@ class ChatTurn(_FrozenModel):
     id: int | None = None
 
     _utc = field_validator("ts")(_require_utc)
+
+
+class ChatSession(_FrozenModel):
+    """A summary of one chat conversation — for enumerating past threads.
+
+    ``last_ts`` is the most recent turn's timestamp, ``turn_count`` the number of
+    messages, ``preview`` the first user message (a label for the conversation).
+    """
+
+    session_id: str
+    last_ts: datetime
+    turn_count: int
+    preview: str
+
+    _utc = field_validator("last_ts")(_require_utc)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Investigation runs (the observable record of one investigation)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class RunFinding(_FrozenModel):
+    """A snapshot of one finding as it stood when an investigation produced it.
+
+    An investigation run is an immutable historical record, so it stores what it
+    found at the time rather than a live link that drifts as findings are
+    superseded.
+    """
+
+    headline: str
+    kind: str
+    confidence: float
+    status: str
+
+
+class InvestigationRun(_FrozenModel):
+    """A persisted record of one coordinator investigation.
+
+    Captures the observable process behind a set of findings: which producers
+    were planned, the step-by-step trace of what ran, the findings produced
+    (snapshotted in ``findings``), and the window inspected. This is what turns
+    isolated answers into an auditable investigation history.
+    """
+
+    run_id: str
+    kind: str
+    status: str
+    question: str | None
+    window_start: date
+    window_end: date
+    plan: list[str]
+    trace: list[str]
+    findings: list[RunFinding]
+    n_findings: int
+    started_at: datetime
+    finished_at: datetime
+    id: int | None = None
+
+    _utc = field_validator("started_at", "finished_at")(_require_utc)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

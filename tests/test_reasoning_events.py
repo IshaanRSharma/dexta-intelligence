@@ -34,6 +34,18 @@ class _FakeModel:
         turn = self._turns.pop(0)
         return _AIMessage(content=turn) if isinstance(turn, str) else _AIMessage(tool_calls=turn)
 
+    def stream(self, _messages: list[Any]):
+        turn = self._turns[0]
+        if isinstance(turn, str):
+            self._turns.pop(0)
+            words = turn.split(" ")
+            for idx, word in enumerate(words):
+                suffix = " " if idx < len(words) - 1 else ""
+                yield _AIMessage(content=word + suffix)
+        else:
+            self._turns.pop(0)
+            yield _AIMessage(tool_calls=turn)
+
 
 def _echo_tool() -> ToolSpec:
     return ToolSpec(
@@ -51,10 +63,11 @@ def test_events_stream_in_order() -> None:
         model, [_echo_tool()], system="s", user="u", on_event=events.append
     )
     kinds = [e.kind for e in events]
-    assert kinds == ["tool_call", "tool_result", "answer"]
-    assert events[0].payload["name"] == "echo"
-    assert events[1].payload["ok"] is True
-    assert events[2].payload["text"] == "Done."
+    assert kinds[:2] == ["tool_call", "tool_result"]
+    assert "answer_start" in kinds
+    assert "answer_delta" in kinds
+    streamed = "".join(e.payload["delta"] for e in events if e.kind == "answer_delta")
+    assert streamed == "Done."
 
 
 def test_no_sink_is_fine() -> None:
@@ -76,6 +89,9 @@ class _CapturingModel:
     def invoke(self, messages: list[Any]) -> _AIMessage:
         self.seen = list(messages)
         return _AIMessage(content=self.answer)
+
+    def stream(self, messages: list[Any]):
+        yield self.invoke(messages)
 
 
 def test_history_is_seeded_before_the_current_turn() -> None:

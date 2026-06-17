@@ -220,7 +220,40 @@ def test_recall_digest_not_raw_findings_in_prompt(store: SQLiteStore) -> None:
     assert "body_md" not in prompt
     active = store.get_findings(status=FindingStatus.ACTIVE, limit=10)
     for finding in active:
-        if finding.kind == "investigation":
-            continue  # recipe records are intentionally surfaced as the past-investigations digest
         if finding.body_md and finding.body_md not in ("body", ""):
             assert finding.body_md not in prompt
+
+
+def test_investigation_run_persisted_with_plan_and_findings(store: SQLiteStore) -> None:
+    """investigate() records one InvestigationRun: plan, trace, and a findings snapshot."""
+    _seed_glucose(store)
+    ctx = _full_coverage_ctx(store)
+    findings = CoordinatorAgent(model=None).investigate(ctx)
+
+    runs = store.get_investigation_runs()
+    assert len(runs) == 1
+    run = runs[0]
+    assert run.run_id == "coordinator-test"
+    assert run.kind == "deep_analysis"  # no goal
+    assert run.status == "completed"
+    assert run.plan == list(PRODUCERS)
+    assert run.trace  # at least the plan line + one round line
+    assert run.n_findings == len(findings)
+    assert {f.headline for f in run.findings} == {f.headline for f in findings}
+
+
+def test_investigation_run_records_goal_and_feeds_recall(store: SQLiteStore) -> None:
+    """A goal-scoped run is kind='question' and is recalled by the planner."""
+    from dexta_intelligence.agents.coordinator import _past_investigations  # noqa: PLC0415
+
+    _seed_glucose(store)
+    ctx = _full_coverage_ctx(store)
+    CoordinatorAgent(model=None).investigate(ctx, goal="overnight lows")
+
+    run = store.get_investigation_runs()[0]
+    assert run.kind == "question"
+    assert run.question == "overnight lows"
+
+    digest = _past_investigations(ctx)
+    assert "overnight lows" in digest
+    assert "observation" in digest

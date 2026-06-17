@@ -24,11 +24,12 @@ so the two backends are observationally indistinguishable through the port.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.models import (
     ActivityEvent,
+    ChatSession,
     ChatTurn,
     CoverageStats,
     Finding,
@@ -43,12 +44,14 @@ from dexta_intelligence.models import (
     HypothesisStatus,
     InsulinEvent,
     InsulinKind,
+    InvestigationRun,
     MealEvent,
     PredictionEvent,
     RawEvent,
     RecoveryEvent,
     Rollup,
     RollupPeriod,
+    RunFinding,
     SleepEvent,
 )
 
@@ -196,7 +199,9 @@ CREATE TABLE IF NOT EXISTS findings (
     skeptic_notes TEXT,
     window_start TIMESTAMPTZ,
     window_end TIMESTAMPTZ,
-    superseded_by BIGINT
+    superseded_by BIGINT,
+    last_verified TIMESTAMPTZ,
+    seen_count INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_findings_agent_kind_status ON findings (agent, kind, status);
 
@@ -237,6 +242,22 @@ CREATE TABLE IF NOT EXISTS chat_turns (
     ts TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns (session_id, id);
+
+CREATE TABLE IF NOT EXISTS investigation_runs (
+    id BIGSERIAL PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    question TEXT,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    plan TEXT NOT NULL,
+    trace TEXT NOT NULL,
+    findings TEXT NOT NULL,
+    n_findings INTEGER NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL,
+    finished_at TIMESTAMPTZ NOT NULL
+);
 """
 
 
@@ -256,6 +277,30 @@ def _to_utc(value: datetime) -> datetime:
 
 def _opt_utc(value: datetime | None) -> datetime | None:
     return None if value is None else _to_utc(value)
+
+
+_RUN_COLUMNS = (
+    "id, run_id, kind, status, question, window_start, window_end, "
+    "plan, trace, findings, n_findings, started_at, finished_at"
+)
+
+
+def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:
+    return InvestigationRun(
+        id=r[0],
+        run_id=r[1],
+        kind=r[2],
+        status=r[3],
+        question=r[4],
+        window_start=date.fromisoformat(r[5]),
+        window_end=date.fromisoformat(r[6]),
+        plan=json.loads(r[7]),
+        trace=json.loads(r[8]),
+        findings=[RunFinding(**f) for f in json.loads(r[9])],
+        n_findings=r[10],
+        started_at=_to_utc(r[11]),
+        finished_at=_to_utc(r[12]),
+    )
 
 
 def _row_to_goal(r: tuple[Any, ...]) -> Goal:
@@ -294,6 +339,14 @@ class PostgresStore:
         """Create or upgrade the schema. Idempotent (IF NOT EXISTS throughout)."""
         with self._conn, self._conn.cursor() as cur:
             cur.execute(_SCHEMA)
+            # Additive column upgrades for DBs created before these columns existed.
+            cur.execute(
+                "ALTER TABLE findings ADD COLUMN IF NOT EXISTS last_verified TIMESTAMPTZ"
+            )
+            cur.execute(
+                "ALTER TABLE findings ADD COLUMN IF NOT EXISTS "
+                "seen_count INTEGER NOT NULL DEFAULT 1"
+            )
             cur.execute("SELECT version FROM schema_version")
             row = cur.fetchone()
             if row is None:
@@ -735,11 +788,13 @@ class PostgresStore:
 
     def insert_finding(self, finding: Finding) -> int:
         """Persist a finding with a freshly assigned id (any incoming id is ignored)."""
+        last_verified = finding.last_verified or datetime.now(tz=UTC)
         with self._conn, self._conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO findings (agent, kind, scope, headline, body_md, evidence, stats, "
-                "confidence, status, skeptic_notes, window_start, window_end, superseded_by) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                "confidence, status, skeptic_notes, window_start, window_end, superseded_by, "
+                "last_verified, seen_count) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     finding.agent,
                     finding.kind,
@@ -754,6 +809,8 @@ class PostgresStore:
                     _opt_utc(finding.window_start),
                     _opt_utc(finding.window_end),
                     finding.superseded_by,
+                    _to_utc(last_verified),
+                    finding.seen_count,
                 ),
             )
             row = cur.fetchone()
@@ -797,7 +854,8 @@ class PostgresStore:
         with self._conn.cursor() as cur:
             cur.execute(
                 "SELECT id, agent, kind, scope, headline, body_md, evidence, stats, confidence, "
-                "status, skeptic_notes, window_start, window_end, superseded_by FROM findings "
+                "status, skeptic_notes, window_start, window_end, superseded_by, last_verified, "
+                "seen_count FROM findings "
                 f"{where}ORDER BY id DESC LIMIT %s",
                 params,
             )
@@ -818,6 +876,8 @@ class PostgresStore:
                 window_start=_opt_utc(r[11]),
                 window_end=_opt_utc(r[12]),
                 superseded_by=r[13],
+                last_verified=_opt_utc(r[14]),
+                seen_count=r[15] if r[15] is not None else 1,
             )
             for r in fetched
         ]
@@ -966,6 +1026,80 @@ class PostgresStore:
             ChatTurn(id=r[0], session_id=r[1], role=r[2], content=r[3], ts=_to_utc(r[4]))
             for r in fetched
         ]
+
+    def get_chat_sessions(self, *, limit: int = 50) -> list[ChatSession]:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT session_id, MAX(ts) AS last_ts, COUNT(*) AS turn_count, "
+                "(SELECT content FROM chat_turns inner_t "
+                " WHERE inner_t.session_id = chat_turns.session_id AND inner_t.role = 'user' "
+                " ORDER BY inner_t.id ASC LIMIT 1) AS preview "
+                "FROM chat_turns GROUP BY session_id "
+                "ORDER BY last_ts DESC, MAX(id) DESC LIMIT %s",
+                (limit,),
+            )
+            fetched = cur.fetchall()
+        return [
+            ChatSession(
+                session_id=r[0],
+                last_ts=_to_utc(r[1]),
+                turn_count=int(r[2]),
+                preview=r[3] or "",
+            )
+            for r in fetched
+        ]
+
+    def delete_chat_session(self, session_id: str) -> int:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute("DELETE FROM chat_turns WHERE session_id = %s", (session_id,))
+            deleted = cur.rowcount
+        return int(deleted)
+
+    # ── investigation runs ─────────────────────────────────────────────────────
+
+    def insert_investigation_run(self, run: InvestigationRun) -> int:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO investigation_runs "
+                "(run_id, kind, status, question, window_start, window_end, plan, trace, "
+                "findings, n_findings, started_at, finished_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    run.run_id,
+                    run.kind,
+                    run.status,
+                    run.question,
+                    run.window_start.isoformat(),
+                    run.window_end.isoformat(),
+                    json.dumps(run.plan),
+                    json.dumps(run.trace),
+                    json.dumps([f.model_dump() for f in run.findings]),
+                    run.n_findings,
+                    _to_utc(run.started_at),
+                    _to_utc(run.finished_at),
+                ),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def get_investigation_runs(self, *, limit: int = 50) -> list[InvestigationRun]:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_RUN_COLUMNS} FROM investigation_runs ORDER BY id DESC LIMIT %s",
+                (limit,),
+            )
+            rows = cur.fetchall()
+        return [_row_to_run(r) for r in rows]
+
+    def get_investigation_run(self, run_db_id: int) -> InvestigationRun | None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_RUN_COLUMNS} FROM investigation_runs WHERE id = %s",
+                (run_db_id,),
+            )
+            row = cur.fetchone()
+        return _row_to_run(row) if row is not None else None
 
     # ── internals ────────────────────────────────────────────────────────────
 

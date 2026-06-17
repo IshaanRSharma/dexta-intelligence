@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     from dexta_intelligence.models import (
         ActivityEvent,
+        ChatSession,
         ChatTurn,
         CoverageStats,
         DeviceEvent,
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
         GoalStatus,
         Hypothesis,
         InsulinEvent,
+        InvestigationRun,
         MealEvent,
         PredictionEvent,
         RawEvent,
@@ -158,4 +160,26 @@ class StoragePort(Protocol):
 
     def get_chat_turns(self, session_id: str, *, limit: int = 50) -> list[ChatTurn]:
         """Turns for a session, oldest→newest, capped to the most-recent ``limit``."""
+        ...
+
+    def get_chat_sessions(self, *, limit: int = 50) -> list[ChatSession]:
+        """Distinct conversations, newest-active first, with a first-message preview."""
+        ...
+
+    def delete_chat_session(self, session_id: str) -> int:
+        """Remove all turns for ``session_id``; returns rows deleted."""
+        ...
+
+    # ── investigation runs ─────────────────────────────────────────────────────
+
+    def insert_investigation_run(self, run: InvestigationRun) -> int:
+        """Persist one investigation run; returns its id."""
+        ...
+
+    def get_investigation_runs(self, *, limit: int = 50) -> list[InvestigationRun]:
+        """Recent runs, newest first, capped to ``limit``."""
+        ...
+
+    def get_investigation_run(self, run_db_id: int) -> InvestigationRun | None:
+        """One run by its row id, or None."""
         ...

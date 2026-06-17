@@ -206,6 +206,8 @@ class LLMConfig(_Section):
 class AnalysisConfig(_Section):
     target_low: int = 70
     target_high: int = 180
+    max_reasoning_steps: int = Field(default=20, ge=4, le=64)
+    """Max tool calls per chat / orchestrator question before the loop stops."""
     deep_analysis_window_days: int = 90
     timezone: str = "UTC"
     """IANA zone for date/time-of-day bucketing (e.g. ``America/New_York``).
@@ -397,6 +399,8 @@ def load_config(path: Path | None = None) -> Config:
         raw.setdefault("dexcom", {})["ous"] = dx_ous
     _apply_libre_env(raw)
     _apply_pump_env(raw)
+    if max_steps := os.environ.get("DEXTA_MAX_REASONING_STEPS"):
+        raw.setdefault("analysis", {})["max_reasoning_steps"] = int(max_steps)
 
     return Config.model_validate(raw)
 
@@ -467,6 +471,7 @@ ENV_OVERRIDES: dict[tuple[str, str], str] = {
     ("carelink", "country"): "CARELINK_COUNTRY",
     ("dexcom_api", "access_token"): "DEXCOM_API_ACCESS_TOKEN",
     ("dexcom_api", "refresh_token"): "DEXCOM_API_REFRESH_TOKEN",
+    ("analysis", "max_reasoning_steps"): "DEXTA_MAX_REASONING_STEPS",
 }
 
 

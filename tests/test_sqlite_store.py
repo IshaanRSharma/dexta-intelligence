@@ -506,7 +506,12 @@ class TestFindings:
         fid = store.insert_finding(finding)
         assert fid == 1
         (got,) = store.get_findings()
-        assert got == finding.model_copy(update={"id": fid})
+        # last_verified is stamped at insert when absent; normalize it out of the
+        # structural round-trip and assert it was populated separately.
+        assert got.last_verified is not None
+        assert got.model_copy(update={"last_verified": None}) == finding.model_copy(
+            update={"id": fid}
+        )
         assert got.window_start is not None
         assert got.window_start.tzinfo == UTC
 

@@ -31,13 +31,14 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.base import AgentRegistry
 from dexta_intelligence.agents.discovery_tools import _recall
 from dexta_intelligence.agents.skeptic import skeptic_agent
 from dexta_intelligence.config import Config
-from dexta_intelligence.models import Finding, FindingStatus
+from dexta_intelligence.models import Finding, FindingStatus, InvestigationRun, RunFinding
 from dexta_intelligence.workflows.lenses import PRODUCERS
 
 if TYPE_CHECKING:
@@ -49,7 +50,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CoordinatorAgent"]
+__all__ = ["CoordinatorAgent", "RunTrace"]
+
+
+@dataclass
+class RunTrace:
+    """Mutable recorder the coordinator fills during an investigation.
+
+    Callers pass one in to capture the observable process (planned producers,
+    step-by-step trace lines, final status) for persistence as an
+    :class:`~dexta_intelligence.models.InvestigationRun`. Passing nothing leaves
+    behaviour unchanged.
+    """
+
+    plan: list[str] = field(default_factory=list)
+    steps: list[str] = field(default_factory=list)
+    status: str = "completed"
+
+    def step(self, line: str) -> None:
+        self.steps.append(line)
 
 _PLAN_PROMPT = """You plan a Type-1 diabetes data investigation. Pick which of the
 available investigations to run for the goal below. Each is an independent producer
@@ -114,7 +133,9 @@ class CoordinatorAgent:
     max_rounds: int = 2
     remember: bool = True
 
-    def investigate(self, ctx: AgentContext, goal: str | None = None) -> list[Finding]:
+    def investigate(
+        self, ctx: AgentContext, goal: str | None = None, *, trace: RunTrace | None = None
+    ) -> list[Finding]:
         """Plan, run the selected producers, skeptic-review, optionally synthesize.
 
         With a model, after the first round it may run bounded follow-up rounds
@@ -125,20 +146,31 @@ class CoordinatorAgent:
         reviewed findings; the caller persists. Never raises on thin data or
         planner failure — it degrades to the full producer set, never an exception.
         """
+        started_at = datetime.now(UTC)
+        rec = trace if trace is not None else RunTrace()
         if self.model is None:
-            reviewed = self._run_round(ctx, list(PRODUCERS))
-            self._remember(ctx, goal, set(PRODUCERS), reviewed)
+            full = list(PRODUCERS)
+            rec.plan = full
+            rec.step(f"Planned full producer set (no model): {', '.join(full)}")
+            reviewed = self._run_round(ctx, full)
+            _record_round(rec, 1, full, reviewed)
+            rec.status = "completed" if reviewed else "limited"
+            self._record_run(ctx, goal, rec, reviewed, started_at)
             return reviewed
 
         ran: set[str] = set()
         reviewed_all: list[Finding] = []
         selected = self._plan(ctx, goal)
+        rec.plan = list(selected)
+        rec.step(f"Planned: {', '.join(selected) or 'nothing'}")
         for round_idx in range(max(1, self.max_rounds)):
             fresh = [name for name in selected if name not in ran]
             if not fresh:
                 break
             ran.update(fresh)
-            reviewed_all.extend(self._run_round(ctx, fresh))
+            round_findings = self._run_round(ctx, fresh)
+            reviewed_all.extend(round_findings)
+            _record_round(rec, round_idx + 1, fresh, round_findings)
             if round_idx + 1 >= self.max_rounds:
                 break
             selected = self._replan(ctx, goal, reviewed_all, ran)
@@ -147,43 +179,52 @@ class CoordinatorAgent:
 
         if self.synthesize_connections and reviewed_all:
             self._synthesize(reviewed_all)
-        self._remember(ctx, goal, ran, reviewed_all)
+            rec.step(f"Synthesized connections across {len(reviewed_all)} finding(s)")
+        rec.status = "completed" if reviewed_all else "limited"
+        self._record_run(ctx, goal, rec, reviewed_all, started_at)
         return reviewed_all
 
-    def _remember(
-        self, ctx: AgentContext, goal: str | None, ran: set[str], reviewed: list[Finding]
+    def _record_run(
+        self,
+        ctx: AgentContext,
+        goal: str | None,
+        rec: RunTrace,
+        reviewed: list[Finding],
+        started_at: datetime,
     ) -> None:
-        """Save the investigation process as memory for future runs — which
-        investigations ran for this goal and what they returned. A later plan
-        recalls these so the coordinator builds on prior work instead of repeating it."""
-        if not self.remember or not ran:
+        """Persist the investigation as an :class:`InvestigationRun` (plan, trace,
+        findings snapshot, window). This is the observable record AND the planner's
+        memory: ``_past_investigations`` recalls these so a later run builds on
+        prior work instead of repeating it."""
+        if not self.remember or not rec.plan:
             return
-        producers = sorted(ran)
-        kinds = sorted({f.kind for f in reviewed})
-        headline = (
-            f"Investigated {goal or 'the whole record'}: ran {', '.join(producers)} "
-            f"→ {len(reviewed)} finding(s)"
+        snapshot = [
+            RunFinding(
+                headline=f.headline,
+                kind=f.kind,
+                confidence=f.confidence,
+                status=f.status.value,
+            )
+            for f in reviewed
+        ]
+        run = InvestigationRun(
+            run_id=ctx.run_id,
+            kind="question" if goal else "deep_analysis",
+            status=rec.status,
+            question=goal,
+            window_start=ctx.window[0],
+            window_end=ctx.window[1],
+            plan=rec.plan,
+            trace=rec.steps,
+            findings=snapshot,
+            n_findings=len(reviewed),
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
         )
         try:
-            ctx.store.insert_finding(
-                Finding(
-                    agent="coordinator",
-                    kind="investigation",
-                    scope=(goal or "whole_record")[:120],
-                    headline=headline,
-                    body_md=headline,
-                    evidence={
-                        "goal": goal or "",
-                        "producers": producers,
-                        "n_findings": len(reviewed),
-                        "finding_kinds": kinds,
-                    },
-                    confidence=1.0,
-                    status=FindingStatus.ACTIVE,
-                )
-            )
+            ctx.store.insert_investigation_run(run)
         except Exception:
-            logger.warning("coordinator: failed to record investigation memory", exc_info=True)
+            logger.warning("coordinator: failed to record investigation run", exc_info=True)
 
     def _run_round(self, ctx: AgentContext, names: list[str]) -> list[Finding]:
         """Run the named producers under gating + isolation, then skeptic-review."""
@@ -276,6 +317,14 @@ class CoordinatorAgent:
         return _parse_json(response.content)
 
 
+def _record_round(trace: RunTrace, number: int, names: list[str], findings: list[Finding]) -> None:
+    """Append a deterministic trace line summarising one producer round."""
+    kept = sum(1 for f in findings if f.status != FindingStatus.REJECTED)
+    rejected = len(findings) - kept
+    suffix = f" ({rejected} rejected by skeptic)" if rejected else ""
+    trace.step(f"Round {number}: ran {', '.join(names)} -> {kept} finding(s){suffix}")
+
+
 def _producer_catalog(names: Iterable[str] = PRODUCERS) -> str:
     return "\n".join(f"- {name}: {_PRODUCER_BLURBS.get(name, 'investigation')}" for name in names)
 
@@ -307,14 +356,18 @@ def _recall_digest(ctx: AgentContext, goal: str | None) -> str:
 
 
 def _past_investigations(ctx: AgentContext) -> str:
-    """Recall prior investigation recipes (the saved process) for the planner."""
+    """Recall prior investigation runs (the saved process) for the planner."""
     try:
-        records = ctx.store.get_findings(
-            agent="coordinator", kind="investigation", status=FindingStatus.ACTIVE, limit=8
-        )
+        runs = ctx.store.get_investigation_runs(limit=8)
     except Exception:
         return "(none yet)"
-    return "\n".join(f"- {r.headline}" for r in records) if records else "(none yet)"
+    if not runs:
+        return "(none yet)"
+    return "\n".join(
+        f"- Investigated {r.question or 'the whole record'}: "
+        f"ran {', '.join(r.plan)} -> {r.n_findings} finding(s)"
+        for r in runs
+    )
 
 
 def _log_skip(name: str, reasons: list[str]) -> None:

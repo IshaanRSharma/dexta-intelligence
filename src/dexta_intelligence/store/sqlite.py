@@ -39,12 +39,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.models import (
     ActivityEvent,
+    ChatSession,
     ChatTurn,
     CoverageStats,
     Finding,
@@ -59,12 +60,14 @@ from dexta_intelligence.models import (
     HypothesisStatus,
     InsulinEvent,
     InsulinKind,
+    InvestigationRun,
     MealEvent,
     PredictionEvent,
     RawEvent,
     RecoveryEvent,
     Rollup,
     RollupPeriod,
+    RunFinding,
     SleepEvent,
 )
 
@@ -73,7 +76,7 @@ if TYPE_CHECKING:
 
 __all__ = ["SQLiteStore"]
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SECONDS_PER_DAY = 86400.0
 _CGM_SLOT_SECONDS = 300.0  # expected 5-minute CGM cadence
@@ -207,7 +210,9 @@ CREATE TABLE IF NOT EXISTS findings (
     skeptic_notes TEXT,
     window_start TEXT,
     window_end TEXT,
-    superseded_by INTEGER
+    superseded_by INTEGER,
+    last_verified TEXT,
+    seen_count INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_findings_agent_kind_status ON findings (agent, kind, status);
 
@@ -248,6 +253,23 @@ CREATE TABLE IF NOT EXISTS chat_turns (
     ts TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns (session_id, id);
+
+CREATE TABLE IF NOT EXISTS investigation_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    question TEXT,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    plan TEXT NOT NULL,
+    trace TEXT NOT NULL,
+    findings TEXT NOT NULL,
+    n_findings INTEGER NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_investigation_runs_finished ON investigation_runs (id);
 """
 
 
@@ -269,6 +291,30 @@ def _row_to_goal(r: tuple[Any, ...]) -> Goal:
         cadence_days=r[6],
         status=GoalStatus(r[7]),
         created_at=_opt_text_to_dt(r[8]),
+    )
+
+
+_RUN_COLUMNS = (
+    "id, run_id, kind, status, question, window_start, window_end, "
+    "plan, trace, findings, n_findings, started_at, finished_at"
+)
+
+
+def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:
+    return InvestigationRun(
+        id=r[0],
+        run_id=r[1],
+        kind=r[2],
+        status=r[3],
+        question=r[4],
+        window_start=date.fromisoformat(r[5]),
+        window_end=date.fromisoformat(r[6]),
+        plan=json.loads(r[7]),
+        trace=json.loads(r[8]),
+        findings=[RunFinding(**f) for f in json.loads(r[9])],
+        n_findings=r[10],
+        started_at=_text_to_dt(r[11]),
+        finished_at=_text_to_dt(r[12]),
     )
 
 
@@ -323,6 +369,11 @@ class SQLiteStore:
         """Create or upgrade the schema. Idempotent (IF NOT EXISTS throughout)."""
         with self._conn:
             self._conn.executescript(_SCHEMA)
+            # Additive column upgrades for DBs created before these columns existed.
+            # CREATE TABLE IF NOT EXISTS never alters an existing table, so add them
+            # here; idempotent because we check the live column set first.
+            self._add_column("findings", "last_verified", "TEXT")
+            self._add_column("findings", "seen_count", "INTEGER NOT NULL DEFAULT 1")
             row = self._conn.execute("SELECT version FROM schema_version").fetchone()
             if row is None:
                 self._conn.execute(
@@ -330,6 +381,12 @@ class SQLiteStore:
                 )
             elif row[0] < SCHEMA_VERSION:
                 self._conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
+
+    def _add_column(self, table: str, column: str, decl: str) -> None:
+        """Add ``column`` to ``table`` if it is not already present (idempotent)."""
+        existing = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     # ── layer 1: raw events ──────────────────────────────────────────────────
 
@@ -747,11 +804,13 @@ class SQLiteStore:
 
     def insert_finding(self, finding: Finding) -> int:
         """Persist a finding with a freshly assigned id (any incoming id is ignored)."""
+        last_verified = finding.last_verified or datetime.now(tz=UTC)
         with self._conn:
             cursor = self._conn.execute(
                 "INSERT INTO findings (agent, kind, scope, headline, body_md, evidence, stats, "
-                "confidence, status, skeptic_notes, window_start, window_end, superseded_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "confidence, status, skeptic_notes, window_start, window_end, superseded_by, "
+                "last_verified, seen_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     finding.agent,
                     finding.kind,
@@ -766,6 +825,8 @@ class SQLiteStore:
                     _opt_dt_to_text(finding.window_start),
                     _opt_dt_to_text(finding.window_end),
                     finding.superseded_by,
+                    _dt_to_text(last_verified),
+                    finding.seen_count,
                 ),
             )
         assert cursor.lastrowid is not None
@@ -807,7 +868,8 @@ class SQLiteStore:
         params.append(limit)
         cursor = self._conn.execute(
             "SELECT id, agent, kind, scope, headline, body_md, evidence, stats, confidence, "
-            "status, skeptic_notes, window_start, window_end, superseded_by FROM findings "
+            "status, skeptic_notes, window_start, window_end, superseded_by, last_verified, "
+            "seen_count FROM findings "
             f"{where}ORDER BY id DESC LIMIT ?",
             params,
         )
@@ -827,6 +889,8 @@ class SQLiteStore:
                 window_start=_opt_text_to_dt(r[11]),
                 window_end=_opt_text_to_dt(r[12]),
                 superseded_by=r[13],
+                last_verified=_opt_text_to_dt(r[14]),
+                seen_count=r[15] if r[15] is not None else 1,
             )
             for r in cursor.fetchall()
         ]
@@ -961,6 +1025,76 @@ class SQLiteStore:
             ChatTurn(id=r[0], session_id=r[1], role=r[2], content=r[3], ts=_text_to_dt(r[4]))
             for r in rows
         ]
+
+    def get_chat_sessions(self, *, limit: int = 50) -> list[ChatSession]:
+        cursor = self._conn.execute(
+            "SELECT session_id, MAX(ts) AS last_ts, COUNT(*) AS turn_count, "
+            "(SELECT content FROM chat_turns inner_t "
+            " WHERE inner_t.session_id = chat_turns.session_id AND inner_t.role = 'user' "
+            " ORDER BY inner_t.id ASC LIMIT 1) AS preview "
+            "FROM chat_turns GROUP BY session_id "
+            "ORDER BY last_ts DESC, MAX(id) DESC LIMIT ?",
+            (limit,),
+        )
+        return [
+            ChatSession(
+                session_id=r[0],
+                last_ts=_text_to_dt(r[1]),
+                turn_count=r[2],
+                preview=r[3] or "",
+            )
+            for r in cursor.fetchall()
+        ]
+
+    def delete_chat_session(self, session_id: str) -> int:
+        with self._conn:
+            cursor = self._conn.execute(
+                "DELETE FROM chat_turns WHERE session_id = ?",
+                (session_id,),
+            )
+        return cursor.rowcount
+
+    # ── investigation runs ─────────────────────────────────────────────────────
+
+    def insert_investigation_run(self, run: InvestigationRun) -> int:
+        with self._conn:
+            cursor = self._conn.execute(
+                "INSERT INTO investigation_runs "
+                "(run_id, kind, status, question, window_start, window_end, plan, trace, "
+                "findings, n_findings, started_at, finished_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run.run_id,
+                    run.kind,
+                    run.status,
+                    run.question,
+                    run.window_start.isoformat(),
+                    run.window_end.isoformat(),
+                    json.dumps(run.plan),
+                    json.dumps(run.trace),
+                    json.dumps([f.model_dump() for f in run.findings]),
+                    run.n_findings,
+                    _dt_to_text(run.started_at),
+                    _dt_to_text(run.finished_at),
+                ),
+            )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def get_investigation_runs(self, *, limit: int = 50) -> list[InvestigationRun]:
+        cursor = self._conn.execute(
+            f"SELECT {_RUN_COLUMNS} FROM investigation_runs ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+        return [_row_to_run(r) for r in cursor.fetchall()]
+
+    def get_investigation_run(self, run_db_id: int) -> InvestigationRun | None:
+        cursor = self._conn.execute(
+            f"SELECT {_RUN_COLUMNS} FROM investigation_runs WHERE id = ?",
+            (run_db_id,),
+        )
+        row = cursor.fetchone()
+        return _row_to_run(row) if row is not None else None
 
     # ── internals ────────────────────────────────────────────────────────────
 
