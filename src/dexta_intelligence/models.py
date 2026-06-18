@@ -45,6 +45,7 @@ __all__ = [
     "InsulinKind",
     "InvestigationRun",
     "MealEvent",
+    "OpenInvestigation",
     "PredictionEvent",
     "RawEvent",
     "RecoveryEvent",
@@ -441,6 +442,28 @@ class InvestigationRun(_FrozenModel):
     id: int | None = None
 
     _utc = field_validator("started_at", "finished_at")(_require_utc)
+
+
+class OpenInvestigation(_FrozenModel):
+    """An investigation that accrues across daemon cycles until it is sufficient.
+
+    Unlike ``InvestigationRun`` (a finished record), this is a standing intent:
+    each cycle updates ``current`` toward ``target`` and, once the deterministic
+    sufficiency condition is met, the investigation flips to ``ready`` and is
+    eventually promoted into a concrete run.
+    """
+
+    question: str
+    condition_type: str
+    subject: str
+    target: float
+    current: float
+    status: str
+    created_at: datetime
+    promoted_run_id: str | None = None
+    id: int | None = None
+
+    _utc = field_validator("created_at")(_require_utc)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

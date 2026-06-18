@@ -28,6 +28,7 @@ from dexta_intelligence.models import (
     GoalCheckpoint,
     GoalMetric,
     InvestigationRun,
+    OpenInvestigation,
     RunFinding,
 )
 from dexta_intelligence.server import create_app
@@ -710,6 +711,26 @@ def test_investigations_empty_state(tmp_path: Path) -> None:
     store.close()
 
 
+def test_investigations_page_shows_open_queue(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.insert_open_investigation(
+        OpenInvestigation(
+            question="Why does severe high keep happening?",
+            condition_type="event_count",
+            subject="severe_high",
+            target=3.0,
+            current=1.0,
+            status="collecting",
+            created_at=FIXED_NOW,
+        )
+    )
+    body = _client(store).get("/investigations").text
+    assert "Open investigations" in body
+    assert "Why does severe high keep happening?" in body
+    assert "1/3 seen" in body
+    store.close()
+
+
 def test_findings_page_renders_tabs_and_cards(tmp_path: Path) -> None:
     store = _store(tmp_path)
     _seed_glucose(store)
@@ -864,6 +885,28 @@ def test_connectors_autosync_sets_interval_live(
     assert "flash=autosync_ok" in resp.headers["location"]
     # The live controller was retuned without a restart.
     assert client.app.state.autosync.status().interval_min == 15
+    client.app.state.autosync.stop()
+    store.close()
+
+
+def test_connectors_autosync_htmx_returns_panel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    toml_path = tmp_path / "dexta.toml"
+    monkeypatch.setattr(
+        "dexta_intelligence.cli._common.resolve_config_path", lambda _explicit: toml_path
+    )
+    client = _client(store)
+    resp = client.post(
+        "/actions/connectors/autosync",
+        data={"interval": "30"},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    assert 'id="autosync-panel"' in resp.text
+    assert "Continuous sync updated." in resp.text
+    assert client.app.state.autosync.status().interval_min == 30
     client.app.state.autosync.stop()
     store.close()
 

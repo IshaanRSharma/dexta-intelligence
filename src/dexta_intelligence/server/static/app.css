@@ -529,7 +529,6 @@ button, .btn {
   font: inherit; font-weight: 600; font-size: 14px;
   padding: 9px 16px; border: none; cursor: pointer; text-decoration: none;
   border-radius: var(--radius-xs); background: var(--accent); color: #fff;
-  transition: background 120ms;
 }
 button:hover, .btn:hover { background: var(--accent-hover); }
 .btn-secondary {
@@ -542,8 +541,9 @@ button:hover, .btn:hover { background: var(--accent-hover); }
 .btn-sm { padding: 7px 12px; font-size: 13px; }
 
 .spin { color: var(--muted); align-self: center; font-size: 14px; }
-.htmx-indicator { opacity: 0; transition: opacity 120ms; }
+.htmx-indicator { opacity: 0; }
 .htmx-request .htmx-indicator { opacity: 1; }
+.htmx-request button[type=submit] { opacity: 0.75; cursor: wait; }
 .goal-add { margin-bottom: 20px; }
 .goal-add h2 { font-size: 1.05rem; margin: 0 0 14px; }
 .goal-add .fields { max-width: 520px; }

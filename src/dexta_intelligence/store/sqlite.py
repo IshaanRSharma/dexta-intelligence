@@ -62,6 +62,7 @@ from dexta_intelligence.models import (
     InsulinKind,
     InvestigationRun,
     MealEvent,
+    OpenInvestigation,
     PredictionEvent,
     RawEvent,
     RecoveryEvent,
@@ -76,7 +77,7 @@ if TYPE_CHECKING:
 
 __all__ = ["SQLiteStore"]
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _SECONDS_PER_DAY = 86400.0
 _CGM_SLOT_SECONDS = 300.0  # expected 5-minute CGM cadence
@@ -270,6 +271,19 @@ CREATE TABLE IF NOT EXISTS investigation_runs (
     finished_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_investigation_runs_finished ON investigation_runs (id);
+
+CREATE TABLE IF NOT EXISTS open_investigations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question TEXT NOT NULL,
+    condition_type TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    target REAL NOT NULL,
+    current REAL NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    promoted_run_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_open_investigations_status ON open_investigations (status);
 """
 
 
@@ -315,6 +329,26 @@ def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:
         n_findings=r[10],
         started_at=_text_to_dt(r[11]),
         finished_at=_text_to_dt(r[12]),
+    )
+
+
+_OPEN_INVESTIGATION_COLUMNS = (
+    "id, question, condition_type, subject, target, current, status, "
+    "created_at, promoted_run_id"
+)
+
+
+def _row_to_open_investigation(r: tuple[Any, ...]) -> OpenInvestigation:
+    return OpenInvestigation(
+        id=r[0],
+        question=r[1],
+        condition_type=r[2],
+        subject=r[3],
+        target=r[4],
+        current=r[5],
+        status=r[6],
+        created_at=_text_to_dt(r[7]),
+        promoted_run_id=r[8],
     )
 
 
@@ -1101,6 +1135,56 @@ class SQLiteStore:
         )
         row = cursor.fetchone()
         return _row_to_run(row) if row is not None else None
+
+    # ── open investigations ─────────────────────────────────────────────────────
+
+    def insert_open_investigation(self, inv: OpenInvestigation) -> int:
+        with self._conn:
+            cursor = self._conn.execute(
+                "INSERT INTO open_investigations "
+                "(question, condition_type, subject, target, current, status, "
+                "created_at, promoted_run_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    inv.question,
+                    inv.condition_type,
+                    inv.subject,
+                    inv.target,
+                    inv.current,
+                    inv.status,
+                    _dt_to_text(inv.created_at),
+                    inv.promoted_run_id,
+                ),
+            )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def get_open_investigations(
+        self, *, status: str | None = None
+    ) -> list[OpenInvestigation]:
+        sql = f"SELECT {_OPEN_INVESTIGATION_COLUMNS} FROM open_investigations"
+        params: tuple[Any, ...] = ()
+        if status is not None:
+            sql += " WHERE status = ?"
+            params = (status,)
+        sql += " ORDER BY id DESC"
+        cursor = self._conn.execute(sql, params)
+        return [_row_to_open_investigation(r) for r in cursor.fetchall()]
+
+    def update_open_investigation(
+        self,
+        inv_id: int,
+        *,
+        current: float,
+        status: str,
+        promoted_run_id: str | None = None,
+    ) -> None:
+        with self._conn:
+            self._conn.execute(
+                "UPDATE open_investigations "
+                "SET current = ?, status = ?, promoted_run_id = ? WHERE id = ?",
+                (current, status, promoted_run_id, inv_id),
+            )
 
     # ── internals ────────────────────────────────────────────────────────────
 

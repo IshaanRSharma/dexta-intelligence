@@ -46,6 +46,7 @@ from dexta_intelligence.models import (
     InsulinKind,
     InvestigationRun,
     MealEvent,
+    OpenInvestigation,
     PredictionEvent,
     RawEvent,
     RecoveryEvent,
@@ -258,6 +259,19 @@ CREATE TABLE IF NOT EXISTS investigation_runs (
     started_at TIMESTAMPTZ NOT NULL,
     finished_at TIMESTAMPTZ NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS open_investigations (
+    id BIGSERIAL PRIMARY KEY,
+    question TEXT NOT NULL,
+    condition_type TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    target DOUBLE PRECISION NOT NULL,
+    current DOUBLE PRECISION NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    promoted_run_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_open_investigations_status ON open_investigations (status);
 """
 
 
@@ -300,6 +314,26 @@ def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:
         n_findings=r[10],
         started_at=_to_utc(r[11]),
         finished_at=_to_utc(r[12]),
+    )
+
+
+_OPEN_INVESTIGATION_COLUMNS = (
+    "id, question, condition_type, subject, target, current, status, "
+    "created_at, promoted_run_id"
+)
+
+
+def _row_to_open_investigation(r: tuple[Any, ...]) -> OpenInvestigation:
+    return OpenInvestigation(
+        id=r[0],
+        question=r[1],
+        condition_type=r[2],
+        subject=r[3],
+        target=r[4],
+        current=r[5],
+        status=r[6],
+        created_at=_to_utc(r[7]),
+        promoted_run_id=r[8],
     )
 
 
@@ -1106,6 +1140,59 @@ class PostgresStore:
             )
             row = cur.fetchone()
         return _row_to_run(row) if row is not None else None
+
+    # ── open investigations ─────────────────────────────────────────────────────
+
+    def insert_open_investigation(self, inv: OpenInvestigation) -> int:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO open_investigations "
+                "(question, condition_type, subject, target, current, status, "
+                "created_at, promoted_run_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    inv.question,
+                    inv.condition_type,
+                    inv.subject,
+                    inv.target,
+                    inv.current,
+                    inv.status,
+                    _to_utc(inv.created_at),
+                    inv.promoted_run_id,
+                ),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def get_open_investigations(
+        self, *, status: str | None = None
+    ) -> list[OpenInvestigation]:
+        sql = f"SELECT {_OPEN_INVESTIGATION_COLUMNS} FROM open_investigations"
+        params: tuple[Any, ...] = ()
+        if status is not None:
+            sql += " WHERE status = %s"
+            params = (status,)
+        sql += " ORDER BY id DESC"
+        with self._conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        return [_row_to_open_investigation(r) for r in rows]
+
+    def update_open_investigation(
+        self,
+        inv_id: int,
+        *,
+        current: float,
+        status: str,
+        promoted_run_id: str | None = None,
+    ) -> None:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE open_investigations "
+                "SET current = %s, status = %s, promoted_run_id = %s WHERE id = %s",
+                (current, status, promoted_run_id, inv_id),
+            )
 
     # ── internals ────────────────────────────────────────────────────────────
 

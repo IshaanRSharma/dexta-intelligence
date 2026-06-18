@@ -166,14 +166,18 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         active: str = "",
         status_code: int = 200,
         status_pill: str | None = None,
+        *,
+        lite: bool = False,
         **kw: Any,
     ) -> Any:
-        if status_pill is None:
+        if status_pill is None and not lite:
             store = store_opener(config, None)
             try:
                 status_pill = _status_pill_text(store.coverage())
             finally:
                 _close(store, store_opener)
+        elif status_pill is None:
+            status_pill = ""
         return templates.TemplateResponse(
             request,
             name,
@@ -295,6 +299,10 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         store = store_opener(config, None)
         try:
             runs = store.get_investigation_runs(limit=50)
+            try:
+                open_invs = store.get_open_investigations()
+            except Exception:
+                open_invs = []
         finally:
             _close(store, store_opener)
         now = datetime.now(tz=UTC)
@@ -302,6 +310,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             "investigations.html",
             request,
             "/investigations",
+            open_invs=[_open_inv_view(o) for o in open_invs],
             runs=[_run_view(r, now) for r in runs],
         )
 
@@ -546,6 +555,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         store = store_opener(config, None)
         try:
             sources = _connectors_view(cfg, store, now)
+            status_pill = _status_pill_text(store.coverage())
         finally:
             _close(store, store_opener)
         autosync = _autosync_view(request.app.state.autosync.status(), now)
@@ -559,6 +569,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             "connectors.html",
             request,
             "/connectors",
+            status_pill=status_pill,
             sources=sources,
             autosync=autosync,
             flash=flash,
@@ -593,12 +604,26 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         try:
             interval = max(0, int(raw)) if isinstance(raw, str) else 0
         except ValueError:
-            return RedirectResponse("/connectors?flash=autosync_bad", status_code=303)
-        save_config_values(
-            {"server": {"auto_sync_minutes": interval}}, path=request.app.state.config_path
-        )
-        request.app.state.autosync.configure(interval)
-        return RedirectResponse("/connectors?flash=autosync_ok", status_code=303)
+            flash: tuple[str, str] | None = ("bad", "Interval must be a whole number of minutes.")
+        else:
+            save_config_values(
+                {"server": {"auto_sync_minutes": interval}}, path=request.app.state.config_path
+            )
+            request.app.state.autosync.configure(interval)
+            flash = ("ok", "Continuous sync updated.")
+        if request.headers.get("HX-Request") == "true":
+            now = datetime.now(tz=UTC)
+            autosync = _autosync_view(request.app.state.autosync.status(), now)
+            return _render(
+                "_connectors_autosync_panel.html",
+                request,
+                lite=True,
+                htmx=True,
+                autosync=autosync,
+                flash=flash,
+            )
+        code = "autosync_ok" if flash and flash[0] == "ok" else "autosync_bad"
+        return RedirectResponse(f"/connectors?flash={code}", status_code=303)
 
     # ── chat ──────────────────────────────────────────────────────────────────
 
@@ -614,7 +639,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
 
         model = getattr(request.app.state, "chat_model", None) or discovery_model(config)
         if model is None:
-            return _render("_answer.html", request, answer=None, question=question)
+            return _render("_answer.html", request, lite=True, answer=None, question=question)
         store = store_opener(config, None)
         try:
             coverage = store.coverage()
@@ -641,6 +666,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         return _render(
             "_answer.html",
             request,
+            lite=True,
             question=question,
             answer=answer.text,
             answer_html=markdown_to_html(answer.text),
@@ -996,7 +1022,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                 save_secret(var, value, path=secrets_path)
             except ValueError as exc:
                 card = _card_view(spec, _settings_cfg(), error=str(exc))
-                return _render("_settings_card.html", request, status_code=400, card=card)
+                return _render("_settings_card.html", request, status_code=400, lite=True, card=card)
 
         updates: dict[str, Any] = {}
         for f in spec.fields:
@@ -1014,14 +1040,17 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             save_config_values({spec.section: updates}, path=request.app.state.config_path)
         except (ValueError, TypeError) as exc:
             card = _card_view(spec, _settings_cfg(), error=str(exc))
-            return _render("_settings_card.html", request, status_code=400, card=card)
-        card = _card_view(
-            spec,
-            _settings_cfg(),
-            freshness=_freshness_map().get(spec.connector) if spec.connector else None,
-            saved=True,
-        )
-        return _render("_settings_card.html", request, card=card)
+            return _render("_settings_card.html", request, status_code=400, lite=True, card=card)
+        cfg = _settings_cfg()
+        fresh: datetime | None = None
+        if spec.connector:
+            store = store_opener(cfg, None)
+            try:
+                fresh = _watermark_for(store, spec.connector)
+            finally:
+                _close(store, store_opener)
+        card = _card_view(spec, cfg, freshness=fresh, saved=True)
+        return _render("_settings_card.html", request, lite=True, card=card)
 
     @app.post("/settings/{source_key}/test", response_class=HTMLResponse)
     def test_source(request: Request, source_key: str) -> Any:
@@ -1033,14 +1062,14 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             (c for c in build_connectors(cfg) if c.source == spec.connector), None
         )
         if connector is None:
-            return _render("_settings_test.html", request, report=None)
+            return _render("_settings_test.html", request, lite=True, report=None)
         try:
             # Tandem's check() already defaults to a 25s timeout; the protocol's
             # check() takes no args, so call it plainly for every connector.
             report = connector.check()
         except Exception as exc:
             report = HealthReport(ok=False, source=spec.connector, detail=str(exc))
-        return _render("_settings_test.html", request, report=report)
+        return _render("_settings_test.html", request, lite=True, report=report)
 
     @app.post("/settings/{source_key}/sync", response_class=HTMLResponse)
     def sync_source(request: Request, source_key: str) -> Any:
@@ -1055,7 +1084,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         )
         if connector is None:
             card = _card_view(spec, cfg, error="Save credentials first, then sync.")
-            return _render("_settings_card.html", request, status_code=400, card=card)
+            return _render("_settings_card.html", request, status_code=400, lite=True, card=card)
         store = store_opener(cfg, None)
         try:
             report = sync(connector, store)
@@ -1068,13 +1097,13 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             card = _card_view(
                 spec,
                 cfg,
-                freshness=_freshness_map().get(spec.connector),
+                freshness=_watermark_for(store, spec.connector),
                 sync_msg=sync_msg,
                 sync_ok=report.ok,
             )
         finally:
             _close(store, store_opener)
-        return _render("_settings_card.html", request, card=card)
+        return _render("_settings_card.html", request, lite=True, card=card)
 
     return app
 
@@ -1346,6 +1375,12 @@ def _card_view(
     )
 
 
+def _watermark_for(store: StoragePort, source: str | None) -> datetime | None:
+    if source is None:
+        return None
+    return store.get_watermark(source)
+
+
 class _SettingsError(ValueError):
     """A user-facing settings validation failure (re-rendered, never persisted)."""
 
@@ -1420,6 +1455,19 @@ def _finding_card(finding: Finding, active: list[Finding]) -> dict[str, Any]:
         "skeptic_notes": finding.skeptic_notes,
         "recurrence": recurrence + 1,
         "body_html": markdown_to_html(finding.body_md) if finding.body_md else "",
+    }
+
+
+def _open_inv_view(inv: Any) -> dict[str, Any]:
+    """Shape one open investigation (the collecting/promoted queue) for the page."""
+    target = inv.target or 0.0
+    pct = round(100 * inv.current / target) if target > 0 else 0
+    unit = "days" if inv.condition_type == "days_elapsed" else "seen"
+    return {
+        "question": inv.question,
+        "status": inv.status,
+        "progress": f"{inv.current:g}/{inv.target:g} {unit}",
+        "pct": max(0, min(100, pct)),
     }
 
 

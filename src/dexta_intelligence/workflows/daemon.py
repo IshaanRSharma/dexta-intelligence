@@ -25,6 +25,10 @@ from dexta_intelligence.models import GoalStatus
 from dexta_intelligence.workflows.deep_analysis import persist_findings
 from dexta_intelligence.workflows.goals import goal_due, tick_goal
 from dexta_intelligence.workflows.monitor import run_monitor
+from dexta_intelligence.workflows.open_investigations import (
+    evaluate_open_investigations,
+    open_from_anomalies,
+)
 from dexta_intelligence.workflows.sync import sync_all
 
 if TYPE_CHECKING:
@@ -56,6 +60,7 @@ class CycleReport:
     goals_ticked: int = 0
     findings_persisted: int = 0
     stale_pruned: int = 0
+    open_promoted: int = 0
     deep_ran: bool = False
     errors: tuple[tuple[str, str], ...] = ()
 
@@ -72,6 +77,7 @@ class _Accumulator:
     goals_ticked: int = 0
     findings_persisted: int = 0
     stale_pruned: int = 0
+    open_promoted: int = 0
     deep_ran: bool = False
     errors: list[tuple[str, str]] = field(default_factory=list)
 
@@ -110,9 +116,11 @@ def run_cycle(
 
     ctx = _ctx(config, store)
 
+    anomaly_names: list[str] = []
     try:
         anomalies = run_monitor(ctx, notify=notify, persist=True)
         acc.anomalies = len(anomalies)
+        anomaly_names = [a.name for a in anomalies]
     except Exception as exc:
         acc.fail("monitor", exc)
 
@@ -120,6 +128,8 @@ def run_cycle(
         acc.stale_pruned = len(prune_stale_findings(store, now=moment))
     except Exception as exc:
         acc.fail("freshness", exc)
+
+    _evaluate_open_investigations(ctx, config, model, anomaly_names, moment, acc)
 
     _tick_due_goals(store, ctx, moment, model, acc)
 
@@ -133,9 +143,27 @@ def run_cycle(
         goals_ticked=acc.goals_ticked,
         findings_persisted=acc.findings_persisted,
         stale_pruned=acc.stale_pruned,
+        open_promoted=acc.open_promoted,
         deep_ran=acc.deep_ran,
         errors=tuple(acc.errors),
     )
+
+
+def _evaluate_open_investigations(
+    ctx: AgentContext,
+    config: Config,
+    model: BaseChatModel | None,
+    anomaly_names: list[str],
+    now: datetime,
+    acc: _Accumulator,
+) -> None:
+    """Open investigations for recurring anomalies, then promote any that are due."""
+    try:
+        open_from_anomalies(ctx.store, anomaly_names, now=now)
+        report = evaluate_open_investigations(ctx, config, model, now=now)
+        acc.open_promoted = report.promoted
+    except Exception as exc:
+        acc.fail("open_investigations", exc)
 
 
 def run_daemon(

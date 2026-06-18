@@ -70,3 +70,12 @@
 .conn-row:last-child { border-bottom: none; }
 .conn-pick { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
 .conn-label { font-size: 15px; font-weight: 500; }
+
+/* open investigations queue */
+.open-inv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.open-inv {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow-sm);
+}
+.open-inv-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.open-inv-q { font-size: 15px; font-weight: 500; }

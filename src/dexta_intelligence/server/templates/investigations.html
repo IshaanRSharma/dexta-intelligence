@@ -2,11 +2,31 @@
 {% block title %}dexta · investigations{% endblock %}
 {% block content %}
 {% set runs = runs|default([]) %}
+{% set open_invs = open_invs|default([]) %}
 
 <div class="page-head">
   <h1>Investigations</h1>
   <p class="page-sub">Every investigation dexta runs, with the plan it followed, the trace of what it did, and the findings it produced.</p>
 </div>
+
+{% if open_invs %}
+<section class="findings-section">
+  <h2 class="section-title">Open investigations</h2>
+  <p class="muted small" style="margin:-8px 0 14px">Recurring patterns dexta is collecting more data on. Each runs a full investigation once it has enough evidence.</p>
+  <ul class="open-inv-list">
+    {% for o in open_invs %}
+    <li class="open-inv">
+      <div class="open-inv-head">
+        <span class="open-inv-q">{{ o.question }}</span>
+        <span class="badge {{ 'ok' if o.status == 'promoted' else 'neutral' }}">{{ o.status }}</span>
+      </div>
+      <div class="conf-bar"><span style="width: {{ o.pct }}%"></span></div>
+      <span class="muted small">{{ o.progress }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 
 {% if runs %}
 <div class="cards">

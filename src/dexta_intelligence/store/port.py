@@ -33,6 +33,7 @@ if TYPE_CHECKING:
         InsulinEvent,
         InvestigationRun,
         MealEvent,
+        OpenInvestigation,
         PredictionEvent,
         RawEvent,
         RecoveryEvent,
@@ -186,4 +187,27 @@ class StoragePort(Protocol):
 
     def get_investigation_run(self, run_db_id: int) -> InvestigationRun | None:
         """One run by its row id, or None."""
+        ...
+
+    # ── open investigations ─────────────────────────────────────────────────────
+
+    def insert_open_investigation(self, inv: OpenInvestigation) -> int:
+        """Persist one open investigation; returns its id."""
+        ...
+
+    def get_open_investigations(
+        self, *, status: str | None = None
+    ) -> list[OpenInvestigation]:
+        """Open investigations, newest first; filtered by ``status`` when given."""
+        ...
+
+    def update_open_investigation(
+        self,
+        inv_id: int,
+        *,
+        current: float,
+        status: str,
+        promoted_run_id: str | None = None,
+    ) -> None:
+        """Update progress/status (and optionally the promoted run id) for one row."""
         ...

@@ -25,6 +25,7 @@ from dexta_intelligence.models import (
     InsulinKind,
     InvestigationRun,
     MealEvent,
+    OpenInvestigation,
     PredictionEvent,
     RawEvent,
     RecoveryEvent,
@@ -79,6 +80,7 @@ class FakeStore:
         self.goal_checkpoints: list[GoalCheckpoint] = []
         self.chat_turns: list[ChatTurn] = []
         self.investigation_runs: list[InvestigationRun] = []
+        self.open_investigations: list[OpenInvestigation] = []
 
     def migrate(self) -> None:
         return None
@@ -321,6 +323,38 @@ class FakeStore:
         if 0 <= idx < len(self.investigation_runs):
             return self.investigation_runs[idx]
         return None
+
+    def insert_open_investigation(self, inv: OpenInvestigation) -> int:
+        new_id = len(self.open_investigations) + 1
+        self.open_investigations.append(inv.model_copy(update={"id": new_id}))
+        return new_id
+
+    def get_open_investigations(
+        self, *, status: str | None = None
+    ) -> list[OpenInvestigation]:
+        rows = list(reversed(self.open_investigations))
+        if status is not None:
+            rows = [r for r in rows if r.status == status]
+        return rows
+
+    def update_open_investigation(
+        self,
+        inv_id: int,
+        *,
+        current: float,
+        status: str,
+        promoted_run_id: str | None = None,
+    ) -> None:
+        for i, inv in enumerate(self.open_investigations):
+            if inv.id == inv_id:
+                self.open_investigations[i] = inv.model_copy(
+                    update={
+                        "current": current,
+                        "status": status,
+                        "promoted_run_id": promoted_run_id,
+                    }
+                )
+                return
 
 
 @dataclass

@@ -10,27 +10,11 @@
   <p class="page-sub">Your data sources. Sync all or a subset on demand, and keep them fresh automatically.</p>
 </div>
 
-{% if flash %}<div class="flash {{ 'error' if flash[0] == 'bad' else '' }}">{{ flash[1] }}</div>{% endif %}
+<div id="connectors-flash">
+  {% include "_connectors_flash.html" %}
+</div>
 
-<article class="card">
-  <div class="card-head">
-    <h2>Continuous sync</h2>
-    <span class="badge {{ 'ok' if autosync.enabled else 'neutral' }}">{{ 'on' if autosync.enabled else 'off' }}</span>
-  </div>
-  <form method="post" action="/actions/connectors/autosync" class="autosync-form">
-    <label for="autosync-interval">Re-sync every</label>
-    <select id="autosync-interval" name="interval">
-      <option value="0"{% if autosync.interval_min == 0 %} selected{% endif %}>Off</option>
-      <option value="15"{% if autosync.interval_min == 15 %} selected{% endif %}>15 minutes</option>
-      <option value="30"{% if autosync.interval_min == 30 %} selected{% endif %}>30 minutes</option>
-      <option value="60"{% if autosync.interval_min == 60 %} selected{% endif %}>1 hour</option>
-    </select>
-    <button type="submit" class="btn-secondary">Apply</button>
-    {% if autosync.last_run %}<span class="muted small">last sync {{ autosync.last_run }}</span>{% endif %}
-    {% if autosync.last_error %}<span class="muted small">last error: {{ autosync.last_error }}</span>{% endif %}
-  </form>
-  <p class="muted small">Runs inside the server while it is up. For a full background cadence (sync, monitor, goal ticks), run <code>dexta daemon</code>.</p>
-</article>
+{% include "_connectors_autosync_panel.html" %}
 
 {% if sources %}
 <form method="post" action="/actions/connectors/sync" class="card conn-card">
