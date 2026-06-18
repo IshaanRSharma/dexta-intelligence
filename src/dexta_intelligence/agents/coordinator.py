@@ -42,7 +42,7 @@ from dexta_intelligence.models import Finding, FindingStatus, InvestigationRun, 
 from dexta_intelligence.workflows.lenses import PRODUCERS
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -61,14 +61,38 @@ class RunTrace:
     step-by-step trace lines, final status) for persistence as an
     :class:`~dexta_intelligence.models.InvestigationRun`. Passing nothing leaves
     behaviour unchanged.
+
+    Set ``on_event`` to stream the process live (the GUI passes a queue sink so
+    the Investigations page can show plan -> trace as it happens). Each event is
+    a ``{"kind": str, "payload": dict}`` mapping. The sink must not raise.
     """
 
     plan: list[str] = field(default_factory=list)
     steps: list[str] = field(default_factory=list)
     status: str = "completed"
+    coverage_summary: dict[str, Any] | None = None
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    on_event: Callable[[dict[str, Any]], None] | None = None
+
+    def emit(self, kind: str, payload: dict[str, Any]) -> None:
+        if self.on_event is not None:
+            self.on_event({"kind": kind, "payload": payload})
+
+    def set_plan(self, plan: list[str]) -> None:
+        self.plan = list(plan)
+        self.emit("plan", {"steps": self.plan})
+
+    def set_coverage(self, summary: dict[str, Any]) -> None:
+        self.coverage_summary = summary
+        self.emit("coverage", summary)
+
+    def producer_done(self, name: str, n_findings: int) -> None:
+        self.tool_calls.append({"producer": name, "n_findings": n_findings})
+        self.emit("producer_done", {"producer": name, "n_findings": n_findings})
 
     def step(self, line: str) -> None:
         self.steps.append(line)
+        self.emit("step", {"text": line})
 
 _PLAN_PROMPT = """You plan a Type-1 diabetes data investigation. Pick which of the
 available investigations to run for the goal below. Each is an independent producer
@@ -148,27 +172,28 @@ class CoordinatorAgent:
         """
         started_at = datetime.now(UTC)
         rec = trace if trace is not None else RunTrace()
+        rec.set_coverage(_coverage_summary(ctx))
         if self.model is None:
             full = list(PRODUCERS)
-            rec.plan = full
+            rec.set_plan(full)
             rec.step(f"Planned full producer set (no model): {', '.join(full)}")
-            reviewed = self._run_round(ctx, full)
+            reviewed = self._run_round(ctx, full, rec)
             _record_round(rec, 1, full, reviewed)
-            rec.status = "completed" if reviewed else "limited"
+            rec.status = _final_status(reviewed, rec)
             self._record_run(ctx, goal, rec, reviewed, started_at)
             return reviewed
 
         ran: set[str] = set()
         reviewed_all: list[Finding] = []
         selected = self._plan(ctx, goal)
-        rec.plan = list(selected)
+        rec.set_plan(selected)
         rec.step(f"Planned: {', '.join(selected) or 'nothing'}")
         for round_idx in range(max(1, self.max_rounds)):
             fresh = [name for name in selected if name not in ran]
             if not fresh:
                 break
             ran.update(fresh)
-            round_findings = self._run_round(ctx, fresh)
+            round_findings = self._run_round(ctx, fresh, rec)
             reviewed_all.extend(round_findings)
             _record_round(rec, round_idx + 1, fresh, round_findings)
             if round_idx + 1 >= self.max_rounds:
@@ -180,7 +205,7 @@ class CoordinatorAgent:
         if self.synthesize_connections and reviewed_all:
             self._synthesize(reviewed_all)
             rec.step(f"Synthesized connections across {len(reviewed_all)} finding(s)")
-        rec.status = "completed" if reviewed_all else "limited"
+        rec.status = _final_status(reviewed_all, rec)
         self._record_run(ctx, goal, rec, reviewed_all, started_at)
         return reviewed_all
 
@@ -220,16 +245,30 @@ class CoordinatorAgent:
             n_findings=len(reviewed),
             started_at=started_at,
             finished_at=datetime.now(UTC),
+            coverage_summary=rec.coverage_summary,
+            tool_calls=rec.tool_calls,
+            evidence_items=[_evidence_item(f) for f in reviewed],
         )
         try:
             ctx.store.insert_investigation_run(run)
         except Exception:
             logger.warning("coordinator: failed to record investigation run", exc_info=True)
 
-    def _run_round(self, ctx: AgentContext, names: list[str]) -> list[Finding]:
-        """Run the named producers under gating + isolation, then skeptic-review."""
+    def _run_round(
+        self, ctx: AgentContext, names: list[str], rec: RunTrace | None = None
+    ) -> list[Finding]:
+        """Run the named producers under gating + isolation, then skeptic-review.
+
+        When ``rec`` streams events, each producer's start and result is emitted
+        live so the Investigations page narrates the round as it runs."""
         registry = self._build_registry(names)
-        raw = registry.run_all(ctx, on_skip=_log_skip)
+        on_start = on_done = None
+        if rec is not None:
+            on_start = lambda name: rec.emit("running", {"producer": name})  # noqa: E731
+            on_done = rec.producer_done
+        raw = registry.run_all(
+            ctx, on_skip=_log_skip, on_agent_start=on_start, on_agent_done=on_done
+        )
         return skeptic_agent.review(raw, ctx)
 
     # ── plan ─────────────────────────────────────────────────────────────────
@@ -315,6 +354,47 @@ class CoordinatorAgent:
             logger.warning("coordinator: planning LLM call failed", exc_info=True)
             return None
         return _parse_json(response.content)
+
+
+#: Below this glucose coverage the run is flagged "limited" (coverage-aware gating).
+_LIMITED_COVERAGE_PCT = 70.0
+
+
+def _coverage_summary(ctx: AgentContext) -> dict[str, Any]:
+    """Data-sufficiency snapshot for the run: glucose coverage, span, treatment
+    counts, and a ``limited`` flag that drives coverage-aware gating."""
+    try:
+        cov = ctx.store.coverage()
+    except Exception:
+        return {"limited": True, "note": "coverage unavailable"}
+    pct = float(cov.glucose_coverage_pct)
+    return {
+        "glucose_coverage_pct": round(pct, 1),
+        "span_days": round(float(cov.span_days), 1),
+        "n_insulin": cov.n_insulin,
+        "n_meals": cov.n_meals,
+        "has_treatment": cov.n_insulin > 0 or cov.n_meals > 0,
+        "limited": pct < _LIMITED_COVERAGE_PCT,
+    }
+
+
+def _final_status(reviewed: list[Finding], rec: RunTrace) -> str:
+    """A run with poor coverage is ``limited`` even when it produced findings."""
+    if rec.coverage_summary is not None and rec.coverage_summary.get("limited"):
+        return "limited"
+    return "completed" if reviewed else "limited"
+
+
+def _evidence_item(f: Finding) -> dict[str, Any]:
+    """The guard-audited numbers behind one finding (evidence-drawer source)."""
+    return {
+        "finding": f.headline,
+        "kind": f.kind,
+        "agent": f.agent,
+        "numbers": dict(f.evidence),
+        "effect_size": f.stats.effect_size,
+        "n": f.stats.n,
+    }
 
 
 def _record_round(trace: RunTrace, number: int, names: list[str], findings: list[Finding]) -> None:

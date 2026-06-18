@@ -61,6 +61,7 @@ from dexta_intelligence.models import (
     InsulinEvent,
     InsulinKind,
     InvestigationRun,
+    ManualEvent,
     MealEvent,
     OpenInvestigation,
     PredictionEvent,
@@ -70,6 +71,7 @@ from dexta_intelligence.models import (
     RollupPeriod,
     RunFinding,
     SleepEvent,
+    TherapyProfile,
 )
 
 if TYPE_CHECKING:
@@ -77,7 +79,7 @@ if TYPE_CHECKING:
 
 __all__ = ["SQLiteStore"]
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 8
 
 _SECONDS_PER_DAY = 86400.0
 _CGM_SLOT_SECONDS = 300.0  # expected 5-minute CGM cadence
@@ -268,7 +270,10 @@ CREATE TABLE IF NOT EXISTS investigation_runs (
     findings TEXT NOT NULL,
     n_findings INTEGER NOT NULL,
     started_at TEXT NOT NULL,
-    finished_at TEXT NOT NULL
+    finished_at TEXT NOT NULL,
+    coverage_summary TEXT,
+    tool_calls TEXT,
+    evidence_items TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_investigation_runs_finished ON investigation_runs (id);
 
@@ -284,6 +289,35 @@ CREATE TABLE IF NOT EXISTS open_investigations (
     promoted_run_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_open_investigations_status ON open_investigations (status);
+
+CREATE TABLE IF NOT EXISTS manual_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    event_ts TEXT NOT NULL,
+    end_ts TEXT,
+    title TEXT,
+    description TEXT,
+    tags TEXT NOT NULL,
+    intensity TEXT,
+    confidence TEXT NOT NULL,
+    source TEXT NOT NULL,
+    linked_run_id TEXT,
+    linked_glucose_event_id INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_manual_events_ts ON manual_events (event_ts);
+
+CREATE TABLE IF NOT EXISTS therapy_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    active_from TEXT NOT NULL,
+    active_to TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_therapy_profiles_active ON therapy_profiles (active_from);
 """
 
 
@@ -310,8 +344,14 @@ def _row_to_goal(r: tuple[Any, ...]) -> Goal:
 
 _RUN_COLUMNS = (
     "id, run_id, kind, status, question, window_start, window_end, "
-    "plan, trace, findings, n_findings, started_at, finished_at"
+    "plan, trace, findings, n_findings, started_at, finished_at, "
+    "coverage_summary, tool_calls, evidence_items"
 )
+
+
+def _opt_json(value: str | None, default: Any) -> Any:
+    """Decode a nullable JSON text column, falling back for legacy NULL rows."""
+    return default if value is None else json.loads(value)
 
 
 def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:
@@ -329,6 +369,9 @@ def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:
         n_findings=r[10],
         started_at=_text_to_dt(r[11]),
         finished_at=_text_to_dt(r[12]),
+        coverage_summary=_opt_json(r[13], None),
+        tool_calls=_opt_json(r[14], []),
+        evidence_items=_opt_json(r[15], []),
     )
 
 
@@ -349,6 +392,48 @@ def _row_to_open_investigation(r: tuple[Any, ...]) -> OpenInvestigation:
         status=r[6],
         created_at=_text_to_dt(r[7]),
         promoted_run_id=r[8],
+    )
+
+
+_MANUAL_EVENT_COLUMNS = (
+    "id, event_type, event_ts, end_ts, title, description, tags, intensity, "
+    "confidence, source, linked_run_id, linked_glucose_event_id, created_at"
+)
+
+
+def _row_to_manual_event(r: tuple[Any, ...]) -> ManualEvent:
+    return ManualEvent(
+        id=r[0],
+        event_type=r[1],
+        event_ts=_text_to_dt(r[2]),
+        end_ts=_opt_text_to_dt(r[3]),
+        title=r[4],
+        description=r[5],
+        tags=json.loads(r[6]),
+        intensity=r[7],
+        confidence=r[8],
+        source=r[9],
+        linked_run_id=r[10],
+        linked_glucose_event_id=r[11],
+        created_at=_text_to_dt(r[12]),
+    )
+
+
+_THERAPY_PROFILE_COLUMNS = (
+    "id, source, name, content, content_hash, active_from, active_to, created_at"
+)
+
+
+def _row_to_therapy_profile(r: tuple[Any, ...]) -> TherapyProfile:
+    return TherapyProfile(
+        id=r[0],
+        source=r[1],
+        name=r[2],
+        content=json.loads(r[3]),
+        content_hash=r[4],
+        active_from=_text_to_dt(r[5]),
+        active_to=_opt_text_to_dt(r[6]),
+        created_at=_text_to_dt(r[7]),
     )
 
 
@@ -408,6 +493,9 @@ class SQLiteStore:
             # here; idempotent because we check the live column set first.
             self._add_column("findings", "last_verified", "TEXT")
             self._add_column("findings", "seen_count", "INTEGER NOT NULL DEFAULT 1")
+            self._add_column("investigation_runs", "coverage_summary", "TEXT")
+            self._add_column("investigation_runs", "tool_calls", "TEXT")
+            self._add_column("investigation_runs", "evidence_items", "TEXT")
             row = self._conn.execute("SELECT version FROM schema_version").fetchone()
             if row is None:
                 self._conn.execute(
@@ -1101,8 +1189,9 @@ class SQLiteStore:
             cursor = self._conn.execute(
                 "INSERT INTO investigation_runs "
                 "(run_id, kind, status, question, window_start, window_end, plan, trace, "
-                "findings, n_findings, started_at, finished_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "findings, n_findings, started_at, finished_at, "
+                "coverage_summary, tool_calls, evidence_items) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run.run_id,
                     run.kind,
@@ -1116,6 +1205,9 @@ class SQLiteStore:
                     run.n_findings,
                     _dt_to_text(run.started_at),
                     _dt_to_text(run.finished_at),
+                    None if run.coverage_summary is None else json.dumps(run.coverage_summary),
+                    json.dumps(run.tool_calls),
+                    json.dumps(run.evidence_items),
                 ),
             )
         assert cursor.lastrowid is not None
@@ -1185,6 +1277,85 @@ class SQLiteStore:
                 "SET current = ?, status = ?, promoted_run_id = ? WHERE id = ?",
                 (current, status, promoted_run_id, inv_id),
             )
+
+    # ── manual context ───────────────────────────────────────────────────────
+
+    def add_manual_event(self, event: ManualEvent) -> int:
+        with self._conn:
+            cursor = self._conn.execute(
+                "INSERT INTO manual_events "
+                "(event_type, event_ts, end_ts, title, description, tags, intensity, "
+                "confidence, source, linked_run_id, linked_glucose_event_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    event.event_type,
+                    _dt_to_text(event.event_ts),
+                    _opt_dt_to_text(event.end_ts),
+                    event.title,
+                    event.description,
+                    json.dumps(event.tags),
+                    event.intensity,
+                    event.confidence,
+                    event.source,
+                    event.linked_run_id,
+                    event.linked_glucose_event_id,
+                    _dt_to_text(event.created_at),
+                ),
+            )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def get_manual_events(self, start: datetime, end: datetime) -> list[ManualEvent]:
+        rows = self._window(
+            f"SELECT {_MANUAL_EVENT_COLUMNS} FROM manual_events", "event_ts", start, end
+        )
+        return [_row_to_manual_event(r) for r in rows]
+
+    # ── therapy profile versions ─────────────────────────────────────────────
+
+    def add_profile_version(self, profile: TherapyProfile) -> int:
+        latest = self._conn.execute(
+            f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles "
+            "ORDER BY active_from DESC, id DESC LIMIT 1"
+        ).fetchone()
+        if latest is not None and latest[4] == profile.content_hash:
+            return int(latest[0])  # unchanged — same version still active
+        with self._conn:
+            if latest is not None and latest[6] is None:
+                self._conn.execute(
+                    "UPDATE therapy_profiles SET active_to = ? WHERE id = ?",
+                    (_dt_to_text(profile.active_from), latest[0]),
+                )
+            cursor = self._conn.execute(
+                "INSERT INTO therapy_profiles "
+                "(source, name, content, content_hash, active_from, active_to, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    profile.source,
+                    profile.name,
+                    json.dumps(profile.content),
+                    profile.content_hash,
+                    _dt_to_text(profile.active_from),
+                    _opt_dt_to_text(profile.active_to),
+                    _dt_to_text(profile.created_at),
+                ),
+            )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def get_profile_versions(self) -> list[TherapyProfile]:
+        rows = self._conn.execute(
+            f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles ORDER BY active_from ASC"
+        ).fetchall()
+        return [_row_to_therapy_profile(r) for r in rows]
+
+    def get_active_profile(self, at: datetime) -> TherapyProfile | None:
+        row = self._conn.execute(
+            f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles "
+            "WHERE active_from <= ? ORDER BY active_from DESC, id DESC LIMIT 1",
+            (_dt_to_text(at),),
+        ).fetchone()
+        return _row_to_therapy_profile(row) if row is not None else None
 
     # ── internals ────────────────────────────────────────────────────────────
 

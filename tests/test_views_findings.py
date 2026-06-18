@@ -17,7 +17,11 @@ from dexta_intelligence.models import (
     InvestigationRun,
     RunFinding,
 )
-from dexta_intelligence.server.views_findings import findings_page_view
+from dexta_intelligence.server.views_findings import (
+    evidence_strength,
+    findings_page_view,
+    lifecycle_label,
+)
 from dexta_intelligence.store import SQLiteStore
 
 NOW = datetime(2025, 6, 20, 12, 0, tzinfo=UTC)
@@ -131,7 +135,9 @@ def test_rejected_includes_rejected() -> None:
 def test_active_card_shape() -> None:
     view = findings_page_view(_seed(), now=NOW)
     card = view["active"][0]
-    assert card["confidence_pct"] == 82
+    # confidence 0.82 + replicated + survived -> strong; seen x3 -> verified
+    assert card["strength"] == "strong"
+    assert card["lifecycle"] == "verified"
     assert card["stats_line"] == "effect 0.4 · n=30 · p=0.01 · q=0.03 · replicated"
     assert card["skeptic_survived"] is True
     assert "<strong>drops</strong>" in card["body_html"]
@@ -139,6 +145,40 @@ def test_active_card_shape() -> None:
     assert card["last_verified_rel"] == "1d ago"
     assert card["window_label"] == "2025-06-01 to 2025-06-10"
     assert card["scope"] == "nocturnal"
+
+
+def _finding(**kw: object) -> Finding:
+    base: dict[str, object] = {
+        "agent": "patterns",
+        "kind": "overnight",
+        "scope": "nocturnal",
+        "headline": "h",
+    }
+    base.update(kw)
+    return Finding(**base)  # type: ignore[arg-type]
+
+
+def test_evidence_strength_bands() -> None:
+    # skeptic-flagged is never above weak, regardless of confidence
+    flagged = _finding(
+        confidence=0.99, skeptic_notes="reject: confounded", stats=FindingStats(n=50)
+    )
+    assert evidence_strength(flagged) == "weak"
+    # strong needs high confidence AND (replication or a real sample)
+    strong = _finding(confidence=0.8, stats=FindingStats(n=30, replicated=True))
+    assert evidence_strength(strong) == "strong"
+    strong_n = _finding(confidence=0.8, stats=FindingStats(n=25))
+    assert evidence_strength(strong_n) == "strong"
+    # high confidence but thin, unreplicated sample is only moderate
+    moderate = _finding(confidence=0.8, stats=FindingStats(n=5))
+    assert evidence_strength(moderate) == "moderate"
+    weak = _finding(confidence=0.3, stats=FindingStats(n=40))
+    assert evidence_strength(weak) == "weak"
+
+
+def test_lifecycle_label_reflects_reconfirmation() -> None:
+    assert lifecycle_label(_finding(seen_count=1)) == "supported"
+    assert lifecycle_label(_finding(seen_count=4)) == "verified"
 
 
 def test_runs_reflect_seeded_run() -> None:

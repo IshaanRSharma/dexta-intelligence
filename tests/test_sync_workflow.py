@@ -24,6 +24,7 @@ from dexta_intelligence.models import (
     InsulinEvent,
     InsulinKind,
     InvestigationRun,
+    ManualEvent,
     MealEvent,
     OpenInvestigation,
     PredictionEvent,
@@ -32,6 +33,7 @@ from dexta_intelligence.models import (
     Rollup,
     RollupPeriod,
     SleepEvent,
+    TherapyProfile,
 )
 from dexta_intelligence.store.port import StoragePort
 from dexta_intelligence.workflows.sync import (
@@ -81,6 +83,8 @@ class FakeStore:
         self.chat_turns: list[ChatTurn] = []
         self.investigation_runs: list[InvestigationRun] = []
         self.open_investigations: list[OpenInvestigation] = []
+        self.manual_events: list[ManualEvent] = []
+        self.profile_versions: list[TherapyProfile] = []
 
     def migrate(self) -> None:
         return None
@@ -355,6 +359,36 @@ class FakeStore:
                     }
                 )
                 return
+
+    def add_manual_event(self, event: ManualEvent) -> int:
+        new_id = len(self.manual_events) + 1
+        self.manual_events.append(event.model_copy(update={"id": new_id}))
+        return new_id
+
+    def get_manual_events(self, start: datetime, end: datetime) -> list[ManualEvent]:
+        return sorted(
+            (e for e in self.manual_events if start <= e.event_ts < end),
+            key=lambda e: e.event_ts,
+        )
+
+    def add_profile_version(self, profile: TherapyProfile) -> int:
+        latest = self.profile_versions[-1] if self.profile_versions else None
+        if latest is not None and latest.content_hash == profile.content_hash:
+            return latest.id or 0
+        if latest is not None and latest.active_to is None:
+            self.profile_versions[-1] = latest.model_copy(
+                update={"active_to": profile.active_from}
+            )
+        new_id = len(self.profile_versions) + 1
+        self.profile_versions.append(profile.model_copy(update={"id": new_id}))
+        return new_id
+
+    def get_profile_versions(self) -> list[TherapyProfile]:
+        return sorted(self.profile_versions, key=lambda p: p.active_from)
+
+    def get_active_profile(self, at: datetime) -> TherapyProfile | None:
+        candidates = [p for p in self.profile_versions if p.active_from <= at]
+        return max(candidates, key=lambda p: p.active_from) if candidates else None
 
 
 @dataclass

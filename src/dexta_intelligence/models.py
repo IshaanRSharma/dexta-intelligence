@@ -44,6 +44,7 @@ __all__ = [
     "InsulinEvent",
     "InsulinKind",
     "InvestigationRun",
+    "ManualEvent",
     "MealEvent",
     "OpenInvestigation",
     "PredictionEvent",
@@ -53,6 +54,7 @@ __all__ = [
     "RollupPeriod",
     "RunFinding",
     "SleepEvent",
+    "TherapyProfile",
 ]
 
 
@@ -61,6 +63,10 @@ def _require_utc(value: datetime) -> datetime:
         msg = "naive datetime rejected: all timestamps must be timezone-aware (UTC)"
         raise ValueError(msg)
     return value.astimezone(UTC)
+
+
+def _require_utc_opt(value: datetime | None) -> datetime | None:
+    return None if value is None else _require_utc(value)
 
 
 class _FrozenModel(BaseModel):
@@ -130,6 +136,63 @@ class MealEvent(_FrozenModel):
     raw_event_id: int | None = None
 
     _utc = field_validator("ts")(_require_utc)
+
+
+class ManualEvent(_FrozenModel):
+    """User-reported context attached to the timeline.
+
+    Unlike connector-derived events, this is logged by the user to record
+    real-world context (meals, stress, site changes, illness, travel, free-form
+    notes). It can optionally link back to an :class:`InvestigationRun` or a
+    specific glucose event so the agent can correlate a report with what it saw.
+    """
+
+    event_type: str
+    """One of: meal, exercise, sleep, illness, stress, alcohol, site_change,
+    sensor_issue, pump_issue, medication, travel, note."""
+    event_ts: datetime
+    end_ts: datetime | None = None
+    title: str | None = None
+    description: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    intensity: str | None = None
+    confidence: str = "user_reported"
+    source: str = "manual"
+    linked_run_id: str | None = None
+    linked_glucose_event_id: int | None = None
+    created_at: datetime
+    id: int | None = None
+
+    _utc_event = field_validator("event_ts")(_require_utc)
+    _utc_created = field_validator("created_at")(_require_utc)
+    _utc_end = field_validator("end_ts")(_require_utc_opt)
+
+
+class TherapyProfile(_FrozenModel):
+    """A versioned snapshot of the user's insulin/therapy settings.
+
+    Devices report only the CURRENT profile, so dexta records a new version
+    whenever the content changes (``content_hash`` differs from the latest).
+    ``active_from`` is when this version was first seen; ``active_to`` is when
+    the next version superseded it (None for the live one). This is what lets an
+    investigation of a March event read the March profile, not today's.
+
+    ``content`` is the formatted profile payload (active profile name, segments,
+    DIA, etc.) as produced by the connector. Read-only clinical context, never
+    dosing advice.
+    """
+
+    source: str
+    name: str
+    content: dict[str, Any]
+    content_hash: str
+    active_from: datetime
+    active_to: datetime | None = None
+    created_at: datetime
+    id: int | None = None
+
+    _utc_from = field_validator("active_from", "created_at")(_require_utc)
+    _utc_to = field_validator("active_to")(_require_utc_opt)
 
 
 class ActivityEvent(_FrozenModel):
@@ -439,6 +502,13 @@ class InvestigationRun(_FrozenModel):
     n_findings: int
     started_at: datetime
     finished_at: datetime
+    coverage_summary: dict[str, Any] | None = None
+    """Data-sufficiency snapshot at run time (glucose coverage, span, counts,
+    ``limited`` flag). Drives coverage-aware gating. None on legacy rows."""
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    """Coordinator-altitude instrument log: one entry per producer that ran."""
+    evidence_items: list[dict[str, Any]] = Field(default_factory=list)
+    """The guard-audited numbers behind each finding (evidence-drawer source)."""
     id: int | None = None
 
     _utc = field_validator("started_at", "finished_at")(_require_utc)

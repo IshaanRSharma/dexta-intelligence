@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}dexta · system{% endblock %}
+{% block content %}
+{% from "_components.html" import chip %}
+{% set pipeline = pipeline|default({}) %}
+{% set agent_runs = agent_runs|default({}) %}
+{% set instruments = instruments|default([]) %}
+{% set rigor = rigor|default({}) %}
+{% set model = model|default({}) %}
+{% set connectors = connectors|default([]) %}
+
+<div class="page-head">
+  <h1>System</h1>
+  <p class="page-sub">Observability for trust: the data pipeline, agent runs, the instruments they called, rigor signals, and the configured model. Read-only.</p>
+</div>
+
+<section class="findings-section">
+  <h2 class="section-title">Pipeline health</h2>
+  <div class="chips">
+    {{ chip("raw events", pipeline.raw_events) }}
+    {{ chip("sources", pipeline.sources) }}
+    {{ chip("glucose", pipeline.glucose) }}
+    {{ chip("insulin", pipeline.insulin) }}
+    {{ chip("meals", pipeline.meals) }}
+    {{ chip("sleep", pipeline.sleep) }}
+    {{ chip("activity", pipeline.activity) }}
+    {{ chip("manual logs", pipeline.manual_logs) }}
+    {{ chip("predictions", pipeline.predictions) }}
+    {{ chip("profile versions", pipeline.profile_versions) }}
+    {{ chip("coverage", pipeline.coverage_pct ~ "%") }}
+    {{ chip("span", pipeline.span_days ~ "d") }}
+    {{ chip("last sync", pipeline.last_sync) }}
+  </div>
+</section>
+
+<section class="findings-section">
+  <h2 class="section-title">Connectors</h2>
+  <ul class="conn-list">
+    {% for s in connectors %}
+    <li class="conn-row">
+      <span class="conn-label">{{ s.label }}</span>
+      <span class="chips">
+        {% if s.configured %}<span class="badge ok">connected</span>{% else %}<span class="badge neutral">not configured</span>{% endif %}
+        {% if s.last_sync %}{{ chip("last sync", s.last_sync) }}{% endif %}
+        {{ chip("events", s.events) }}
+        <span class="badge neutral">read-only</span>
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="findings-section">
+  <h2 class="section-title">Agent runs</h2>
+  <div class="chips">
+    {{ chip("total", agent_runs.total) }}
+    {{ chip("last run", agent_runs.last_run) }}
+    {% for status, count in (agent_runs.by_status or {}).items() %}{{ chip(status, count) }}{% endfor %}
+  </div>
+  {% if agent_runs.recent %}
+  <ul class="run-log" style="margin-top:12px">
+    {% for r in agent_runs.recent %}
+    <li>
+      <span class="run-finding-head">{{ r.question }}</span>
+      <span class="meta">
+        <span class="badge {{ 'ok' if r.status == 'completed' else 'neutral' }}">{{ r.status }}</span>
+        <span class="muted">{{ r.n_findings }} finding(s)</span>
+        <span class="muted">{{ r.when }}</span>
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No investigation runs yet.</p>
+  {% endif %}
+</section>
+
+<section class="findings-section">
+  <h2 class="section-title">Instruments called</h2>
+  {% if instruments %}
+  <ul class="conn-list">
+    {% for i in instruments %}
+    <li class="conn-row">
+      <span class="conn-label">{{ i.name }}</span>
+      <span class="chips">{{ chip("runs", i.runs) }}{{ chip("findings", i.findings) }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No instrument calls recorded yet.</p>
+  {% endif %}
+</section>
+
+<section class="findings-section">
+  <h2 class="section-title">Rigor signals</h2>
+  <div class="chips">
+    {{ chip("active findings", rigor.active_findings) }}
+    {{ chip("skeptic rejected", rigor.skeptic_rejected) }}
+    {{ chip("stale", rigor.stale_findings) }}
+    {{ chip("coverage-limited runs", rigor.limited_runs) }}
+    {{ chip("failed runs", rigor.failed_runs) }}
+  </div>
+  <p class="muted small" style="margin-top:8px">Every finding is re-checked by an independent skeptic and gated by the faithfulness rail before it is shown. Dosing advice is always blocked.</p>
+</section>
+
+<section class="findings-section">
+  <h2 class="section-title">Model</h2>
+  <div class="chips">
+    {{ chip("provider", model.provider) }}
+    {{ chip("model", model.model) }}
+    {{ chip("discovery", model.discovery) }}
+    {{ chip("chat", model.chat) }}
+  </div>
+</section>
+{% endblock %}

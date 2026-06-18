@@ -8,23 +8,19 @@
 <article class="card finding-card">
   <div class="card-head">
     <h2>{{ c.headline }}</h2>
-    {% if c.skeptic_survived %}
-      <span class="badge ok" title="survived the skeptic">survived</span>
-    {% else %}
-      <span class="badge bad" title="flagged by the skeptic">flagged</span>
-    {% endif %}
+    <span class="badge {{ 'ok' if c.lifecycle == 'verified' else 'neutral' }}" title="finding lifecycle">{{ c.lifecycle }}</span>
   </div>
   <div class="chips">
     {{ chip("agent", c.agent) }}
     {{ chip("scope", c.scope) }}
-    {{ chip("confidence", c.confidence_pct ~ "%") }}
+    <span class="chip-kv strength-{{ c.strength }}"><span class="chip-k">evidence</span><span class="chip-v">{{ c.strength }}</span></span>
     {% if c.seen_count and c.seen_count > 1 %}{{ chip("seen", "x" ~ c.seen_count) }}{% endif %}
     {% if c.last_verified_rel %}{{ chip("verified", c.last_verified_rel) }}{% endif %}
     {% if c.window_label %}{{ chip("window", c.window_label) }}{% endif %}
   </div>
   {% if c.stats_line %}<p class="stats">{{ c.stats_line }}</p>{% endif %}
   {% if c.body_html %}<div class="prose">{{ c.body_html|safe }}</div>{% endif %}
-  {% if not c.skeptic_survived and c.skeptic_notes %}
+  {% if c.skeptic_notes %}
   <p class="counter-evidence"><span class="ce-label">Counter-evidence</span> {{ c.skeptic_notes }}</p>
   {% endif %}
 </article>

@@ -94,12 +94,16 @@ class AgentRegistry:
         ctx: AgentContext,
         *,
         on_skip: Callable[[str, list[str]], None] | None = None,
+        on_agent_start: Callable[[str], None] | None = None,
+        on_agent_done: Callable[[str, int], None] | None = None,
     ) -> list[Finding]:
         """Run every registered agent that meets its data requirement.
 
         Skipped agents are reported through ``on_skip`` with their unmet
         reasons — cold start is explicit, never silent. A raising agent is
-        logged and isolated; the run continues.
+        logged and isolated; the run continues. ``on_agent_start`` /
+        ``on_agent_done`` (name, finding count) let a caller narrate the fan-out
+        live; a failed agent reports zero findings.
         """
         findings: list[Finding] = []
         for agent in self._agents.values():
@@ -109,8 +113,15 @@ class AgentRegistry:
                 if on_skip is not None:
                     on_skip(agent.name, reasons)
                 continue
+            if on_agent_start is not None:
+                on_agent_start(agent.name)
+            produced = 0
             try:
-                findings.extend(agent.run(ctx))
+                round_findings = agent.run(ctx)
+                produced = len(round_findings)
+                findings.extend(round_findings)
             except Exception:
                 logger.exception("agent %s failed; continuing run", agent.name)
+            if on_agent_done is not None:
+                on_agent_done(agent.name, produced)
         return findings

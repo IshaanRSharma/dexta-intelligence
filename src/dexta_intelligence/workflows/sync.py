@@ -36,6 +36,7 @@ Predictions note
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -43,6 +44,8 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from dexta_intelligence.analytics.rollups import daily_rollup
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -72,6 +75,46 @@ OVERLAP_MARGIN = timedelta(minutes=15)
 #: Raw ``source_id`` values that are singleton snapshots — upserted with
 #: replace-on-conflict so each sync refreshes the payload.
 _SNAPSHOT_RAW_IDS = frozenset({"tandem:profile:active"})
+
+#: Snapshot ids whose payload is a therapy profile we also version (PRD 18).
+_PROFILE_RAW_IDS = frozenset({"tandem:profile:active"})
+
+
+def _capture_profile_versions(store: StoragePort, snapshot_raw: list[RawEvent]) -> None:
+    """Record a therapy-profile version for each profile snapshot in the batch.
+
+    Devices report only the current profile, so this keeps a content-addressed
+    history: ``add_profile_version`` is a no-op when the payload is unchanged and
+    opens a new version when it changes. Best-effort: never fails a sync, and
+    silently no-ops on stores without the method (older schemas)."""
+    import hashlib  # noqa: PLC0415
+    import json  # noqa: PLC0415
+
+    from dexta_intelligence.models import TherapyProfile  # noqa: PLC0415
+
+    add = getattr(store, "add_profile_version", None)
+    if add is None:
+        return
+    for raw in snapshot_raw:
+        if raw.source_id not in _PROFILE_RAW_IDS or not isinstance(raw.payload, dict):
+            continue
+        payload = dict(raw.payload)
+        digest = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, default=str).encode()
+        ).hexdigest()
+        try:
+            add(
+                TherapyProfile(
+                    source=raw.source,
+                    name=str(payload.get("active_profile") or "profile"),
+                    content=payload,
+                    content_hash=digest,
+                    active_from=raw.source_ts,
+                    created_at=datetime.now(UTC),
+                )
+            )
+        except Exception:
+            logger.warning("sync: failed to capture profile version", exc_info=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +184,7 @@ def sync(
     id_map = store.upsert_raw_events(event_raw)
     if snapshot_raw:
         id_map.update(store.replace_raw_events(snapshot_raw))
+        _capture_profile_versions(store, snapshot_raw)
     raw_new = sum(1 for sid in id_map if sid not in existing_before)
 
     ts_to_raw_id = _unambiguous_ts_index(batch.raw, id_map)

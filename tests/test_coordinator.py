@@ -109,6 +109,75 @@ def test_skeptic_pass_applied(store: SQLiteStore) -> None:
         assert finding.skeptic_notes is not None
 
 
+def test_run_trace_streams_plan_and_per_producer_events(store: SQLiteStore) -> None:
+    """A RunTrace with an on_event sink narrates the investigation live: a plan
+    event, then running/producer_done per producer, then step lines."""
+    from dexta_intelligence.agents.coordinator import RunTrace  # noqa: PLC0415
+
+    _seed_glucose(store)
+    events: list[dict[str, Any]] = []
+    rec = RunTrace(on_event=events.append)
+    CoordinatorAgent(model=None).investigate(_full_coverage_ctx(store), trace=rec)
+
+    kinds = [e["kind"] for e in events]
+    assert "plan" in kinds
+    assert "running" in kinds
+    assert "producer_done" in kinds
+
+    plan = next(e for e in events if e["kind"] == "plan")
+    assert plan["payload"]["steps"] == list(PRODUCERS)
+    # Every producer that started also reported done with a finding count.
+    started = {e["payload"]["producer"] for e in events if e["kind"] == "running"}
+    done = {e["payload"]["producer"] for e in events if e["kind"] == "producer_done"}
+    assert started == done
+    assert all(
+        isinstance(e["payload"]["n_findings"], int)
+        for e in events
+        if e["kind"] == "producer_done"
+    )
+    # Coverage is emitted up front and recorded on the trace.
+    assert kinds[0] == "coverage"
+    assert "glucose_coverage_pct" in events[0]["payload"]
+    assert rec.coverage_summary is not None
+    assert rec.tool_calls  # one entry per producer that ran
+
+
+def test_record_run_persists_coverage_and_evidence(store: SQLiteStore) -> None:
+    """The persisted run carries the coverage snapshot and per-finding evidence."""
+    _seed_glucose(store)
+    findings = CoordinatorAgent(model=None).investigate(_full_coverage_ctx(store))
+    run = store.get_investigation_runs(limit=1)[0]
+    assert run.coverage_summary is not None
+    assert "glucose_coverage_pct" in run.coverage_summary
+    assert run.tool_calls  # producer-level instrument log
+    assert len(run.evidence_items) == len(findings)
+    if findings:
+        assert run.evidence_items[0]["finding"] == findings[0].headline
+        assert "numbers" in run.evidence_items[0]
+
+
+def test_poor_coverage_marks_run_limited(store: SQLiteStore) -> None:
+    """A run over thin sensor coverage is flagged limited even with findings."""
+    from dexta_intelligence.agents.coordinator import (  # noqa: PLC0415
+        RunTrace,
+        _coverage_summary,
+        _final_status,
+    )
+    from dexta_intelligence.models import Finding  # noqa: PLC0415
+
+    _seed_glucose(store)
+    # Full-coverage fixture is not limited.
+    assert _coverage_summary(_full_coverage_ctx(store))["limited"] is False
+
+    one = [Finding(agent="observation", kind="pattern", scope="x", headline="h")]
+    limited = RunTrace(coverage_summary={"glucose_coverage_pct": 40.0, "limited": True})
+    good = RunTrace(coverage_summary={"glucose_coverage_pct": 90.0, "limited": False})
+    # Poor coverage forces "limited" even with findings; good coverage + findings completes.
+    assert _final_status(one, limited) == "limited"
+    assert _final_status(one, good) == "completed"
+    assert _final_status([], good) == "limited"  # no findings is still limited
+
+
 def test_scripted_plan_selects_subset(store: SQLiteStore) -> None:
     """A planner that picks only 'observation' runs only that producer."""
     _seed_glucose(store)

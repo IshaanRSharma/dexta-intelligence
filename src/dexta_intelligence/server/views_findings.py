@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["findings_page_view"]
+__all__ = ["evidence_strength", "findings_page_view", "lifecycle_label"]
 
 #: Kinds that are bookkeeping artifacts rather than user-facing findings. They
 #: are excluded from both the active and rejected lists on the Findings page.
@@ -50,6 +50,34 @@ def _relative_time(ts: datetime, now: datetime) -> str:
     if secs < 86400:
         return f"{secs // 3600}h ago"
     return f"{delta.days}d ago"
+
+
+def _skeptic_survived(finding: Finding) -> bool:
+    return finding.skeptic_notes is None or "reject" not in finding.skeptic_notes.lower()
+
+
+def evidence_strength(finding: Finding) -> str:
+    """Qualitative evidence strength (strong / moderate / weak) from the finding's
+    confidence, sample size, replication, and whether it survived the skeptic.
+
+    Replaces the misleading raw "confidence 100%" label with an honest band: a
+    finding the skeptic flagged is never stronger than weak, and "strong" needs
+    both high confidence and either replication or a real sample."""
+    if not _skeptic_survived(finding):
+        return "weak"
+    n = finding.stats.n or 0
+    if finding.confidence >= 0.75 and (finding.stats.replicated or n >= 20):
+        return "strong"
+    if finding.confidence >= 0.5:
+        return "moderate"
+    return "weak"
+
+
+def lifecycle_label(finding: Finding) -> str:
+    """User-facing lifecycle label for an active finding: a finding re-confirmed
+    across runs is "verified", otherwise "supported". (Rejected/superseded
+    findings carry their own status and never reach this.)"""
+    return "verified" if (finding.seen_count or 1) > 1 else "supported"
 
 
 def _stats_line(finding: Finding) -> str:
@@ -77,7 +105,6 @@ def _window_label(finding: Finding) -> str:
 
 
 def _active_card(finding: Finding, now: datetime) -> dict[str, Any]:
-    survived = finding.skeptic_notes is None or "reject" not in finding.skeptic_notes.lower()
     last_verified_rel = (
         _relative_time(finding.last_verified, now) if finding.last_verified is not None else ""
     )
@@ -86,9 +113,10 @@ def _active_card(finding: Finding, now: datetime) -> dict[str, Any]:
         "agent": finding.agent,
         "kind": finding.kind,
         "scope": finding.scope,
-        "confidence_pct": round(finding.confidence * 100),
+        "strength": evidence_strength(finding),
+        "lifecycle": lifecycle_label(finding),
         "stats_line": _stats_line(finding),
-        "skeptic_survived": survived,
+        "skeptic_survived": _skeptic_survived(finding),
         "skeptic_notes": finding.skeptic_notes,
         "body_html": markdown_to_html(finding.body_md) if finding.body_md else "",
         "seen_count": finding.seen_count,

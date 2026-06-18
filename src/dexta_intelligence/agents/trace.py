@@ -173,6 +173,15 @@ def _get_insulin_profile(r: dict[str, Any]) -> TraceLine:
     return TraceLine("treatment", f"checked insulin profile — {name!r} ({n_seg} segments)")
 
 
+def _get_active_profile(r: dict[str, Any]) -> TraceLine:
+    if r.get("error"):
+        return TraceLine("treatment", "checked therapy profile — none available")
+    name = _get(r, "version_name", _get(r, "active_profile", "?"))
+    if r.get("versioned"):
+        return TraceLine("treatment", f"loaded the profile in effect then — {name!r}")
+    return TraceLine("treatment", f"loaded the current profile (no history yet) — {name!r}")
+
+
 def _get_cob(r: dict[str, Any]) -> TraceLine:
     return TraceLine(
         "treatment",
@@ -197,6 +206,33 @@ def _find_similar_events(r: dict[str, Any]) -> TraceLine:
     )
 
 
+def _manual_summary(r: dict[str, Any]) -> str:
+    rows = r.get("events") or []
+    types = [e.get("event_type") for e in rows if isinstance(e, dict) and e.get("event_type")]
+    head = f": {types[0]}" if len(types) == 1 else ""
+    return f"{_count(r, 'n_events', 'user-reported note')}{head}"
+
+
+def _get_manual_events(r: dict[str, Any]) -> TraceLine:
+    if not r.get("n_events"):
+        return TraceLine("recall", "checked manual context — no user-reported context found")
+    return TraceLine("recall", f"checked manual context ({_manual_summary(r)})")
+
+
+def _search_manual_events(r: dict[str, Any]) -> TraceLine:
+    q = _get(r, "query", "")
+    label = f" for {q!r}" if q else ""
+    if not r.get("n_events"):
+        return TraceLine("recall", f"searched manual context{label} — no matches")
+    return TraceLine("recall", f"searched manual context{label} ({_manual_summary(r)})")
+
+
+def _get_context_around_event(r: dict[str, Any]) -> TraceLine:
+    if not r.get("n_events"):
+        return TraceLine("recall", "checked manual context — no user-reported context found")
+    return TraceLine("recall", f"checked manual context near the event ({_manual_summary(r)})")
+
+
 def _current_time(r: dict[str, Any]) -> TraceLine:
     return TraceLine("time", f"anchored 'now' ({_get(r, 'date', '?')}, {_get(r, 'weekday', '?')})")
 
@@ -215,9 +251,13 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], TraceLine]] = {
     "get_basal_timeline": _get_basal_timeline,
     "get_iob": _get_iob,
     "get_insulin_profile": _get_insulin_profile,
+    "get_active_profile": _get_active_profile,
     "get_cob": _get_cob,
     "find_spikes": _find_spikes,
     "find_similar_events": _find_similar_events,
+    "get_manual_events": _get_manual_events,
+    "search_manual_events": _search_manual_events,
+    "get_context_around_event": _get_context_around_event,
     "get_current_time": _current_time,
     "get_weekday": _weekday,
     "parse_relative_date": _relative_date,

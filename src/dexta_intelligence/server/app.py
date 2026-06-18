@@ -15,10 +15,11 @@ import os
 import queue
 import threading
 import uuid
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dexta_intelligence.cli._common import (
     _analysis_window,
@@ -45,7 +46,7 @@ from dexta_intelligence.config import (
     secrets_path_for,
 )
 from dexta_intelligence.connectors.base import HealthReport
-from dexta_intelligence.models import ChatTurn, FindingStatus
+from dexta_intelligence.models import ChatTurn, FindingStatus, ManualEvent
 from dexta_intelligence.server.autosync import AutoSyncController
 from dexta_intelligence.server.render import markdown_to_html
 from dexta_intelligence.server.settings_render import field_to_view, panel_to_view
@@ -59,8 +60,13 @@ from dexta_intelligence.server.settings_schema import (
     FieldKind,
     source_nav,
 )
-from dexta_intelligence.server.views_findings import findings_page_view
+from dexta_intelligence.server.views_findings import (
+    evidence_strength,
+    findings_page_view,
+    lifecycle_label,
+)
 from dexta_intelligence.server.views_goals import goal_card_view
+from dexta_intelligence.server.views_system import system_page_view
 
 # FastAPI resolves route annotations against this module's globals, so the GUI
 # types must live here at import time. They are an optional extra, so a missing
@@ -155,7 +161,9 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         ("/findings", "Findings"),
         ("/goals", "Goals"),
         ("/chat", "Chat"),
+        ("/log", "Log"),
         ("/connectors", "Connectors"),
+        ("/system", "System"),
         ("/settings", "Settings"),
     )
     templates.env.globals["source_nav"] = source_nav()
@@ -313,6 +321,63 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             open_invs=[_open_inv_view(o) for o in open_invs],
             runs=[_run_view(r, now) for r in runs],
         )
+
+    # ── manual context logging ────────────────────────────────────────────────
+
+    @app.get("/log", response_class=HTMLResponse)
+    def log_context(request: Request) -> Any:
+        flash = request.query_params.get("flash")
+        now = datetime.now(tz=UTC)
+        tz = _analysis_tz(config)
+        store = store_opener(config, None)
+        try:
+            recent = store.get_manual_events(now - timedelta(days=30), now + timedelta(days=1))
+        finally:
+            _close(store, store_opener)
+        events = [_manual_event_view(e, tz, now) for e in reversed(recent)]
+        return _render(
+            "log.html",
+            request,
+            "/log",
+            flash=_log_banner(flash),
+            event_types=_MANUAL_EVENT_TYPES,
+            events=events,
+            default_ts=now.astimezone(tz).strftime("%Y-%m-%dT%H:%M"),
+        )
+
+    @app.post("/actions/log-context")
+    def action_log_context(
+        event_type: str = Form(...),
+        event_ts: str = Form(""),
+        end_ts: str = Form(""),
+        title: str = Form(""),
+        description: str = Form(""),
+        tags: str = Form(""),
+        intensity: str = Form(""),
+    ) -> Any:
+        """Persist one user-submitted manual event. This is the ONLY path that
+        creates manual events: the LLM never does (PRD section 19)."""
+        etype = event_type.strip()
+        if etype not in _MANUAL_TYPE_LABELS:
+            return RedirectResponse("/log?flash=log_badtype", status_code=303)
+        tz = _analysis_tz(config)
+        when = _parse_local_dt(event_ts, tz) or datetime.now(UTC)
+        event = ManualEvent(
+            event_type=etype,
+            event_ts=when,
+            end_ts=_parse_local_dt(end_ts, tz),
+            title=title.strip() or None,
+            description=description.strip() or None,
+            tags=[t.strip() for t in tags.split(",") if t.strip()],
+            intensity=intensity.strip() or None,
+            created_at=datetime.now(UTC),
+        )
+        store = store_opener(config, None)
+        try:
+            store.add_manual_event(event)
+        finally:
+            _close(store, store_opener)
+        return RedirectResponse("/log?flash=log_ok", status_code=303)
 
     @app.post("/actions/upload")
     async def action_upload(file: UploadFile = File(...)) -> Any:  # noqa: B008 - FastAPI idiom
@@ -575,6 +640,18 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             flash=flash,
         )
 
+    @app.get("/system", response_class=HTMLResponse)
+    def system(request: Request) -> Any:
+        cfg = _settings_cfg()
+        now = datetime.now(tz=UTC)
+        store = store_opener(config, None)
+        try:
+            view = system_page_view(cfg, store, now)
+            connectors = _connectors_view(cfg, store, now)
+        finally:
+            _close(store, store_opener)
+        return _render("system.html", request, "/system", connectors=connectors, **view)
+
     @app.post("/actions/connectors/sync")
     async def action_connectors_sync(request: Request) -> Any:
         from dexta_intelligence.workflows.sync import sync_all  # noqa: PLC0415
@@ -774,6 +851,99 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                         "payload": {"text": f"{type(exc).__name__}: {exc}"},
                     }
                 )
+            finally:
+                _close(store, store_opener)
+                events.put(done)
+
+        async def _drain() -> Any:
+            import asyncio  # noqa: PLC0415
+
+            worker = threading.Thread(target=_run, daemon=True)
+            worker.start()
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    item = await asyncio.to_thread(events.get, True, 0.25)
+                except queue.Empty:
+                    continue
+                if item is done:
+                    break
+                yield _sse(item)
+
+        return StreamingResponse(
+            _drain(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.get("/api/investigate/stream")
+    async def api_investigate_stream(request: Request, q: str = "") -> Any:
+        """Stream a coordinator investigation as Server-Sent Events.
+
+        Mirrors ``/api/ask/stream``: the coordinator runs in a worker thread and
+        its ``RunTrace.on_event`` sink pushes plan / running / step events onto a
+        queue this generator drains. Works with no model (the coordinator
+        degrades to the full deterministic producer set). Ends with ``done`` (the
+        evidence cards) or a terminal ``error``.
+        """
+        question = q.strip()
+        events: queue.Queue[Any] = queue.Queue()
+        done = object()
+
+        def _run() -> None:
+            from dexta_intelligence.agents.base import AgentContext  # noqa: PLC0415
+            from dexta_intelligence.agents.coordinator import (  # noqa: PLC0415
+                CoordinatorAgent,
+                RunTrace,
+            )
+            from dexta_intelligence.workflows.deep_analysis import (  # noqa: PLC0415
+                persist_findings,
+            )
+
+            store = store_opener(config, None)
+            try:
+                coverage = store.coverage()
+                gates = ColdStartReport.from_coverage(coverage)
+                if gates.below_hard_floor:
+                    events.put(
+                        {
+                            "kind": "error",
+                            "payload": {
+                                "text": "Not enough data yet to investigate. "
+                                f"Need at least {HARD_FLOOR_DAYS} days."
+                            },
+                        }
+                    )
+                    return
+                end = coverage.last_ts.date() if coverage.last_ts is not None else None
+                ctx = AgentContext(
+                    store=store,
+                    window=_analysis_window(config, end),
+                    gates=gates,
+                    run_id=f"gui-investigate-{uuid.uuid4()}",
+                    timezone=config.analysis.timezone,
+                )
+                rec = RunTrace(on_event=events.put)
+                coordinator = CoordinatorAgent(model=discovery_model(config), config=config)
+                findings = coordinator.investigate(ctx, goal=question or None, trace=rec)
+                persisted = persist_findings(store, findings)
+                events.put(
+                    {
+                        "kind": "done",
+                        "payload": {
+                            "status": rec.status,
+                            "n_findings": len(persisted),
+                            "findings": [_stream_finding_card(f) for f in findings],
+                        },
+                    }
+                )
+            except Exception as exc:
+                events.put({"kind": "error", "payload": {"text": f"{type(exc).__name__}: {exc}"}})
             finally:
                 _close(store, store_opener)
                 events.put(done)
@@ -1022,7 +1192,9 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                 save_secret(var, value, path=secrets_path)
             except ValueError as exc:
                 card = _card_view(spec, _settings_cfg(), error=str(exc))
-                return _render("_settings_card.html", request, status_code=400, lite=True, card=card)
+                return _render(
+                    "_settings_card.html", request, status_code=400, lite=True, card=card
+                )
 
         updates: dict[str, Any] = {}
         for f in spec.fields:
@@ -1448,13 +1620,30 @@ def _finding_card(finding: Finding, active: list[Finding]) -> dict[str, Any]:
         "headline": finding.headline,
         "agent": finding.agent,
         "kind": finding.kind,
+        "scope": finding.scope,
         "confidence": finding.confidence,
-        "confidence_pct": round(finding.confidence * 100),
+        "strength": evidence_strength(finding),
+        "lifecycle": lifecycle_label(finding),
         "stats_line": _stats_line(finding),
         "skeptic_survived": survived,
         "skeptic_notes": finding.skeptic_notes,
         "recurrence": recurrence + 1,
+        "seen_count": finding.seen_count,
         "body_html": markdown_to_html(finding.body_md) if finding.body_md else "",
+    }
+
+
+def _stream_finding_card(finding: Finding) -> dict[str, Any]:
+    """One reviewed finding as an evidence card for the live investigate stream."""
+    return {
+        "headline": finding.headline,
+        "agent": finding.agent,
+        "kind": finding.kind,
+        "scope": finding.scope,
+        "confidence_pct": round(finding.confidence * 100),
+        "status": finding.status.value,
+        "body_html": markdown_to_html(finding.body_md) if finding.body_md else "",
+        "skeptic_notes": finding.skeptic_notes,
     }
 
 
@@ -1502,6 +1691,71 @@ def _autosync_view(status: Any, now: datetime) -> dict[str, Any]:
     }
 
 
+_MANUAL_EVENT_TYPES: tuple[tuple[str, str], ...] = (
+    ("meal", "Meal context"),
+    ("exercise", "Exercise"),
+    ("site_change", "Site change"),
+    ("illness", "Illness"),
+    ("stress", "Stress"),
+    ("alcohol", "Alcohol"),
+    ("sleep", "Sleep disruption"),
+    ("sensor_issue", "Sensor issue"),
+    ("pump_issue", "Pump issue"),
+    ("medication", "Medication"),
+    ("travel", "Travel / timezone"),
+    ("note", "Free-text note"),
+)
+_MANUAL_TYPE_LABELS = dict(_MANUAL_EVENT_TYPES)
+
+
+def _analysis_tz(config: Config) -> ZoneInfo:
+    """The patient-local zone from config, falling back to UTC on anything unknown."""
+    try:
+        return ZoneInfo(config.analysis.timezone or "UTC")
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return ZoneInfo("UTC")
+
+
+def _parse_local_dt(value: str, tz: ZoneInfo) -> datetime | None:
+    """A datetime-local form value (patient zone) → aware UTC, or None if blank/bad."""
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=tz)
+    return dt.astimezone(UTC)
+
+
+def _log_banner(flash: str | None) -> dict[str, str] | None:
+    """Flash banner for the /log page."""
+    if flash == "log_ok":
+        return {"kind": "ok", "text": "Context logged. It is now part of your timeline."}
+    if flash == "log_badtype":
+        return {"kind": "warn", "text": "Unknown event type. Nothing was logged."}
+    return None
+
+
+def _manual_event_view(e: ManualEvent, tz: ZoneInfo, now: datetime) -> dict[str, Any]:
+    """Shape one manual event for the /log timeline. Always user-reported."""
+    local = e.event_ts.astimezone(tz)
+    return {
+        "type_label": _MANUAL_TYPE_LABELS.get(
+            e.event_type, e.event_type.replace("_", " ").title()
+        ),
+        "when": local.strftime("%b %d, %Y · %H:%M"),
+        "ago": _relative_time(e.event_ts, now),
+        "title": e.title,
+        "description": e.description,
+        "tags": list(e.tags),
+        "intensity": e.intensity,
+        "provenance": "user-reported",
+    }
+
+
 def _run_view(run: InvestigationRun, now: datetime) -> dict[str, Any]:
     """Shape one investigation run for the Investigations page."""
     return {
@@ -1513,6 +1767,8 @@ def _run_view(run: InvestigationRun, now: datetime) -> dict[str, Any]:
         "plan": run.plan,
         "trace": run.trace,
         "n_findings": run.n_findings,
+        "coverage": _coverage_view(run.coverage_summary),
+        "evidence_items": run.evidence_items,
         "findings": [
             {
                 "headline": f.headline,
@@ -1522,6 +1778,19 @@ def _run_view(run: InvestigationRun, now: datetime) -> dict[str, Any]:
             }
             for f in run.findings
         ],
+    }
+
+
+def _coverage_view(summary: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Shape a run's coverage snapshot for display (scope chip + limited banner)."""
+    if not summary:
+        return None
+    pct = summary.get("glucose_coverage_pct")
+    return {
+        "pct": pct,
+        "limited": bool(summary.get("limited")),
+        "has_treatment": bool(summary.get("has_treatment")),
+        "label": f"{pct:g}%" if isinstance(pct, (int, float)) else "unknown",
     }
 
 

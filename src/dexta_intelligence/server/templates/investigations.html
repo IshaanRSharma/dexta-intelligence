@@ -7,7 +7,20 @@
 <div class="page-head">
   <h1>Investigations</h1>
   <p class="page-sub">Every investigation dexta runs, with the plan it followed, the trace of what it did, and the findings it produced.</p>
+  <a class="btn btn-ghost" href="/log">+ Log context</a>
 </div>
+
+<form id="investigate-form" class="investigate-box" autocomplete="off">
+  <label for="investigate-q" class="investigate-label">Start an investigation</label>
+  <div class="investigate-row">
+    <input id="investigate-q" type="text" name="q"
+           placeholder="e.g. what caused my worst high yesterday?" />
+    <button type="submit">Investigate</button>
+  </div>
+  <p class="muted small">dexta plans which investigations to run, narrates the trace live, and shows the evidence. Pattern analysis only. Not a dosing recommendation.</p>
+</form>
+
+<div id="investigate-stream"></div>
 
 {% if open_invs %}
 <section class="findings-section">
@@ -41,7 +54,12 @@
       <span class="mono">{{ r.window }}</span>
       <span class="muted">{{ r.when }}</span>
       <span class="muted">{{ r.n_findings }} finding(s)</span>
+      {% if r.coverage %}<span class="chip">coverage {{ r.coverage.label }}</span>{% endif %}
     </div>
+
+    {% if r.coverage and r.coverage.limited %}
+    <p class="flash error" style="margin:10px 0">Limited analysis mode: sensor coverage is {{ r.coverage.label }}. Treat conclusions as provisional.</p>
+    {% endif %}
 
     <div class="run-section">
       <h3>Plan</h3>
@@ -74,6 +92,24 @@
       </ul>
     </div>
     {% endif %}
+
+    {% if r.evidence_items %}
+    <details class="run-section evidence-drawer">
+      <summary>Evidence ({{ r.evidence_items|length }})</summary>
+      <ul class="evidence-list">
+        {% for ev in r.evidence_items %}
+        <li>
+          <span class="run-finding-head">{{ ev.finding }}</span>
+          <div class="meta">
+            {% if ev.n is not none %}<span class="chip">n={{ ev.n }}</span>{% endif %}
+            {% if ev.effect_size is not none %}<span class="chip">effect {{ "%.2f"|format(ev.effect_size) }}</span>{% endif %}
+            {% for k, v in (ev.numbers or {}).items() %}<span class="mono">{{ k }}={{ v }}</span>{% endfor %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
   </article>
   {% endfor %}
 </div>
@@ -84,4 +120,5 @@
   <a class="btn btn-secondary" href="/" style="margin-top:14px">Go to dashboard</a>
 </div>
 {% endif %}
+<script src="/static/investigate.js?v={{ static_version }}" defer></script>
 {% endblock %}

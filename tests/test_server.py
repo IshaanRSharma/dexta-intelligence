@@ -102,8 +102,9 @@ def test_dashboard_lists_active_finding(tmp_path: Path) -> None:
     assert resp.status_code == 200
     body = resp.text
     assert "Overnight lows cluster after evening exercise" in body
-    assert "✓ survived" in body
-    assert "82%" in body  # confidence
+    # confidence 0.82 + n=24 + survived -> strong evidence; seen once -> supported
+    assert "strong evidence" in body
+    assert "supported" in body
     store.close()
 
 
@@ -751,7 +752,7 @@ def test_findings_page_renders_tabs_and_cards(tmp_path: Path) -> None:
     assert "Overnight lows after evening exercise" in body
     assert "Open hypotheses" in body
     assert "Investigation log" in body
-    assert "confidence" in body  # scope chip
+    assert "evidence" in body  # evidence-strength chip
     store.close()
 
 

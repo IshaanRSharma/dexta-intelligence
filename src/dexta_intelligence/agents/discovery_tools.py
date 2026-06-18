@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from dexta_intelligence.agents.base import AgentContext
-    from dexta_intelligence.models import InsulinEvent, MealEvent
+    from dexta_intelligence.models import InsulinEvent, ManualEvent, MealEvent
 
 __all__ = [
     "TOOL_SCHEMA_FOR_LLM",
@@ -290,6 +290,13 @@ class DiscoveryToolkit:
             self._n_predictions = len(ctx.store.get_predictions(start, end))
         except (AttributeError, NotImplementedError):  # minimal/partial stores
             self._n_predictions = 0
+        try:
+            self._manual: list[ManualEvent] = sorted(
+                ctx.store.get_manual_events(start, end), key=lambda m: m.event_ts
+            )
+        except (AttributeError, NotImplementedError):  # minimal/partial stores
+            self._manual = []
+        self._manual_ts = [m.event_ts for m in self._manual]
         self._insulin_profile: dict[str, Any] | None = None
         try:
             profile_raw = ctx.store.get_raw_event("tandem", PROFILE_SOURCE_ID)
@@ -297,6 +304,10 @@ class DiscoveryToolkit:
             profile_raw = None
         if profile_raw is not None:
             self._insulin_profile = dict(profile_raw.payload)
+        try:
+            self._profile_versions = list(ctx.store.get_profile_versions())
+        except (AttributeError, NotImplementedError):  # minimal/partial stores
+            self._profile_versions = []
 
     # ── local-time helpers (bucket in the patient's zone, slice the UTC arrays) ──
 
@@ -1009,6 +1020,42 @@ class DiscoveryToolkit:
         }
         return out
 
+    def get_active_profile(self, timestamp_iso: str) -> dict[str, Any]:
+        """The therapy profile VERSION in effect at ``timestamp`` — so an event
+        in March reads the March profile, not today's. Falls back to the current
+        snapshot when no version history exists yet. Tier B, never dosing."""
+        at = _parse_ts(timestamp_iso)
+        if at is None:
+            return {"error": f"bad timestamp: {timestamp_iso!r}"}
+        covering = [p for p in self._profile_versions if p.active_from <= at]
+        if not covering:
+            if self._insulin_profile is not None:
+                return {
+                    **self._insulin_profile,
+                    "as_of": at.isoformat(),
+                    "versioned": False,
+                    "tier": "B",
+                    "note": (
+                        "no profile version recorded at this time — showing the "
+                        "current snapshot; versions accrue from future syncs"
+                    ),
+                }
+            return {
+                "error": "no therapy profile available",
+                "note": "connect Tandem in Settings and Sync to capture the profile",
+            }
+        version = max(covering, key=lambda p: p.active_from)
+        return {
+            **version.content,
+            "version_name": version.name,
+            "active_from": version.active_from.isoformat(),
+            "active_to": version.active_to.isoformat() if version.active_to else None,
+            "as_of": at.isoformat(),
+            "versioned": True,
+            "tier": "B",
+            "method": "therapy-profile version in effect at the timestamp",
+        }
+
     def get_iob(self, timestamp_iso: str) -> dict[str, Any]:
         """Insulin-on-board at ``timestamp`` from logged boluses (oref0
         exponential curve, rapid-acting defaults). Tier B — computed for
@@ -1090,6 +1137,93 @@ class DiscoveryToolkit:
             "method": "computed from announced carbs (oref0 deviation decay, "
             "analysis-profile defaults)",
         }
+
+    def _manual_row(self, e: ManualEvent) -> dict[str, Any]:
+        """One manual event as a tool-facing row. ``provenance`` is always
+        user-reported: manual events are submitted by the user, never inferred."""
+        row: dict[str, Any] = {
+            "ts": e.event_ts.isoformat(),
+            "event_type": e.event_type,
+            "provenance": "user-reported",
+        }
+        if e.end_ts is not None:
+            row["end_ts"] = e.end_ts.isoformat()
+        if e.title:
+            row["title"] = e.title
+        if e.description:
+            row["description"] = e.description
+        if e.tags:
+            row["tags"] = list(e.tags)
+        if e.intensity:
+            row["intensity"] = e.intensity
+        return row
+
+    def _manual_in_active_window(self) -> list[ManualEvent]:
+        lo = bisect.bisect_left(self._manual_ts, self._active_start)
+        hi = bisect.bisect_right(self._manual_ts, self._active_end)
+        return self._manual[lo:hi]
+
+    _MANUAL_EMPTY_NOTE = (
+        "no user-reported context in this window — manual logs are added by the "
+        "user, never inferred"
+    )
+
+    def get_manual_events(self) -> dict[str, Any]:
+        """User-reported context in the ACTIVE window ({ts, event_type, title,
+        description, tags, intensity}). Manual logs are user-submitted only;
+        an empty result means none were logged, not that nothing happened."""
+        events = self._manual_in_active_window()
+        rows = [self._manual_row(e) for e in events[:_MAX_LISTED_EVENTS]]
+        out: dict[str, Any] = {"n_events": len(events), "events": rows}
+        if not events:
+            out["note"] = self._MANUAL_EMPTY_NOTE
+        elif len(events) > _MAX_LISTED_EVENTS:
+            out["note"] = f"showing first {_MAX_LISTED_EVENTS} of {len(events)}"
+        return out
+
+    def search_manual_events(self, query: str) -> dict[str, Any]:
+        """User-reported context in the ACTIVE window whose type/title/description/
+        tags contain ``query`` (case-insensitive)."""
+        q = query.strip().lower()
+        events = self._manual_in_active_window()
+        if q:
+            events = [e for e in events if q in self._manual_haystack(e)]
+        rows = [self._manual_row(e) for e in events[:_MAX_LISTED_EVENTS]]
+        out: dict[str, Any] = {"query": query, "n_events": len(events), "events": rows}
+        if not events:
+            out["note"] = self._MANUAL_EMPTY_NOTE
+        elif len(events) > _MAX_LISTED_EVENTS:
+            out["note"] = f"showing first {_MAX_LISTED_EVENTS} of {len(events)}"
+        return out
+
+    @staticmethod
+    def _manual_haystack(e: ManualEvent) -> str:
+        parts = [e.event_type, e.title or "", e.description or "", " ".join(e.tags)]
+        return " ".join(parts).lower()
+
+    def get_context_around_event(
+        self, timestamp_iso: str, pad_hours: float = 4.0
+    ) -> dict[str, Any]:
+        """User-reported context within ``pad_hours`` of ``timestamp`` (whole
+        record, like get_iob/find_similar_events). Pads around a specific glucose
+        event so the agent can ask 'what did the user log near this spike?'."""
+        at = _parse_ts(timestamp_iso)
+        if at is None:
+            return {"error": f"bad timestamp: {timestamp_iso!r}"}
+        pad = timedelta(hours=max(0.0, min(float(pad_hours), 48.0)))
+        events = [e for e in self._manual if abs(e.event_ts - at) <= pad]
+        rows = [self._manual_row(e) for e in events[:_MAX_LISTED_EVENTS]]
+        out: dict[str, Any] = {
+            "timestamp": at.isoformat(),
+            "pad_hours": pad.total_seconds() / 3600.0,
+            "n_events": len(events),
+            "events": rows,
+        }
+        if not events:
+            out["note"] = self._MANUAL_EMPTY_NOTE
+        elif len(events) > _MAX_LISTED_EVENTS:
+            out["note"] = f"showing first {_MAX_LISTED_EVENTS} of {len(events)}"
+        return out
 
     def find_spikes(
         self, threshold: float = _SPIKE_THRESHOLD, top_n: int = 10
@@ -1777,6 +1911,8 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
     specs.extend(_treatment_specs(toolkit))
     caps = toolkit.capabilities()
     specs = [spec for spec in specs if caps.allows(_TOOL_NEEDS.get(spec.name))]
+    # Manual context is independent of glucose coverage — always available.
+    specs.extend(_manual_specs(toolkit))
     specs.extend(time_tool_specs())
     return specs
 
@@ -1824,6 +1960,10 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             numbers["active_dia_hr"] = active.get("dia_hr")
             numbers["n_active_segments"] = len(active.get("segments") or [])
         return result, numbers
+
+    def get_active_profile(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        result = toolkit.get_active_profile(str(args.get("timestamp", "")))
+        return result, _numbers(result, ("pump_serial",))
 
     def get_cob(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
         result = toolkit.get_cob(str(args.get("timestamp", "")))
@@ -1911,6 +2051,23 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             fn=get_insulin_profile,
         ),
         ToolSpec(
+            name="get_active_profile",
+            description=(
+                "The therapy profile VERSION in effect at an ISO datetime — use when "
+                "explaining a past event so it reads that period's settings, not "
+                "today's. Falls back to the current snapshot if no history exists. "
+                "Tier B — analysis context only, never dosing."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "timestamp": {"type": "string", "description": "ISO datetime of the event"},
+                },
+                "required": ["timestamp"],
+            },
+            fn=get_active_profile,
+        ),
+        ToolSpec(
             name="get_cob",
             description=(
                 "Carbs-on-board at an ISO datetime from announced carb entries "
@@ -1959,6 +2116,72 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
                 "required": ["timestamp"],
             },
             fn=find_similar_events,
+        ),
+    ]
+
+
+def _manual_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
+    """Manual-context ToolSpecs. Read-only: these tools never create manual
+    events (only the user submits them); they surface what the user logged."""
+
+    def get_manual_events(_args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        result = toolkit.get_manual_events()
+        return result, _numbers(result, ("n_events",))
+
+    def search_manual_events(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        result = toolkit.search_manual_events(str(args.get("query", "")))
+        return result, _numbers(result, ("n_events",))
+
+    def get_context_around_event(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        result = toolkit.get_context_around_event(
+            str(args.get("timestamp", "")), float(args.get("pad_hours", 4.0))
+        )
+        return result, _numbers(result, ("n_events", "pad_hours"))
+
+    return [
+        ToolSpec(
+            name="get_manual_events",
+            description=(
+                "User-reported context in the ACTIVE window (meals, stress, illness, "
+                "site changes, notes — {ts, event_type, title, description, tags}). "
+                "Provenance is user-reported, never device data. An empty result means "
+                "nothing was logged, not that nothing happened."
+            ),
+            parameters={"type": "object", "properties": {}},
+            fn=get_manual_events,
+        ),
+        ToolSpec(
+            name="search_manual_events",
+            description=(
+                "User-reported context in the ACTIVE window matching a query "
+                "(case-insensitive over type/title/description/tags). Use to find a "
+                "specific note, e.g. 'high-fat' or 'site change'."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "substring to match"},
+                },
+                "required": ["query"],
+            },
+            fn=search_manual_events,
+        ),
+        ToolSpec(
+            name="get_context_around_event",
+            description=(
+                "User-reported context within pad_hours of a timestamp (whole record). "
+                "Pads around a specific glucose event to answer 'what did the user log "
+                "near this spike?'."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "timestamp": {"type": "string", "description": "ISO datetime"},
+                    "pad_hours": {"type": "number", "minimum": 0, "maximum": 48},
+                },
+                "required": ["timestamp"],
+            },
+            fn=get_context_around_event,
         ),
     ]
 

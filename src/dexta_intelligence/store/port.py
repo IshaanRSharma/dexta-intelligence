@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         Hypothesis,
         InsulinEvent,
         InvestigationRun,
+        ManualEvent,
         MealEvent,
         OpenInvestigation,
         PredictionEvent,
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
         Rollup,
         RollupPeriod,
         SleepEvent,
+        TherapyProfile,
     )
 
 __all__ = ["StoragePort"]
@@ -187,6 +189,39 @@ class StoragePort(Protocol):
 
     def get_investigation_run(self, run_db_id: int) -> InvestigationRun | None:
         """One run by its row id, or None."""
+        ...
+
+    # ── manual context ───────────────────────────────────────────────────────
+
+    def add_manual_event(self, event: ManualEvent) -> int:
+        """Persist one user-reported manual event; returns its id.
+
+        Manual events are user-submitted context, never created autonomously by
+        an agent. Each call is one explicit submission (no idempotency dedup).
+        """
+        ...
+
+    def get_manual_events(self, start: datetime, end: datetime) -> list[ManualEvent]:
+        """Manual events in the half-open window ``[start, end)``, oldest first."""
+        ...
+
+    # ── therapy profile versions ─────────────────────────────────────────────
+
+    def add_profile_version(self, profile: TherapyProfile) -> int:
+        """Record a therapy-profile version; returns its id (or the existing one).
+
+        Idempotent on content: if the latest stored version has the same
+        ``content_hash`` nothing changes. Otherwise the previous live version is
+        closed (``active_to`` set) and the new version is inserted open-ended.
+        """
+        ...
+
+    def get_profile_versions(self) -> list[TherapyProfile]:
+        """All therapy-profile versions, oldest first."""
+        ...
+
+    def get_active_profile(self, at: datetime) -> TherapyProfile | None:
+        """The profile version in effect at ``at`` (latest with ``active_from <= at``)."""
         ...
 
     # ── open investigations ─────────────────────────────────────────────────────

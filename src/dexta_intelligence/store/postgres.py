@@ -45,6 +45,7 @@ from dexta_intelligence.models import (
     InsulinEvent,
     InsulinKind,
     InvestigationRun,
+    ManualEvent,
     MealEvent,
     OpenInvestigation,
     PredictionEvent,
@@ -54,6 +55,7 @@ from dexta_intelligence.models import (
     RollupPeriod,
     RunFinding,
     SleepEvent,
+    TherapyProfile,
 )
 
 if TYPE_CHECKING:
@@ -61,7 +63,7 @@ if TYPE_CHECKING:
 
 __all__ = ["PostgresStore"]
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 6
 
 _SECONDS_PER_DAY = 86400.0
 _CGM_SLOT_SECONDS = 300.0  # expected 5-minute CGM cadence
@@ -257,7 +259,10 @@ CREATE TABLE IF NOT EXISTS investigation_runs (
     findings TEXT NOT NULL,
     n_findings INTEGER NOT NULL,
     started_at TIMESTAMPTZ NOT NULL,
-    finished_at TIMESTAMPTZ NOT NULL
+    finished_at TIMESTAMPTZ NOT NULL,
+    coverage_summary TEXT,
+    tool_calls TEXT,
+    evidence_items TEXT
 );
 
 CREATE TABLE IF NOT EXISTS open_investigations (
@@ -272,6 +277,35 @@ CREATE TABLE IF NOT EXISTS open_investigations (
     promoted_run_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_open_investigations_status ON open_investigations (status);
+
+CREATE TABLE IF NOT EXISTS manual_events (
+    id BIGSERIAL PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    event_ts TIMESTAMPTZ NOT NULL,
+    end_ts TIMESTAMPTZ,
+    title TEXT,
+    description TEXT,
+    tags JSONB NOT NULL,
+    intensity TEXT,
+    confidence TEXT NOT NULL,
+    source TEXT NOT NULL,
+    linked_run_id TEXT,
+    linked_glucose_event_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_manual_events_ts ON manual_events (event_ts);
+
+CREATE TABLE IF NOT EXISTS therapy_profiles (
+    id BIGSERIAL PRIMARY KEY,
+    source TEXT NOT NULL,
+    name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    active_from TIMESTAMPTZ NOT NULL,
+    active_to TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_therapy_profiles_active ON therapy_profiles (active_from);
 """
 
 
@@ -295,8 +329,14 @@ def _opt_utc(value: datetime | None) -> datetime | None:
 
 _RUN_COLUMNS = (
     "id, run_id, kind, status, question, window_start, window_end, "
-    "plan, trace, findings, n_findings, started_at, finished_at"
+    "plan, trace, findings, n_findings, started_at, finished_at, "
+    "coverage_summary, tool_calls, evidence_items"
 )
+
+
+def _opt_json(value: str | None, default: Any) -> Any:
+    """Decode a nullable JSON text column, falling back for legacy NULL rows."""
+    return default if value is None else json.loads(value)
 
 
 def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:
@@ -314,6 +354,9 @@ def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:
         n_findings=r[10],
         started_at=_to_utc(r[11]),
         finished_at=_to_utc(r[12]),
+        coverage_summary=_opt_json(r[13], None),
+        tool_calls=_opt_json(r[14], []),
+        evidence_items=_opt_json(r[15], []),
     )
 
 
@@ -334,6 +377,48 @@ def _row_to_open_investigation(r: tuple[Any, ...]) -> OpenInvestigation:
         status=r[6],
         created_at=_to_utc(r[7]),
         promoted_run_id=r[8],
+    )
+
+
+_MANUAL_EVENT_COLUMNS = (
+    "id, event_type, event_ts, end_ts, title, description, tags, intensity, "
+    "confidence, source, linked_run_id, linked_glucose_event_id, created_at"
+)
+
+
+_THERAPY_PROFILE_COLUMNS = (
+    "id, source, name, content, content_hash, active_from, active_to, created_at"
+)
+
+
+def _row_to_therapy_profile(r: tuple[Any, ...]) -> TherapyProfile:
+    return TherapyProfile(
+        id=r[0],
+        source=r[1],
+        name=r[2],
+        content=json.loads(r[3]),
+        content_hash=r[4],
+        active_from=_to_utc(r[5]),
+        active_to=_opt_utc(r[6]),
+        created_at=_to_utc(r[7]),
+    )
+
+
+def _row_to_manual_event(r: tuple[Any, ...]) -> ManualEvent:
+    return ManualEvent(
+        id=r[0],
+        event_type=r[1],
+        event_ts=_to_utc(r[2]),
+        end_ts=_opt_utc(r[3]),
+        title=r[4],
+        description=r[5],
+        tags=r[6],
+        intensity=r[7],
+        confidence=r[8],
+        source=r[9],
+        linked_run_id=r[10],
+        linked_glucose_event_id=r[11],
+        created_at=_to_utc(r[12]),
     )
 
 
@@ -381,6 +466,10 @@ class PostgresStore:
                 "ALTER TABLE findings ADD COLUMN IF NOT EXISTS "
                 "seen_count INTEGER NOT NULL DEFAULT 1"
             )
+            for col in ("coverage_summary", "tool_calls", "evidence_items"):
+                cur.execute(
+                    f"ALTER TABLE investigation_runs ADD COLUMN IF NOT EXISTS {col} TEXT"
+                )
             cur.execute("SELECT version FROM schema_version")
             row = cur.fetchone()
             if row is None:
@@ -1102,8 +1191,10 @@ class PostgresStore:
             cur.execute(
                 "INSERT INTO investigation_runs "
                 "(run_id, kind, status, question, window_start, window_end, plan, trace, "
-                "findings, n_findings, started_at, finished_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                "findings, n_findings, started_at, finished_at, "
+                "coverage_summary, tool_calls, evidence_items) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "RETURNING id",
                 (
                     run.run_id,
                     run.kind,
@@ -1117,6 +1208,9 @@ class PostgresStore:
                     run.n_findings,
                     _to_utc(run.started_at),
                     _to_utc(run.finished_at),
+                    None if run.coverage_summary is None else json.dumps(run.coverage_summary),
+                    json.dumps(run.tool_calls),
+                    json.dumps(run.evidence_items),
                 ),
             )
             row = cur.fetchone()
@@ -1193,6 +1287,93 @@ class PostgresStore:
                 "SET current = %s, status = %s, promoted_run_id = %s WHERE id = %s",
                 (current, status, promoted_run_id, inv_id),
             )
+
+    # ── manual context ───────────────────────────────────────────────────────
+
+    def add_manual_event(self, event: ManualEvent) -> int:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO manual_events "
+                "(event_type, event_ts, end_ts, title, description, tags, intensity, "
+                "confidence, source, linked_run_id, linked_glucose_event_id, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    event.event_type,
+                    _to_utc(event.event_ts),
+                    _opt_utc(event.end_ts),
+                    event.title,
+                    event.description,
+                    self._jsonb(event.tags),
+                    event.intensity,
+                    event.confidence,
+                    event.source,
+                    event.linked_run_id,
+                    event.linked_glucose_event_id,
+                    _to_utc(event.created_at),
+                ),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def get_manual_events(self, start: datetime, end: datetime) -> list[ManualEvent]:
+        rows = self._window(
+            f"SELECT {_MANUAL_EVENT_COLUMNS} FROM manual_events", "event_ts", start, end
+        )
+        return [_row_to_manual_event(r) for r in rows]
+
+    # ── therapy profile versions ─────────────────────────────────────────────
+
+    def add_profile_version(self, profile: TherapyProfile) -> int:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles "
+                "ORDER BY active_from DESC, id DESC LIMIT 1"
+            )
+            latest = cur.fetchone()
+            if latest is not None and latest[4] == profile.content_hash:
+                return int(latest[0])
+            if latest is not None and latest[6] is None:
+                cur.execute(
+                    "UPDATE therapy_profiles SET active_to = %s WHERE id = %s",
+                    (_to_utc(profile.active_from), latest[0]),
+                )
+            cur.execute(
+                "INSERT INTO therapy_profiles "
+                "(source, name, content, content_hash, active_from, active_to, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    profile.source,
+                    profile.name,
+                    json.dumps(profile.content),
+                    profile.content_hash,
+                    _to_utc(profile.active_from),
+                    _opt_utc(profile.active_to),
+                    _to_utc(profile.created_at),
+                ),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def get_profile_versions(self) -> list[TherapyProfile]:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles "
+                "ORDER BY active_from ASC"
+            )
+            rows = cur.fetchall()
+        return [_row_to_therapy_profile(r) for r in rows]
+
+    def get_active_profile(self, at: datetime) -> TherapyProfile | None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles "
+                "WHERE active_from <= %s ORDER BY active_from DESC, id DESC LIMIT 1",
+                (_to_utc(at),),
+            )
+            row = cur.fetchone()
+        return _row_to_therapy_profile(row) if row is not None else None
 
     # ── internals ────────────────────────────────────────────────────────────
 

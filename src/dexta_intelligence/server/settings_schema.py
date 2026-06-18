@@ -565,7 +565,8 @@ ANALYSIS_PANEL: PanelSchema = PanelSchema(
             kind=FieldKind.NUMBER,
             min=4,
             max=64,
-            hint="How many tools chat can call before stopping (orchestrator loop). Raise for complex multi-step questions.",
+            hint="How many tools chat can call before stopping (orchestrator loop). "
+            "Raise for complex multi-step questions.",
         ),
         FieldSchema(
             "deep_analysis_window_days",

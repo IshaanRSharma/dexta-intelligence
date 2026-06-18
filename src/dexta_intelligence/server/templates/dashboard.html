@@ -37,6 +37,7 @@
   <form method="post" action="/actions/wiki" class="btn-row">
     <button type="submit" class="btn-secondary" title="Regenerate the knowledge base from current findings">Rebuild wiki</button>
   </form>
+  <a class="btn btn-ghost" href="/log">+ Log context</a>
   <a class="btn btn-ghost" href="/chat">Ask a question →</a>
 </div>
 <p class="muted small" style="margin:-6px 0 0">Upload a Dexcom Clarity or LibreView CSV export — parsed locally, no upload off your machine.</p>
@@ -64,22 +65,18 @@
       <article class="card">
         <div class="card-head">
           <h2>{{ c.headline }}</h2>
-          {% if c.skeptic_survived %}
-            <span class="badge ok" title="survived the skeptic">✓ survived</span>
-          {% else %}
-            <span class="badge bad" title="flagged by the skeptic">✗ flagged</span>
-          {% endif %}
-        </div>
-        <div class="conf">
-          <div class="conf-bar"><span style="width: {{ c.confidence_pct }}%"></span></div>
-          <span class="conf-val">{{ c.confidence_pct }}%</span>
+          <span class="badge {{ 'ok' if c.lifecycle == 'verified' else 'neutral' }}" title="finding lifecycle">{{ c.lifecycle }}</span>
         </div>
         <div class="meta">
           <span class="mono">{{ c.agent }}</span>
+          <span class="chip strength-{{ c.strength }}">{{ c.strength }} evidence</span>
           {% if c.recurrence > 1 %}<span class="chip recur">seen ×{{ c.recurrence }}</span>{% endif %}
         </div>
         {% if c.stats_line %}<p class="stats">{{ c.stats_line }}</p>{% endif %}
         {% if c.body_html %}<div class="prose">{{ c.body_html|safe }}</div>{% endif %}
+        {% if c.skeptic_notes %}
+        <p class="counter-evidence"><span class="ce-label">Counter-evidence</span> {{ c.skeptic_notes }}</p>
+        {% endif %}
       </article>
       {% endfor %}
     </div>
