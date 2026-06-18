@@ -9,6 +9,7 @@ the GUI stack.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -882,21 +883,139 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         )
 
     @app.get("/api/investigate/stream")
-    async def api_investigate_stream(request: Request, q: str = "") -> Any:
-        """Stream a coordinator investigation as Server-Sent Events.
+    async def api_investigate_stream(  # noqa: PLR0915 - queue + two workers + drain
+        request: Request, q: str = "", mode: str = "question"
+    ) -> Any:
+        """Stream an investigation as Server-Sent Events.
 
-        Mirrors ``/api/ask/stream``: the coordinator runs in a worker thread and
-        its ``RunTrace.on_event`` sink pushes plan / running / step events onto a
-        queue this generator drains. Works with no model (the coordinator
-        degrades to the full deterministic producer set). Ends with ``done`` (the
-        evidence cards) or a terminal ``error``.
+        ``mode=question`` (default): the OrchestratorAgent drills the question
+        over the full tool belt, emitting per-tool ``tool_call`` / ``tool_result``
+        events (the live tool shelf) and an audited answer. ``mode=deep``: the
+        CoordinatorAgent runs the multi-producer statistical sweep (works with no
+        model). Both persist an InvestigationRun. Ends with ``answer`` / ``done``
+        or a terminal ``error``.
         """
         question = q.strip()
         events: queue.Queue[Any] = queue.Queue()
         done = object()
 
-        def _run() -> None:
+        def _ctx_or_error(store: StoragePort) -> Any:
+            coverage = store.coverage()
+            gates = ColdStartReport.from_coverage(coverage)
+            if gates.below_hard_floor:
+                events.put(
+                    {
+                        "kind": "error",
+                        "payload": {
+                            "text": "Not enough data yet to investigate. "
+                            f"Need at least {HARD_FLOOR_DAYS} days."
+                        },
+                    }
+                )
+                return None
+            end = coverage.last_ts.date() if coverage.last_ts is not None else None
             from dexta_intelligence.agents.base import AgentContext  # noqa: PLC0415
+
+            return AgentContext(
+                store=store,
+                window=_analysis_window(config, end),
+                gates=gates,
+                run_id=f"gui-investigate-{uuid.uuid4()}",
+                timezone=config.analysis.timezone,
+            )
+
+        def _run_question() -> None:
+            from dexta_intelligence.agents.coordinator import _coverage_summary  # noqa: PLC0415
+            from dexta_intelligence.agents.orchestrator import (  # noqa: PLC0415
+                OrchestratorAgent,
+            )
+            from dexta_intelligence.models import InvestigationRun  # noqa: PLC0415
+
+            started = datetime.now(UTC)
+            store = store_opener(config, None)
+            try:
+                ctx = _ctx_or_error(store)
+                if ctx is None:
+                    return
+                model = discovery_model(config)
+                if model is None:
+                    events.put(
+                        {
+                            "kind": "error",
+                            "payload": {
+                                "text": "Investigating a question needs a language model. "
+                                "Set a provider in Settings, or use Run deep analysis "
+                                "for the model-free statistical sweep."
+                            },
+                        }
+                    )
+                    return
+                summary = _coverage_summary(ctx)
+                events.put({"kind": "coverage", "payload": summary})
+                calls: list[dict[str, Any]] = []
+
+                def _sink(event: Any) -> None:
+                    if event.kind == "tool_call":
+                        calls.append(
+                            {
+                                "name": event.payload.get("name"),
+                                "scope": event.payload.get("args") or {},
+                                "ok": None,
+                            }
+                        )
+                    elif event.kind == "tool_result" and calls and calls[-1]["ok"] is None:
+                        calls[-1]["ok"] = bool(event.payload.get("ok", True))
+                    if event.kind == "answer":
+                        return  # the endpoint emits the audited answer below
+                    events.put({"kind": event.kind, "payload": event.payload})
+
+                agent = OrchestratorAgent(
+                    model=model,
+                    max_steps=config.analysis.max_reasoning_steps,
+                    target_low=config.analysis.target_low,
+                    target_high=config.analysis.target_high,
+                )
+                drill = question or "Investigate the record for anything notable."
+                answer = agent.ask(ctx, drill, on_event=_sink)
+                run = InvestigationRun(
+                    run_id=ctx.run_id,
+                    kind="question",
+                    status="limited" if summary.get("limited") else "completed",
+                    question=question or None,
+                    window_start=ctx.window[0],
+                    window_end=ctx.window[1],
+                    plan=list(dict.fromkeys(c["name"] for c in calls if c["name"])),
+                    trace=[line.text for line in answer.trace],
+                    findings=[],
+                    n_findings=0,
+                    started_at=started,
+                    finished_at=datetime.now(UTC),
+                    coverage_summary=summary,
+                    tool_calls=calls,
+                    evidence_items=[],
+                    answer=answer.text,
+                )
+                # persistence is best-effort; never drop the answer over it
+                with contextlib.suppress(Exception):
+                    store.insert_investigation_run(run)
+                events.put(
+                    {
+                        "kind": "answer",
+                        "payload": {
+                            "text": answer.text,
+                            "html": markdown_to_html(answer.text),
+                            "tools": list(answer.tools_used),
+                            "faithful": answer.faithful,
+                        },
+                    }
+                )
+            except Exception as exc:
+                events.put({"kind": "error", "payload": {"text": f"{type(exc).__name__}: {exc}"}})
+            finally:
+                _close(store, store_opener)
+                events.put(done)
+
+        def _run_deep() -> None:
             from dexta_intelligence.agents.coordinator import (  # noqa: PLC0415
                 CoordinatorAgent,
                 RunTrace,
@@ -907,27 +1026,9 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
 
             store = store_opener(config, None)
             try:
-                coverage = store.coverage()
-                gates = ColdStartReport.from_coverage(coverage)
-                if gates.below_hard_floor:
-                    events.put(
-                        {
-                            "kind": "error",
-                            "payload": {
-                                "text": "Not enough data yet to investigate. "
-                                f"Need at least {HARD_FLOOR_DAYS} days."
-                            },
-                        }
-                    )
+                ctx = _ctx_or_error(store)
+                if ctx is None:
                     return
-                end = coverage.last_ts.date() if coverage.last_ts is not None else None
-                ctx = AgentContext(
-                    store=store,
-                    window=_analysis_window(config, end),
-                    gates=gates,
-                    run_id=f"gui-investigate-{uuid.uuid4()}",
-                    timezone=config.analysis.timezone,
-                )
                 rec = RunTrace(on_event=events.put)
                 coordinator = CoordinatorAgent(model=discovery_model(config), config=config)
                 findings = coordinator.investigate(ctx, goal=question or None, trace=rec)
@@ -948,10 +1049,12 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                 _close(store, store_opener)
                 events.put(done)
 
+        worker_fn = _run_deep if mode == "deep" else _run_question
+
         async def _drain() -> Any:
             import asyncio  # noqa: PLC0415
 
-            worker = threading.Thread(target=_run, daemon=True)
+            worker = threading.Thread(target=worker_fn, daemon=True)
             worker.start()
             while True:
                 if await request.is_disconnected():
@@ -1756,6 +1859,13 @@ def _manual_event_view(e: ManualEvent, tz: ZoneInfo, now: datetime) -> dict[str,
     }
 
 
+def _scope_label(scope: Any) -> str:
+    """Render a tool call's input scope (its args dict) as a compact string."""
+    if not isinstance(scope, dict):
+        return ""
+    return ", ".join(f"{k}={v}" for k, v in scope.items() if v not in (None, ""))
+
+
 def _run_view(run: InvestigationRun, now: datetime) -> dict[str, Any]:
     """Shape one investigation run for the Investigations page."""
     return {
@@ -1769,6 +1879,16 @@ def _run_view(run: InvestigationRun, now: datetime) -> dict[str, Any]:
         "n_findings": run.n_findings,
         "coverage": _coverage_view(run.coverage_summary),
         "evidence_items": run.evidence_items,
+        "answer_html": markdown_to_html(run.answer) if run.answer else "",
+        "tool_calls": [
+            {
+                "name": c.get("name"),
+                "scope": _scope_label(c.get("scope")),
+                "ok": c.get("ok"),
+            }
+            for c in run.tool_calls
+            if c.get("name")
+        ],
         "findings": [
             {
                 "headline": f.headline,

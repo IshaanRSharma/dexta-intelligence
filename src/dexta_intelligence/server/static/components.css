@@ -99,3 +99,8 @@
 .chip-kv.strength-strong .chip-v { color: var(--ok, #1a7f37); font-weight: 600; }
 .chip-kv.strength-moderate .chip-v { color: var(--warn, #9a6700); font-weight: 600; }
 .chip-kv.strength-weak .chip-v { color: var(--muted); font-weight: 600; }
+
+/* persisted run: tools-called list + live answer card */
+.run-tools { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.run-tools li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.answer-card { margin-top: 12px; }

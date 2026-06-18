@@ -16,8 +16,9 @@
     <input id="investigate-q" type="text" name="q"
            placeholder="e.g. what caused my worst high yesterday?" />
     <button type="submit">Investigate</button>
+    <button type="button" id="investigate-deep" class="btn-secondary" title="Run the multi-producer statistical sweep over the whole record">Run deep analysis</button>
   </div>
-  <p class="muted small">dexta plans which investigations to run, narrates the trace live, and shows the evidence. Pattern analysis only. Not a dosing recommendation.</p>
+  <p class="muted small">Investigate drills your question tool by tool, narrating the trace live. Run deep analysis sweeps the whole record for statistical patterns. Pattern analysis only. Not a dosing recommendation.</p>
 </form>
 
 <div id="investigate-stream"></div>
@@ -74,6 +75,28 @@
         {% for line in r.trace %}<li>{{ line }}</li>{% endfor %}
       </ol>
     </div>
+
+    {% if r.tool_calls %}
+    <details class="run-section">
+      <summary>Tools called ({{ r.tool_calls|length }})</summary>
+      <ul class="run-tools">
+        {% for t in r.tool_calls %}
+        <li>
+          <span class="step-mark {{ 'step-ok' if t.ok else 'step-bad' if t.ok is false else 'step-pending' }}">{{ '✓' if t.ok else '✗' if t.ok is false else '·' }}</span>
+          <span class="mono">{{ t.name }}</span>{% if t.scope %} <span class="muted small">{{ t.scope }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+
+    {% if r.answer_html %}
+    <div class="run-section">
+      <h3>Evidence</h3>
+      <div class="prose">{{ r.answer_html|safe }}</div>
+      <p class="muted small">Pattern analysis only. Not a dosing recommendation.</p>
+    </div>
+    {% endif %}
 
     {% if r.findings %}
     <div class="run-section">

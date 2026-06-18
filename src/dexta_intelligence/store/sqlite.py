@@ -79,7 +79,7 @@ if TYPE_CHECKING:
 
 __all__ = ["SQLiteStore"]
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _SECONDS_PER_DAY = 86400.0
 _CGM_SLOT_SECONDS = 300.0  # expected 5-minute CGM cadence
@@ -273,7 +273,8 @@ CREATE TABLE IF NOT EXISTS investigation_runs (
     finished_at TEXT NOT NULL,
     coverage_summary TEXT,
     tool_calls TEXT,
-    evidence_items TEXT
+    evidence_items TEXT,
+    answer TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_investigation_runs_finished ON investigation_runs (id);
 
@@ -345,7 +346,7 @@ def _row_to_goal(r: tuple[Any, ...]) -> Goal:
 _RUN_COLUMNS = (
     "id, run_id, kind, status, question, window_start, window_end, "
     "plan, trace, findings, n_findings, started_at, finished_at, "
-    "coverage_summary, tool_calls, evidence_items"
+    "coverage_summary, tool_calls, evidence_items, answer"
 )
 
 
@@ -372,6 +373,7 @@ def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:
         coverage_summary=_opt_json(r[13], None),
         tool_calls=_opt_json(r[14], []),
         evidence_items=_opt_json(r[15], []),
+        answer=r[16],
     )
 
 
@@ -496,6 +498,7 @@ class SQLiteStore:
             self._add_column("investigation_runs", "coverage_summary", "TEXT")
             self._add_column("investigation_runs", "tool_calls", "TEXT")
             self._add_column("investigation_runs", "evidence_items", "TEXT")
+            self._add_column("investigation_runs", "answer", "TEXT")
             row = self._conn.execute("SELECT version FROM schema_version").fetchone()
             if row is None:
                 self._conn.execute(
@@ -1190,8 +1193,8 @@ class SQLiteStore:
                 "INSERT INTO investigation_runs "
                 "(run_id, kind, status, question, window_start, window_end, plan, trace, "
                 "findings, n_findings, started_at, finished_at, "
-                "coverage_summary, tool_calls, evidence_items) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "coverage_summary, tool_calls, evidence_items, answer) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run.run_id,
                     run.kind,
@@ -1208,6 +1211,7 @@ class SQLiteStore:
                     None if run.coverage_summary is None else json.dumps(run.coverage_summary),
                     json.dumps(run.tool_calls),
                     json.dumps(run.evidence_items),
+                    run.answer,
                 ),
             )
         assert cursor.lastrowid is not None

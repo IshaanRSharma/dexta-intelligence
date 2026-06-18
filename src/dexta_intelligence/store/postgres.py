@@ -63,7 +63,7 @@ if TYPE_CHECKING:
 
 __all__ = ["PostgresStore"]
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _SECONDS_PER_DAY = 86400.0
 _CGM_SLOT_SECONDS = 300.0  # expected 5-minute CGM cadence
@@ -262,7 +262,8 @@ CREATE TABLE IF NOT EXISTS investigation_runs (
     finished_at TIMESTAMPTZ NOT NULL,
     coverage_summary TEXT,
     tool_calls TEXT,
-    evidence_items TEXT
+    evidence_items TEXT,
+    answer TEXT
 );
 
 CREATE TABLE IF NOT EXISTS open_investigations (
@@ -330,7 +331,7 @@ def _opt_utc(value: datetime | None) -> datetime | None:
 _RUN_COLUMNS = (
     "id, run_id, kind, status, question, window_start, window_end, "
     "plan, trace, findings, n_findings, started_at, finished_at, "
-    "coverage_summary, tool_calls, evidence_items"
+    "coverage_summary, tool_calls, evidence_items, answer"
 )
 
 
@@ -357,6 +358,7 @@ def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:
         coverage_summary=_opt_json(r[13], None),
         tool_calls=_opt_json(r[14], []),
         evidence_items=_opt_json(r[15], []),
+        answer=r[16],
     )
 
 
@@ -466,7 +468,7 @@ class PostgresStore:
                 "ALTER TABLE findings ADD COLUMN IF NOT EXISTS "
                 "seen_count INTEGER NOT NULL DEFAULT 1"
             )
-            for col in ("coverage_summary", "tool_calls", "evidence_items"):
+            for col in ("coverage_summary", "tool_calls", "evidence_items", "answer"):
                 cur.execute(
                     f"ALTER TABLE investigation_runs ADD COLUMN IF NOT EXISTS {col} TEXT"
                 )
@@ -1192,8 +1194,8 @@ class PostgresStore:
                 "INSERT INTO investigation_runs "
                 "(run_id, kind, status, question, window_start, window_end, plan, trace, "
                 "findings, n_findings, started_at, finished_at, "
-                "coverage_summary, tool_calls, evidence_items) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "coverage_summary, tool_calls, evidence_items, answer) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                 "RETURNING id",
                 (
                     run.run_id,
@@ -1211,6 +1213,7 @@ class PostgresStore:
                     None if run.coverage_summary is None else json.dumps(run.coverage_summary),
                     json.dumps(run.tool_calls),
                     json.dumps(run.evidence_items),
+                    run.answer,
                 ),
             )
             row = cur.fetchone()

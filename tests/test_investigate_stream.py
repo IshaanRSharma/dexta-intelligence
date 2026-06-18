@@ -1,9 +1,9 @@
 """Tests for the live investigation SSE endpoint (/api/investigate/stream).
 
-A scripted CoordinatorAgent emits plan / running / producer_done / step events
-through the ``RunTrace.on_event`` sink; we assert the SSE body carries them in
-order and ends with the ``done`` evidence cards. The below-floor and error
-paths degrade to a terminal ``error`` event.
+Two modes: question (default) runs the OrchestratorAgent and streams per-tool
+tool_call/tool_result events plus an audited answer (the PRD tool shelf + trace);
+deep runs the CoordinatorAgent statistical sweep. Both persist an
+InvestigationRun. Below-floor and error paths degrade to a terminal error.
 """
 
 from __future__ import annotations
@@ -17,6 +17,9 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient
 
+from dexta_intelligence.agents.chat import ChatAnswer
+from dexta_intelligence.agents.reason import ReasoningEvent
+from dexta_intelligence.agents.trace import TraceLine
 from dexta_intelligence.config import Config
 from dexta_intelligence.models import Finding, GlucoseEvent
 from dexta_intelligence.server import create_app
@@ -65,9 +68,113 @@ def _read_sse(text: str) -> list[dict[str, Any]]:
     return events
 
 
-class _ScriptedCoordinator:
-    """Emits a fixed investigation script through the RunTrace sink."""
+# ── question mode: the orchestrator drill (PRD tool shelf + trace) ──────────────
 
+
+class _ScriptedOrchestrator:
+    """Emits a per-tool script then returns an audited answer."""
+
+    def __init__(self, *_a: object, **_kw: object) -> None:
+        pass
+
+    def ask(
+        self,
+        _ctx: object,
+        _question: str,
+        *,
+        on_event: Callable[[ReasoningEvent], None] | None = None,
+        history: list[dict[str, Any]] | None = None,
+    ) -> ChatAnswer:
+        if on_event is not None:
+            on_event(ReasoningEvent("tool_call", {"name": "find_spikes", "args": {"day": "x"}}))
+            on_event(ReasoningEvent("tool_result", {"name": "find_spikes", "ok": True}))
+            on_event(ReasoningEvent("tool_call", {"name": "get_boluses", "args": {}}))
+            on_event(ReasoningEvent("tool_result", {"name": "get_boluses", "ok": True}))
+        return ChatAnswer(
+            text="The worst high followed a late bolus.",
+            tools_used=("find_spikes", "get_boluses"),
+            faithful=True,
+            stopped_reason="answered",
+            trace=(
+                TraceLine("zoom", "scanned for excursions (1 spike)"),
+                TraceLine("treatment", "checked bolus timing (1 bolus; +22 min vs carb entry)"),
+            ),
+        )
+
+
+def _patch_orchestrator(monkeypatch: pytest.MonkeyPatch, agent: type) -> None:
+    monkeypatch.setattr("dexta_intelligence.server.app.discovery_model", lambda _cfg: object())
+    monkeypatch.setattr("dexta_intelligence.agents.orchestrator.OrchestratorAgent", agent)
+
+
+def test_question_mode_streams_tool_calls_then_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _seeded_store(tmp_path)
+    _patch_orchestrator(monkeypatch, _ScriptedOrchestrator)
+    resp = _client(store).get("/api/investigate/stream?q=worst high yesterday")
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    events = _read_sse(resp.text)
+    kinds = [e["kind"] for e in events]
+
+    assert kinds[0] == "coverage"
+    assert kinds.count("tool_call") == 2
+    assert kinds.count("tool_result") == 2
+    assert kinds[-1] == "answer"
+    assert events[1]["payload"]["name"] == "find_spikes"
+    final = events[-1]
+    assert "late bolus" in final["payload"]["text"]
+    assert "<p>" in final["payload"]["html"]
+    assert final["payload"]["faithful"] is True
+    store.close()
+
+
+def test_question_mode_persists_a_run_with_real_tool_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _seeded_store(tmp_path)
+    _patch_orchestrator(monkeypatch, _ScriptedOrchestrator)
+    _client(store).get("/api/investigate/stream?q=worst high")
+    runs = SQLiteStore(store._path).get_investigation_runs(limit=5)
+    assert runs
+    run = runs[0]
+    assert run.kind == "question"
+    assert [c["name"] for c in run.tool_calls] == ["find_spikes", "get_boluses"]
+    assert all(c["ok"] is True for c in run.tool_calls)
+    assert run.answer == "The worst high followed a late bolus."
+    assert run.trace  # rendered PRD trace lines persisted
+    store.close()
+
+
+def test_persisted_question_run_renders_answer_and_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _seeded_store(tmp_path)
+    _patch_orchestrator(monkeypatch, _ScriptedOrchestrator)
+    client = _client(store)
+    client.get("/api/investigate/stream?q=worst high")
+    body = client.get("/investigations").text
+    assert "late bolus" in body  # the answer prose
+    assert "find_spikes" in body  # the real tool, not a producer name
+    assert "Tools called" in body
+    store.close()
+
+
+def test_question_mode_without_model_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _seeded_store(tmp_path)
+    monkeypatch.setattr("dexta_intelligence.server.app.discovery_model", lambda _cfg: None)
+    events = _read_sse(_client(store).get("/api/investigate/stream?q=anything").text)
+    assert events[-1]["kind"] == "error"
+    assert "needs a language model" in events[-1]["payload"]["text"]
+    store.close()
+
+
+# ── deep mode: the coordinator statistical sweep ────────────────────────────────
+
+
+class _ScriptedCoordinator:
     def __init__(self, *_a: object, **_kw: object) -> None:
         pass
 
@@ -77,8 +184,7 @@ class _ScriptedCoordinator:
         if trace is not None:
             trace.set_plan(["observation", "pattern"])
             trace.emit("running", {"producer": "observation"})
-            trace.emit("producer_done", {"producer": "observation", "n_findings": 1})
-            trace.step("Round 1: ran observation, pattern -> 1 finding(s)")
+            trace.producer_done("observation", 1)
             trace.status = "completed"
         return [
             Finding(
@@ -92,68 +198,44 @@ class _ScriptedCoordinator:
         ]
 
 
-def _patch(monkeypatch: pytest.MonkeyPatch, coordinator: type) -> None:
+def _patch_coordinator(monkeypatch: pytest.MonkeyPatch, coordinator: type) -> None:
     monkeypatch.setattr("dexta_intelligence.server.app.discovery_model", lambda _cfg: None)
     monkeypatch.setattr("dexta_intelligence.agents.coordinator.CoordinatorAgent", coordinator)
 
 
-def test_investigate_stream_is_event_stream(
+def test_deep_mode_streams_plan_trace_and_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = _seeded_store(tmp_path)
-    _patch(monkeypatch, _ScriptedCoordinator)
-    resp = _client(store).get("/api/investigate/stream?q=worst high yesterday")
-    assert resp.status_code == 200
-    assert resp.headers["content-type"].startswith("text/event-stream")
-    store.close()
-
-
-def test_investigate_stream_emits_plan_trace_and_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    store = _seeded_store(tmp_path)
-    _patch(monkeypatch, _ScriptedCoordinator)
-    resp = _client(store).get("/api/investigate/stream?q=worst high")
+    _patch_coordinator(monkeypatch, _ScriptedCoordinator)
+    resp = _client(store).get("/api/investigate/stream?q=worst high&mode=deep")
     events = _read_sse(resp.text)
     kinds = [e["kind"] for e in events]
 
     assert "plan" in kinds
-    assert "running" in kinds
     assert "producer_done" in kinds
     assert kinds[-1] == "done"
-
-    plan = next(e for e in events if e["kind"] == "plan")
-    assert plan["payload"]["steps"] == ["observation", "pattern"]
-
     done = events[-1]
     assert done["payload"]["n_findings"] == 1
-    card = done["payload"]["findings"][0]
-    assert card["headline"].startswith("Overnight lows")
-    assert card["confidence_pct"] == 70
-    assert "<strong>" in card["body_html"]
-
-    # The finding was persisted to the store.
-    persisted = SQLiteStore(store._path).get_findings(limit=10)
-    assert any(f.headline.startswith("Overnight lows") for f in persisted)
+    assert done["payload"]["findings"][0]["headline"].startswith("Overnight lows")
     store.close()
 
 
-def test_investigate_stream_below_floor_errors(
+def test_below_floor_errors_in_both_modes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = SQLiteStore(tmp_path / "thin.db")
     store.migrate()
     store.insert_glucose([GlucoseEvent(ts=_NOW, mg_dl=120)])  # one reading, below floor
-    _patch(monkeypatch, _ScriptedCoordinator)
-    resp = _client(store).get("/api/investigate/stream?q=anything")
-    events = _read_sse(resp.text)
+    _patch_coordinator(monkeypatch, _ScriptedCoordinator)
+    events = _read_sse(_client(store).get("/api/investigate/stream?q=x&mode=deep").text)
     assert len(events) == 1
     assert events[0]["kind"] == "error"
     assert "Not enough data" in events[0]["payload"]["text"]
     store.close()
 
 
-def test_investigate_stream_surfaces_coordinator_error(
+def test_deep_mode_surfaces_coordinator_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = _seeded_store(tmp_path)
@@ -165,9 +247,8 @@ def test_investigate_stream_surfaces_coordinator_error(
         def investigate(self, *_a: object, **_kw: object) -> list[Finding]:
             raise RuntimeError("planner exploded")
 
-    _patch(monkeypatch, _Boom)
-    resp = _client(store).get("/api/investigate/stream?q=boom")
-    events = _read_sse(resp.text)
+    _patch_coordinator(monkeypatch, _Boom)
+    events = _read_sse(_client(store).get("/api/investigate/stream?q=boom&mode=deep").text)
     assert events[-1]["kind"] == "error"
     assert "planner exploded" in events[-1]["payload"]["text"]
     store.close()

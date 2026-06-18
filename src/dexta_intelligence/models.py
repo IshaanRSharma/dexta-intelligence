@@ -506,9 +506,13 @@ class InvestigationRun(_FrozenModel):
     """Data-sufficiency snapshot at run time (glucose coverage, span, counts,
     ``limited`` flag). Drives coverage-aware gating. None on legacy rows."""
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
-    """Coordinator-altitude instrument log: one entry per producer that ran."""
+    """Instrument log: the tools the run called (name, scope, ok) for the
+    orchestrator drill, or one entry per producer for a deep-analysis run."""
     evidence_items: list[dict[str, Any]] = Field(default_factory=list)
     """The guard-audited numbers behind each finding (evidence-drawer source)."""
+    answer: str | None = None
+    """The drill's prose conclusion (orchestrator question runs). None for
+    deep-analysis runs, which produce findings rather than a single answer."""
     id: int | None = None
 
     _utc = field_validator("started_at", "finished_at")(_require_utc)
