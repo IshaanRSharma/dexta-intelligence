@@ -94,6 +94,10 @@ class StoragePort(Protocol):
         """Latest ``source_ts`` ingested for a source (sync cursor)."""
         ...
 
+    def source_event_counts(self) -> dict[str, int]:
+        """Count of ingested raw events per source (source -> count)."""
+        ...
+
     # ── layer 2: clinical timeline ───────────────────────────────────────────
 
     def insert_glucose(self, events: list[GlucoseEvent]) -> int: ...

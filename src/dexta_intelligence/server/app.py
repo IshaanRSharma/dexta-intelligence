@@ -46,7 +46,8 @@ from dexta_intelligence.config import (
 )
 from dexta_intelligence.connectors.base import HealthReport
 from dexta_intelligence.models import ChatTurn, FindingStatus
-from dexta_intelligence.server.render import markdown_to_html, sparkline_svg
+from dexta_intelligence.server.autosync import AutoSyncController
+from dexta_intelligence.server.render import markdown_to_html
 from dexta_intelligence.server.settings_render import field_to_view, panel_to_view
 from dexta_intelligence.server.settings_schema import (
     ANALYSIS_PANEL,
@@ -58,6 +59,8 @@ from dexta_intelligence.server.settings_schema import (
     FieldKind,
     source_nav,
 )
+from dexta_intelligence.server.views_findings import findings_page_view
+from dexta_intelligence.server.views_goals import goal_card_view
 
 # FastAPI resolves route annotations against this module's globals, so the GUI
 # types must live here at import time. They are an optional extra, so a missing
@@ -74,7 +77,7 @@ if TYPE_CHECKING:
 
     from dexta_intelligence.cli._common import StoreOpener
     from dexta_intelligence.config import Config
-    from dexta_intelligence.models import Finding, Goal, InvestigationRun
+    from dexta_intelligence.models import Finding, InvestigationRun
     from dexta_intelligence.store.port import StoragePort
 
 _INSTALL_HINT = (
@@ -139,6 +142,9 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     app = FastAPI(title="dexta", docs_url=None, redoc_url=None)
     app.state.config_path = settings_path
     app.state.bind_host = host
+    # Runtime-managed background sync. Constructed here (idle); cmd_serve enables
+    # it from config at boot, and the Connectors page retunes it live.
+    app.state.autosync = AutoSyncController(config, store_opener)
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     templates = Jinja2Templates(directory=str(templates_dir))
     _static_stamps = [f.stat().st_mtime for f in static_dir.iterdir() if f.is_file()]
@@ -146,9 +152,10 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     templates.env.globals["nav_items"] = (
         ("/", "Dashboard"),
         ("/investigations", "Investigations"),
-        ("/wiki", "Wiki"),
+        ("/findings", "Findings"),
         ("/goals", "Goals"),
         ("/chat", "Chat"),
+        ("/connectors", "Connectors"),
         ("/settings", "Settings"),
     )
     templates.env.globals["source_nav"] = source_nav()
@@ -375,13 +382,15 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         *,
         saved: bool = False,
         error: str | None = None,
+        info: str | None = None,
     ) -> Any:
         from dexta_intelligence.models import GoalStatus  # noqa: PLC0415
 
+        now = datetime.now(tz=UTC)
         store = store_opener(config, None)
         try:
             cards = [
-                _goal_card(store, g)
+                goal_card_view(store, g, now=now)
                 for g in store.get_goals()
                 if g.status in (GoalStatus.ACTIVE, GoalStatus.ACHIEVED)
             ]
@@ -394,7 +403,13 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             cards=cards,
             saved=saved,
             error=error,
+            info=info,
         )
+
+    _goals_flash = {
+        "ticked_ok": "Goals ticked. Checkpoints and progress updated.",
+        "ticked_fail": "Goal tick failed. See the CLI log for details.",
+    }
 
     @app.get("/goals", response_class=HTMLResponse)
     def goals(request: Request) -> Any:
@@ -403,7 +418,39 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             request,
             saved=qp.get("saved") == "1",
             error=qp.get("error"),
+            info=_goals_flash.get(qp.get("flash", "")),
         )
+
+    @app.post("/actions/goals/tick")
+    def action_goals_tick() -> Any:
+        from dexta_intelligence.cli.intelligence import cmd_goals  # noqa: PLC0415
+
+        buf = io.StringIO()
+        try:
+            code = cmd_goals(
+                action="tick",
+                statement=None,
+                config=config,
+                db_path=None,
+                out=buf,
+                model=model_for_role(config, "plan"),
+            )
+        except Exception:
+            code = 1
+        flash = "ticked_ok" if code == 0 else "ticked_fail"
+        return RedirectResponse(f"/goals?flash={flash}", status_code=303)
+
+    @app.post("/actions/wiki")
+    def action_wiki() -> Any:
+        from dexta_intelligence.cli.intelligence import cmd_wiki  # noqa: PLC0415
+
+        buf = io.StringIO()
+        try:
+            code = cmd_wiki(config=config, db_path=None, out=buf)
+        except Exception:
+            code = 1
+        flash = "wiki_ok" if code == 0 else "wiki_fail"
+        return RedirectResponse(f"/?flash={flash}", status_code=303)
 
     @app.post("/goals", response_class=HTMLResponse)
     async def goals_add(request: Request) -> Any:
@@ -424,6 +471,16 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             except ValueError:
                 return _goals_page(request, error="Target must be a number.")
 
+        cadence: int | None = None
+        raw_cadence = form.get("cadence")
+        if isinstance(raw_cadence, str) and raw_cadence.strip():
+            try:
+                cadence = int(raw_cadence.strip())
+            except ValueError:
+                return _goals_page(request, error="Cadence must be a whole number of days.")
+            if cadence < 1:
+                return _goals_page(request, error="Cadence must be at least 1 day.")
+
         store = store_opener(config, None)
         try:
             normalized = statement.casefold()
@@ -440,6 +497,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                 model=model_for_role(config, "plan"),
                 now=datetime.now(tz=UTC),
                 target=target,
+                cadence_days=cadence,
             )
             store.insert_goal(goal)
         finally:
@@ -460,6 +518,87 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
         return RedirectResponse("/goals", status_code=303)
+
+    # ── findings ──────────────────────────────────────────────────────────────
+
+    @app.get("/findings", response_class=HTMLResponse)
+    def findings(request: Request) -> Any:
+        store = store_opener(config, None)
+        try:
+            view = findings_page_view(store, now=datetime.now(tz=UTC))
+        finally:
+            _close(store, store_opener)
+        return _render("findings.html", request, "/findings", findings=view)
+
+    # ── connectors ──────────────────────────────────────────────────────────────
+
+    _connectors_flash = {
+        "autosync_ok": ("ok", "Continuous sync updated."),
+        "autosync_bad": ("bad", "Interval must be a whole number of minutes."),
+        "sync_none": ("bad", "Select at least one source, or use Sync all."),
+        "sync_fail": ("bad", "Sync failed. Check the source credentials in Settings."),
+    }
+
+    @app.get("/connectors", response_class=HTMLResponse)
+    def connectors(request: Request) -> Any:
+        cfg = _settings_cfg()
+        now = datetime.now(tz=UTC)
+        store = store_opener(config, None)
+        try:
+            sources = _connectors_view(cfg, store, now)
+        finally:
+            _close(store, store_opener)
+        autosync = _autosync_view(request.app.state.autosync.status(), now)
+        raw_flash = request.query_params.get("flash", "")
+        flash: tuple[str, str] | None
+        if raw_flash.startswith("synced:"):
+            flash = ("ok", f"Synced {raw_flash.split(':', 1)[1]} new row(s).")
+        else:
+            flash = _connectors_flash.get(raw_flash)
+        return _render(
+            "connectors.html",
+            request,
+            "/connectors",
+            sources=sources,
+            autosync=autosync,
+            flash=flash,
+        )
+
+    @app.post("/actions/connectors/sync")
+    async def action_connectors_sync(request: Request) -> Any:
+        from dexta_intelligence.workflows.sync import sync_all  # noqa: PLC0415
+
+        form = await request.form()
+        scope = form.get("scope")
+        selected = set(form.getlist("sources"))
+        cfg = _settings_cfg()
+        available = build_connectors(cfg)
+        chosen = available if scope == "all" else [c for c in available if c.source in selected]
+        if not chosen:
+            return RedirectResponse("/connectors?flash=sync_none", status_code=303)
+        store = store_opener(config, None)
+        try:
+            reports = sync_all(chosen, store)
+            total = sum(sum(r.inserted.values()) for r in reports)
+        except Exception:
+            return RedirectResponse("/connectors?flash=sync_fail", status_code=303)
+        finally:
+            _close(store, store_opener)
+        return RedirectResponse(f"/connectors?flash=synced:{total}", status_code=303)
+
+    @app.post("/actions/connectors/autosync")
+    async def action_connectors_autosync(request: Request) -> Any:
+        form = await request.form()
+        raw = form.get("interval")
+        try:
+            interval = max(0, int(raw)) if isinstance(raw, str) else 0
+        except ValueError:
+            return RedirectResponse("/connectors?flash=autosync_bad", status_code=303)
+        save_config_values(
+            {"server": {"auto_sync_minutes": interval}}, path=request.app.state.config_path
+        )
+        request.app.state.autosync.configure(interval)
+        return RedirectResponse("/connectors?flash=autosync_ok", status_code=303)
 
     # ── chat ──────────────────────────────────────────────────────────────────
 
@@ -1038,6 +1177,8 @@ def _dashboard_banners(
         ),
         "investigate_empty": ("bad", "Type a question to investigate."),
         "investigate_fail": ("bad", "Investigation failed — see the CLI log for details."),
+        "wiki_ok": ("ok", "Wiki rebuilt from current findings."),
+        "wiki_fail": ("bad", "Wiki rebuild failed — see the CLI log for details."),
     }
     if flash in flash_msgs:
         kind, message = flash_msgs[flash]
@@ -1282,6 +1423,37 @@ def _finding_card(finding: Finding, active: list[Finding]) -> dict[str, Any]:
     }
 
 
+def _connectors_view(config: Config, store: StoragePort, now: datetime) -> list[dict[str, Any]]:
+    """One row per connector-backed source: configured state, freshness, row count."""
+    counts = store.source_event_counts()
+    rows: list[dict[str, Any]] = []
+    for spec in SETTINGS_PANELS:
+        if spec.connector is None:
+            continue
+        src = spec.connector
+        ts = store.get_watermark(src)
+        rows.append(
+            {
+                "key": src,
+                "label": _SOURCE_LABELS.get(src, src.replace("_", " ").title()),
+                "configured": _card_configured(spec, config),
+                "last_sync": _relative_time(ts, now) if ts is not None else "",
+                "events": counts.get(src, 0),
+            }
+        )
+    return rows
+
+
+def _autosync_view(status: Any, now: datetime) -> dict[str, Any]:
+    """Shape the live AutoSyncController status for the Connectors page."""
+    return {
+        "enabled": status.enabled,
+        "interval_min": status.interval_min,
+        "last_run": _relative_time(status.last_run, now) if status.last_run else "",
+        "last_error": status.last_error,
+    }
+
+
 def _run_view(run: InvestigationRun, now: datetime) -> dict[str, Any]:
     """Shape one investigation run for the Investigations page."""
     return {
@@ -1311,24 +1483,6 @@ def _graveyard_row(finding: Finding) -> dict[str, Any]:
         "status": finding.status.value,
         "agent": finding.agent,
         "skeptic_notes": finding.skeptic_notes,
-    }
-
-
-def _goal_card(store: StoragePort, goal: Goal) -> dict[str, Any]:
-    checkpoints = store.get_goal_checkpoints(goal.id) if goal.id is not None else []
-    values = [cp.metric_value for cp in checkpoints if cp.metric_value is not None]
-    latest = checkpoints[-1] if checkpoints else None
-    return {
-        "id": goal.id,
-        "statement": goal.statement,
-        "status": goal.status.value,
-        "metric": goal.metric.value,
-        "direction": goal.direction,
-        "cadence_days": goal.cadence_days,
-        "spark": sparkline_svg(values),
-        "n_checkpoints": len(checkpoints),
-        "latest_note": latest.note if latest else None,
-        "latest_value": latest.metric_value if latest else None,
     }
 
 

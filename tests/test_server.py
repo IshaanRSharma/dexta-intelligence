@@ -710,6 +710,164 @@ def test_investigations_empty_state(tmp_path: Path) -> None:
     store.close()
 
 
+def test_findings_page_renders_tabs_and_cards(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_glucose(store)
+    store.insert_finding(
+        Finding(
+            agent="pattern",
+            kind="overnight-lows",
+            scope="global",
+            headline="Overnight lows after evening exercise",
+            confidence=0.82,
+            stats=FindingStats(n=24, effect_size=0.6),
+            status=FindingStatus.ACTIVE,
+        )
+    )
+    _seed_run(store)  # populates the investigation log tab
+    body = _client(store).get("/findings").text
+    assert "Active findings" in body
+    assert "Overnight lows after evening exercise" in body
+    assert "Open hypotheses" in body
+    assert "Investigation log" in body
+    assert "confidence" in body  # scope chip
+    store.close()
+
+
+def test_goals_page_shows_progress_and_checkpoints(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    goal_id = store.insert_goal(
+        Goal(
+            statement="increase time in range",
+            metric=GoalMetric.TIR,
+            direction="increase",
+            target=70.0,
+        )
+    )
+    for i, val in enumerate((31.6, 45.0, 58.0)):
+        store.insert_goal_checkpoint(
+            GoalCheckpoint(
+                goal_id=goal_id,
+                ts=FIXED_NOW + timedelta(days=i),
+                metric_value=val,
+                note=f"tick {i}",
+            )
+        )
+    body = _client(store).get("/goals").text
+    assert "increase time in range" in body
+    assert "baseline" in body  # progress labels
+    assert "target" in body
+    assert "58.0" in body  # current value surfaced
+    assert "checkpoint(s)" in body  # history affordance
+    store.close()
+
+
+def test_goal_cadence_is_configurable(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).post(
+        "/goals",
+        data={"statement": "reduce overnight lows", "cadence": "14"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert store.get_goals()[0].cadence_days == 14
+    store.close()
+
+
+def test_goal_cadence_rejects_non_positive(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).post("/goals", data={"statement": "x", "cadence": "0"})
+    assert resp.status_code == 200
+    assert "at least 1 day" in resp.text
+    assert not store.get_goals()
+    store.close()
+
+
+def test_goals_tick_action_invokes_cmd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    called: dict[str, Any] = {}
+
+    def _fake_cmd_goals(*, action: str, **_kw: Any) -> int:
+        called["action"] = action
+        return 0
+
+    monkeypatch.setattr(
+        "dexta_intelligence.cli.intelligence.cmd_goals", _fake_cmd_goals
+    )
+    resp = _client(store).post("/actions/goals/tick", follow_redirects=False)
+    assert resp.status_code == 303
+    assert "flash=ticked_ok" in resp.headers["location"]
+    assert called["action"] == "tick"
+    store.close()
+
+
+def test_wiki_rebuild_action_invokes_cmd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+
+    def _fake_cmd_wiki(**_kw: Any) -> int:
+        return 0
+
+    monkeypatch.setattr(
+        "dexta_intelligence.cli.intelligence.cmd_wiki", _fake_cmd_wiki
+    )
+    resp = _client(store).post("/actions/wiki", follow_redirects=False)
+    assert resp.status_code == 303
+    assert "flash=wiki_ok" in resp.headers["location"]
+    store.close()
+
+
+# ── connectors page ─────────────────────────────────────────────────────────
+
+
+def test_connectors_page_lists_all_sources(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    body = _client(store).get("/connectors").text
+    assert "Connectors" in body
+    assert "Continuous sync" in body
+    assert "Nightscout" in body  # a connector-backed source row
+    assert "read-only" in body  # the read-only badge
+    assert "not configured" in body  # nothing configured in a fresh store
+    store.close()
+
+
+def test_connectors_sync_requires_a_selection(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).post(
+        "/actions/connectors/sync",
+        data={"scope": "selected"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "flash=sync_none" in resp.headers["location"]
+    store.close()
+
+
+def test_connectors_autosync_sets_interval_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    toml_path = tmp_path / "dexta.toml"
+    monkeypatch.setattr(
+        "dexta_intelligence.cli._common.resolve_config_path", lambda _explicit: toml_path
+    )
+    client = _client(store)
+    resp = client.post(
+        "/actions/connectors/autosync",
+        data={"interval": "15"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "flash=autosync_ok" in resp.headers["location"]
+    # The live controller was retuned without a restart.
+    assert client.app.state.autosync.status().interval_min == 15
+    client.app.state.autosync.stop()
+    store.close()
+
+
 def test_dashboard_shows_lens_picker(tmp_path: Path) -> None:
     store = _store(tmp_path)
     _seed_glucose(store)

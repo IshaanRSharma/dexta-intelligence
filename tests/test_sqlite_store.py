@@ -193,6 +193,21 @@ class TestRawEvents:
         assert store.get_watermark("whoop") == T0
         assert store.get_watermark("dexcom") is None
 
+    def test_source_event_counts_empty(self, store: SQLiteStore) -> None:
+        assert store.source_event_counts() == {}
+
+    def test_source_event_counts_per_source(self, store: SQLiteStore) -> None:
+        store.upsert_raw_events(
+            [
+                _raw("nightscout", "a", T0),
+                _raw("nightscout", "b", T0 + timedelta(minutes=5)),
+                _raw("nightscout", "c", T0 + timedelta(minutes=10)),
+                _raw("whoop", "a", T0),
+                _raw("whoop", "b", T0 + timedelta(minutes=5)),
+            ]
+        )
+        assert store.source_event_counts() == {"nightscout": 3, "whoop": 2}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Layer 2 — typed event round trips

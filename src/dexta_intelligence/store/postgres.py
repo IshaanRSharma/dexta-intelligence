@@ -440,6 +440,12 @@ class PostgresStore:
         assert row is not None
         return _opt_utc(row[0])
 
+    def source_event_counts(self) -> dict[str, int]:
+        with self._conn.cursor() as cur:
+            cur.execute("SELECT source, COUNT(*) FROM raw_events GROUP BY source")
+            rows = cur.fetchall()
+        return {r[0]: int(r[1]) for r in rows}
+
     # ── layer 2: clinical timeline ───────────────────────────────────────────
 
     def insert_glucose(self, events: list[GlucoseEvent]) -> int:

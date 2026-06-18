@@ -139,23 +139,26 @@ def compose_goal(
     model: BaseChatModel | None = None,
     now: datetime,
     target: float | None = None,
+    cadence_days: int | None = None,
 ) -> Goal:
     """Turn a free-text objective into a measurable, tool-backed goal.
 
     An explicit ``target`` wins; otherwise the LLM compose path may supply one.
     Without a target the goal tracks progress but never auto-flips to ACHIEVED.
+    An explicit ``cadence_days`` overrides the composed default check interval.
     """
     plan = _llm_compose(statement, model) if model is not None else None
     if plan is None:
         plan = _keyword_compose(statement)
     resolved_target = target if target is not None else plan.target
+    resolved_cadence = cadence_days if cadence_days is not None else plan.cadence_days
     return Goal(
         statement=statement,
         metric=plan.metric,
         direction=plan.direction,
         target=resolved_target,
         tools=plan.tools,
-        cadence_days=plan.cadence_days,
+        cadence_days=resolved_cadence,
         status=GoalStatus.ACTIVE,
         created_at=now,
     )

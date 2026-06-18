@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-import threading
-import time
 from typing import TYPE_CHECKING, TextIO
 
 from dexta_intelligence.cli._common import StoreOpener, open_sqlite_store
@@ -18,34 +16,6 @@ if TYPE_CHECKING:
 __all__ = ["cmd_serve"]
 
 logger = logging.getLogger("dexta_intelligence.serve")
-
-
-def _start_auto_sync(config: Config, opener: StoreOpener, interval_min: int) -> None:
-    """Background daemon thread that re-syncs every ``interval_min`` minutes.
-
-    Reuses the same connector + storage seams as ``dexta sync``, so it covers
-    whatever the user configured (Nightscout, pumps, a self-hosted Postgres).
-    Failures are swallowed — a flaky source must never take the GUI down."""
-    from dexta_intelligence.cli._common import build_connectors  # noqa: PLC0415
-    from dexta_intelligence.workflows.sync import sync_all  # noqa: PLC0415
-
-    def loop() -> None:
-        while True:
-            time.sleep(interval_min * 60)
-            try:
-                connectors = build_connectors(config)
-                if not connectors:
-                    continue
-                store = opener(config, None)
-                try:
-                    sync_all(connectors, store)
-                finally:
-                    if hasattr(store, "close"):
-                        store.close()
-            except Exception:
-                logger.debug("auto-sync tick failed", exc_info=True)
-
-    threading.Thread(target=loop, daemon=True, name="dexta-auto-sync").start()
 
 
 def cmd_serve(
@@ -89,7 +59,9 @@ def cmd_serve(
 
     interval = sync_every if sync_every is not None else config.server.auto_sync_minutes
     if interval and interval > 0:
-        _start_auto_sync(config, base_opener, interval)
+        # The controller lives on app.state (created in create_app); enable it
+        # from config at boot. The Connectors page retunes it live thereafter.
+        app.state.autosync.configure(interval)
         out.write(f"auto-sync every {interval} min (background)\n")
 
     if host not in ("127.0.0.1", "localhost", "::1"):

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}dexta · findings{% endblock %}
+{% block content %}
+{% from "_components.html" import chip, finding_card %}
+{% set f = findings|default({"active": [], "hypotheses": [], "rejected": [], "runs": [], "counts": {}}) %}
+
+<div class="page-head">
+  <h1>Findings</h1>
+  <p class="page-sub">What dexta currently believes, what it suspects, and what it has retired, with the evidence behind each.</p>
+</div>
+
+<nav class="tabbar">
+  <a href="#active">Active <span class="tab-count">{{ f.counts.active }}</span></a>
+  <a href="#hypotheses">Hypotheses <span class="tab-count">{{ f.counts.hypotheses }}</span></a>
+  <a href="#rejected">Rejected <span class="tab-count">{{ f.counts.rejected }}</span></a>
+  <a href="#runs">Investigation log <span class="tab-count">{{ f.counts.runs }}</span></a>
+</nav>
+
+<section id="active" class="findings-section">
+  <h2 class="section-title">Active findings</h2>
+  {% if f.active %}
+  <div class="cards">{% for c in f.active %}{{ finding_card(c) }}{% endfor %}</div>
+  {% else %}
+  <p class="muted">No active findings yet. Run analyze or ask an investigation to populate this.</p>
+  {% endif %}
+</section>
+
+<section id="hypotheses" class="findings-section">
+  <h2 class="section-title">Open hypotheses</h2>
+  {% if f.hypotheses %}
+  <ul class="plain-list">
+    {% for h in f.hypotheses %}<li><span class="badge neutral">open</span> {{ h.statement }}</li>{% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No open hypotheses. The skeptic banks competing explanations here as it finds them.</p>
+  {% endif %}
+</section>
+
+<section id="rejected" class="findings-section">
+  <h2 class="section-title">Rejected and superseded</h2>
+  {% if f.rejected %}
+  <ul class="plain-list">
+    {% for r in f.rejected %}
+    <li>
+      <span class="badge bad">{{ r.status }}</span> {{ r.headline }}
+      {% if r.skeptic_notes %}<span class="muted">· {{ r.skeptic_notes }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Nothing retired yet.</p>
+  {% endif %}
+</section>
+
+<section id="runs" class="findings-section">
+  <h2 class="section-title">Investigation log</h2>
+  {% if f.runs %}
+  <ul class="run-log">
+    {% for r in f.runs %}
+    <li>
+      <a href="/investigations">{{ r.question }}</a>
+      <span class="chips">
+        {{ chip("kind", r.kind) }}{{ chip("status", r.status) }}{{ chip("findings", r.n_findings) }}
+      </span>
+      <span class="muted small">{{ r.when }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No investigations run yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

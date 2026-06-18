@@ -1,13 +1,22 @@
 {% extends "base.html" %}
 {% block title %}dexta · goals{% endblock %}
 {% block content %}
+{% from "_components.html" import chip %}
 <div class="page-head">
   <h1>Goals</h1>
-  <p class="page-sub">Track what you want to improve — progress arcs update as the system ticks.</p>
+  <p class="page-sub">Track what you want to improve. Each goal is a living investigation: progress, checkpoints, and the runs it triggered update as the system ticks.</p>
 </div>
 
 {% if saved %}<div class="flash">Goal added.</div>{% endif %}
 {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+{% if info %}<div class="flash">{{ info }}</div>{% endif %}
+
+{% if cards %}
+<form method="post" action="/actions/goals/tick" class="btn-row" style="margin-bottom:18px">
+  <button type="submit" class="btn-secondary">Tick goals now</button>
+  <span class="muted small" style="align-self:center">Re-measure every goal and record a checkpoint, instead of waiting for the cadence.</span>
+</form>
+{% endif %}
 
 <article class="card goal-add">
   <h2>New goal</h2>
@@ -17,13 +26,18 @@
         <label class="field-label" for="goal-statement">What do you want to improve?</label>
         <input id="goal-statement" name="statement" type="text" required
                placeholder="e.g. reduce my overnight lows" autocomplete="off" />
-        <p class="field-hint">Plain language is fine — dexta picks a measurable metric and investigation plan.</p>
+        <p class="field-hint">Plain language is fine. dexta picks a measurable metric and an investigation plan.</p>
       </div>
       <div class="field">
         <label class="field-label" for="goal-target">Target <span class="field-opt">optional</span></label>
         <input id="goal-target" name="target" type="number" step="any"
                placeholder="e.g. 5 for 5% overnight below range" autocomplete="off" />
         <p class="field-hint">When set, the goal auto-marks achieved once the metric crosses it.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="goal-cadence">Check cadence <span class="field-opt">days</span></label>
+        <input id="goal-cadence" name="cadence" type="number" min="1" step="1" value="7" autocomplete="off" />
+        <p class="field-hint">How often dexta re-checks this goal and records a checkpoint. Default 7 days.</p>
       </div>
     </div>
     <div class="card-actions">
@@ -46,23 +60,59 @@
 {% if cards %}
 <div class="cards">
   {% for g in cards %}
-  <article class="card">
+  <article class="card goal-card">
     <div class="card-head">
       <h2>{{ g.statement }}</h2>
       <span class="pill {{ g.status }}">{{ g.status }}</span>
     </div>
-    <div class="meta">
-      <span class="mono">{{ g.metric }}</span>
-      <span class="muted">{{ g.direction }} · every {{ g.cadence_days }}d</span>
+    <div class="chips">
+      {{ chip("metric", g.metric) }}
+      {{ chip("direction", g.direction) }}
+      {{ chip("cadence", "every " ~ g.cadence_days ~ "d") }}
+      {% if g.next_check %}{{ chip("next check", g.next_check) }}{% endif %}
     </div>
+
+    <div class="goal-progress">
+      {% if g.pct_to_target is not none %}
+      <div class="conf-bar"><span style="width: {{ g.pct_to_target }}%"></span></div>
+      {% endif %}
+      <div class="goal-metrics">
+        {% if g.baseline is not none %}<span><span class="gm-label">baseline</span> {{ "%.1f"|format(g.baseline) }}</span>{% endif %}
+        {% if g.current is not none %}<span><span class="gm-label">now</span> <strong>{{ "%.1f"|format(g.current) }}</strong></span>{% endif %}
+        {% if g.target is not none %}<span><span class="gm-label">target</span> {{ "%.1f"|format(g.target) }}</span>{% endif %}
+        {% if g.on_track is not none %}<span class="badge {{ 'ok' if g.on_track else 'neutral' }}">{{ 'on track' if g.on_track else 'off track' }}</span>{% endif %}
+      </div>
+    </div>
+
     <div class="arc">{{ g.spark|safe }}</div>
-    {% if g.latest_note %}
-      <p class="stats">
-        {% if g.latest_value is not none %}<strong>{{ "%.1f"|format(g.latest_value) }}</strong> · {% endif %}{{ g.latest_note }}
-      </p>
+
+    {% if g.checkpoints %}
+    <details class="goal-history">
+      <summary>{{ g.n_checkpoints }} checkpoint(s)</summary>
+      <ul class="checkpoint-list">
+        {% for cp in g.checkpoints %}
+        <li>
+          <span class="muted small">{{ cp.when }}</span>
+          {% if cp.value is not none %}<strong>{{ "%.1f"|format(cp.value) }}</strong> {% endif %}{{ cp.note }}
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
     {% else %}
-      <p class="muted">No checkpoints yet — run <code>dexta goals tick</code> or <code>dexta daemon</code> to advance.</p>
+    <p class="muted">No checkpoints yet. Run <code>dexta goals tick</code> or <code>dexta daemon</code> to advance.</p>
     {% endif %}
+
+    {% if g.runs %}
+    <div class="goal-runs">
+      <span class="gm-label">investigations</span>
+      <ul class="run-log">
+        {% for r in g.runs %}
+        <li><a href="/investigations">{{ r.status }} · {{ r.n_findings }} finding(s)</a> <span class="muted small">{{ r.when }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
     {% if g.status == 'active' %}
     <form method="post" action="/goals/{{ g.id }}/abandon" class="goal-abandon">
       <button type="submit" class="btn-secondary btn-sm">Remove</button>
@@ -73,7 +123,7 @@
 </div>
 {% else %}
 <div class="empty">
-  <p>No goals yet — add one above.</p>
+  <p>No goals yet. Add one above.</p>
 </div>
 {% endif %}
 {% endblock %}

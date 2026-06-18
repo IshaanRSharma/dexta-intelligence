@@ -115,6 +115,12 @@ class FakeStore:
         stamps = [e.source_ts for e in self.raw.values() if e.source == source]
         return max(stamps) if stamps else None
 
+    def source_event_counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for event in self.raw.values():
+            counts[event.source] = counts.get(event.source, 0) + 1
+        return counts
+
     def insert_glucose(self, events: list[GlucoseEvent]) -> int:
         new = 0
         for event in events:
