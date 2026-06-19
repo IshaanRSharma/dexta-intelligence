@@ -246,33 +246,80 @@ def _demo_predictions(glucose: list[GlucoseEvent]) -> list[PredictionEvent]:
     return out
 
 
-def _profile_payload(name: str, basal: float, isf: int, carb_ratio: int) -> dict[str, object]:
+#: Realistic t:slim X2 time-of-day schedules: (start, basal U/hr, ISF mg/dL/U,
+#: carb ratio g/U, target). Spring is less insulin-sensitive (lower ISF, tighter
+#: carb ratio, higher basal) — the planted sensitivity shift mid-window.
+_WINTER_SCHEDULE: tuple[tuple[str, float, int, int, int], ...] = (
+    ("00:00", 0.70, 50, 12, 110),
+    ("06:00", 0.95, 45, 10, 110),
+    ("11:00", 0.85, 48, 11, 110),
+    ("17:00", 0.80, 45, 11, 110),
+)
+_SPRING_SCHEDULE: tuple[tuple[str, float, int, int, int], ...] = (
+    ("00:00", 0.80, 45, 11, 110),
+    ("06:00", 1.05, 40, 9, 110),
+    ("11:00", 0.95, 43, 10, 110),
+    ("17:00", 0.90, 40, 10, 110),
+)
+
+
+def _segments(schedule: tuple[tuple[str, float, int, int, int], ...]) -> list[dict[str, object]]:
+    return [
+        {
+            "start": start,
+            "basal_u_hr": basal,
+            "isf_mg_dl_u": isf,
+            "carb_ratio_g_u": cr,
+            "target_mg_dl": target,
+        }
+        for start, basal, isf, cr, target in schedule
+    ]
+
+
+def _profile_payload(
+    name: str, schedule: tuple[tuple[str, float, int, int, int], ...]
+) -> dict[str, object]:
     return {
         "active_profile": name,
         "pump_serial": "DEMO-CIQ-0001",
+        "pump_model": "Tandem t:slim X2",
+        "control_iq": True,
         "profiles": [
             {
                 "name": name,
                 "active": True,
                 "dia_hr": 5.0,
-                "segments": [
-                    {
-                        "start": "00:00",
-                        "basal_u_hr": basal,
-                        "isf_mg_dl_u": isf,
-                        "carb_ratio_g_u": carb_ratio,
-                        "target_mg_dl": 110,
-                    }
-                ],
+                "max_bolus_u": 10.0,
+                "segments": _segments(schedule),
             }
         ],
     }
 
 
+def _carb_ratio_at(ts: datetime) -> float:
+    """Carb ratio (g/U) in effect at ``ts`` from the dominant (Spring) schedule."""
+    hour = ts.hour + ts.minute / 60.0
+    cr = _SPRING_SCHEDULE[0][3]
+    for start, _basal, _isf, ratio, _target in _SPRING_SCHEDULE:
+        seg_hour = int(start[:2])
+        if hour >= seg_hour:
+            cr = ratio
+    return float(cr)
+
+
+def _basal_rate_at(ts: datetime) -> float:
+    hour = ts.hour + ts.minute / 60.0
+    rate = _SPRING_SCHEDULE[0][1]
+    for start, basal, _isf, _ratio, _target in _SPRING_SCHEDULE:
+        if hour >= int(start[:2]):
+            rate = basal
+    return float(rate)
+
+
 def _demo_profiles() -> list[TherapyProfile]:
     """Two profile versions: a spring sensitivity change splits the window."""
-    v1 = _profile_payload("Winter", basal=0.85, isf=45, carb_ratio=10)
-    v2 = _profile_payload("Spring", basal=0.95, isf=50, carb_ratio=11)
+    v1 = _profile_payload("Winter", _WINTER_SCHEDULE)
+    v2 = _profile_payload("Spring", _SPRING_SCHEDULE)
     mid = _START + timedelta(days=_DAYS // 2)
     return [
         TherapyProfile(
@@ -329,21 +376,80 @@ def _demo_manual() -> list[ManualEvent]:
     ]
 
 
+def _tandem_treatment(rng: random.Random) -> tuple[list[MealEvent], list[InsulinEvent]]:
+    """Fill out the Tandem t:slim X2 / Control-IQ treatment timeline around the
+    hero dinners: breakfast and lunch carb entries with carb-ratio-matched
+    boluses, Control-IQ temp-basal adjustments through the day, occasional
+    automatic corrections, and the rare low-glucose suspend."""
+    meals: list[MealEvent] = []
+    insulin: list[InsulinEvent] = []
+    midnight = _START.replace(hour=0, minute=0)
+    for i in range(_DAYS):
+        day = midnight + timedelta(days=i)
+        for hour, base_carbs, note in ((7.5, 45.0, "breakfast"), (12.5, 60.0, "lunch")):
+            meal_ts = day + timedelta(hours=hour, minutes=rng.uniform(-20.0, 20.0))
+            carbs = round(max(10.0, base_carbs + rng.uniform(-12.0, 12.0)), 1)
+            meals.append(MealEvent(ts=meal_ts, carbs_g=carbs, note=note))
+            bolus_ts = meal_ts + timedelta(minutes=rng.uniform(0.0, 8.0))
+            insulin.append(
+                InsulinEvent(
+                    ts=bolus_ts,
+                    kind=InsulinKind.BOLUS,
+                    units=round(carbs / _carb_ratio_at(meal_ts), 2),
+                    automatic=False,
+                )
+            )
+        # Control-IQ temp basals through the morning. Kept to the 03:00-13:00 band
+        # so they never fall inside the +/-6h window explain_spike inspects around
+        # the ~20:00 dinner spike (which must read "basal stable").
+        for slot in (3, 6, 9, 12):
+            ts = day + timedelta(hours=slot, minutes=rng.uniform(0.0, 55.0))
+            rate = round(_basal_rate_at(ts) * rng.uniform(0.0, 1.8), 2)
+            insulin.append(
+                InsulinEvent(
+                    ts=ts,
+                    kind=InsulinKind.TEMP_BASAL,
+                    units=rate,
+                    duration_min=float(rng.choice([5, 10, 15, 30])),
+                    automatic=True,
+                )
+            )
+        if rng.random() < 0.33:  # automatic correction bolus, mid-morning
+            ts = day + timedelta(hours=10, minutes=rng.uniform(0.0, 90.0))
+            insulin.append(
+                InsulinEvent(
+                    ts=ts, kind=InsulinKind.BOLUS, units=round(rng.uniform(0.3, 1.2), 2),
+                    automatic=True,
+                )
+            )
+        if rng.random() < 0.11:  # low-glucose suspend, pre-dawn
+            ts = day + timedelta(hours=4, minutes=rng.uniform(0.0, 60.0))
+            insulin.append(
+                InsulinEvent(
+                    ts=ts, kind=InsulinKind.SUSPEND, units=0.0,
+                    duration_min=float(rng.choice([15, 30, 45])),
+                )
+            )
+    return meals, insulin
+
+
 def build_demo_store() -> SQLiteStore:
     """An in-memory, migrated store loaded with the synthetic patient.
 
     Deterministic: repeated calls produce byte-identical timelines. Fast (<2s).
-    Beyond the hero CGM/insulin/meal timeline it adds sleep, activity, logged
-    forecast curves, two therapy-profile versions, and manual notes so every
-    surface (investigations, reconciliation, profiles, manual context) has data."""
+    Beyond the hero CGM/insulin/meal timeline it adds a full Tandem t:slim X2 /
+    Control-IQ treatment record (multi-segment profile, temp basals, corrections,
+    suspends, three meals a day), sleep, activity, logged forecast curves, two
+    therapy-profile versions, and manual notes — so every surface has data."""
     store = SQLiteStore(":memory:")
     store.migrate()
     glucose, insulin, meals = _patient()
     glucose = _with_prolonged_highs(glucose)
     store.insert_glucose(glucose)
-    store.insert_insulin(insulin)
-    store.insert_meals(meals)
     rng = random.Random(_SEED + 1)  # separate stream so the hero timeline is unchanged
+    extra_meals, extra_insulin = _tandem_treatment(rng)
+    store.insert_insulin(insulin + extra_insulin)
+    store.insert_meals(meals + extra_meals)
     store.insert_sleep(_demo_sleep(rng))
     store.insert_activity(_demo_activity(rng))
     store.insert_predictions(_demo_predictions(glucose))

@@ -66,6 +66,34 @@ def test_demo_store_populates_every_surface() -> None:
         store.close()
 
 
+def test_demo_has_comprehensive_tandem_treatment() -> None:
+    """The demo carries a full t:slim X2 / Control-IQ record: a multi-segment
+    profile (basal/CR/ISF schedules), temp basals, corrections, suspends, and
+    three meals a day across at least 30 days."""
+    from collections import Counter  # noqa: PLC0415
+
+    from dexta_intelligence.models import InsulinKind  # noqa: PLC0415
+
+    store = build_demo_store()
+    try:
+        wide = (datetime(2000, 1, 1, tzinfo=UTC), datetime(2100, 1, 1, tzinfo=UTC))
+        cov = store.coverage()
+        assert cov.span_days >= 30
+        kinds = Counter(i.kind for i in store.get_insulin(*wide))
+        assert kinds[InsulinKind.TEMP_BASAL] > 0  # Control-IQ adjustments
+        assert kinds[InsulinKind.SUSPEND] > 0  # low-glucose suspends
+        assert kinds[InsulinKind.BOLUS] > 90  # meal + correction boluses
+        notes = {m.note for m in store.get_meals(*wide)}
+        assert {"breakfast", "lunch", "dinner"} <= notes
+        active = store.get_active_profile(datetime(2026, 3, 14, 20, 0, tzinfo=UTC))
+        segments = active.content["profiles"][0]["segments"]
+        assert len(segments) >= 3  # time-of-day basal/CR/ISF schedule
+        assert all("carb_ratio_g_u" in s and "isf_mg_dl_u" in s for s in segments)
+        assert active.content["pump_model"] == "Tandem t:slim X2"
+    finally:
+        store.close()
+
+
 def test_demo_reconciliation_finds_the_planted_miss() -> None:
     """The logged forecast curves diverge from realized CGM by design, so the
     reconciliation agent surfaces a carb-underestimate forecast miss."""
