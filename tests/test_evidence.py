@@ -148,6 +148,39 @@ class TestPubMedBackend:
         esearch_req = next(r for r in server.requests if "esearch" in r.url.path)
         assert "email" not in esearch_req.url.params
 
+    def test_api_key_sent_when_env_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NCBI_API_KEY", "k-789")
+        server = _PubMedServer()
+        _backend(server).search("glucose")
+        esearch_req = next(r for r in server.requests if "esearch" in r.url.path)
+        assert esearch_req.url.params.get("api_key") == "k-789"
+
+    def test_api_key_absent_when_env_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("NCBI_API_KEY", raising=False)
+        server = _PubMedServer()
+        _backend(server).search("glucose")
+        esearch_req = next(r for r in server.requests if "esearch" in r.url.path)
+        assert "api_key" not in esearch_req.url.params
+
+    def test_retries_once_on_rate_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("dexta_intelligence.evidence.pubmed._RATE_LIMIT_BACKOFF_S", 0.0)
+        calls = {"esearch": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/esearch.fcgi"):
+                calls["esearch"] += 1
+                if calls["esearch"] == 1:
+                    return httpx.Response(429, json={"error": "rate"})
+                return httpx.Response(200, json=ESEARCH)
+            if request.url.path.endswith("/esummary.fcgi"):
+                return httpx.Response(200, json=ESUMMARY)
+            return httpx.Response(404)
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        hits = PubMedBackend(client=client).search("exercise glucose")
+        assert len(hits) == 2  # succeeded on the retry
+        assert calls["esearch"] == 2  # throttled once, then retried
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OpenEvidence backend — missing-key gate
@@ -294,3 +327,20 @@ def test_search_evidence_fn_clamps_limit(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(dt, "evidence_backend", lambda: stub)
     dt._search_evidence({"query": "glucose", "limit": 99})
     assert stub.calls == [("glucose", 8)]
+
+
+def test_markdown_linkifies_pmids() -> None:
+    """A cited PMID renders as a clickable PubMed link, so a literature-grounded
+    claim is one click from its source."""
+    from dexta_intelligence.server.render import markdown_to_html  # noqa: PLC0415
+
+    html = markdown_to_html("Prebolusing cuts the post-meal rise (PMID 25188375).")
+    assert 'href="https://pubmed.ncbi.nlm.nih.gov/25188375/"' in html
+    assert ">PMID 25188375</a>" in html
+
+
+def test_markdown_linkifies_pmid_with_colon() -> None:
+    from dexta_intelligence.server.render import markdown_to_html  # noqa: PLC0415
+
+    html = markdown_to_html("See PMID: 30100000 for the trial.")
+    assert "https://pubmed.ncbi.nlm.nih.gov/30100000/" in html

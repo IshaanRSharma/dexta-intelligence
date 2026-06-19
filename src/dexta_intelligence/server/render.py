@@ -36,6 +36,9 @@ _BOLD_US = re.compile(r"(?<!\w)__([^_]+)__(?!\w)")
 _ITALIC = re.compile(r"(?<![*\w])\*([^*]+)\*(?![*\w])")
 _ITALIC_US = re.compile(r"(?<![_\w])_([^_]+)_(?![_\w])")
 _LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+#: A bare PubMed id mention ("PMID 12345678") -> a clickable PubMed link, so a
+#: literature-grounded claim's citation is one click from the source.
+_PMID = re.compile(r"\bPMID:?\s*(\d{4,9})\b")
 
 #: Only these link schemes are allowed; anything else (javascript:, data:, …)
 #: is neutralised so model-authored prose can't emit a live dangerous link.
@@ -59,6 +62,10 @@ def _inline(text: str) -> str:
     # Code first — its contents are literal (no further inline parsing).
     out = _INLINE_CODE.sub(lambda m: f"<code>{m.group(1)}</code>", out)
     out = _LINK.sub(lambda m: f'<a href="{_safe_href(m.group(2))}">{m.group(1)}</a>', out)
+    out = _PMID.sub(
+        lambda m: f'<a href="https://pubmed.ncbi.nlm.nih.gov/{m.group(1)}/">PMID {m.group(1)}</a>',
+        out,
+    )
     out = _BOLD.sub(lambda m: f"<strong>{m.group(1)}</strong>", out)
     out = _BOLD_US.sub(lambda m: f"<strong>{m.group(1)}</strong>", out)
     out = _ITALIC.sub(lambda m: f"<em>{m.group(1)}</em>", out)
