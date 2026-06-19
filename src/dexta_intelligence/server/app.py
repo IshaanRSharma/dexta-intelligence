@@ -67,6 +67,7 @@ from dexta_intelligence.server.views_findings import (
     lifecycle_label,
 )
 from dexta_intelligence.server.views_goals import goal_card_view
+from dexta_intelligence.server.views_reconciliation import reconciliation_page_view
 from dexta_intelligence.server.views_system import system_page_view
 
 # FastAPI resolves route annotations against this module's globals, so the GUI
@@ -160,6 +161,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         ("/", "Dashboard"),
         ("/investigations", "Investigations"),
         ("/findings", "Findings"),
+        ("/reconciliation", "Reconciliation"),
         ("/goals", "Goals"),
         ("/chat", "Chat"),
         ("/log", "Log"),
@@ -652,6 +654,35 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
         return _render("system.html", request, "/system", connectors=connectors, **view)
+
+    @app.get("/reconciliation", response_class=HTMLResponse)
+    def reconciliation(request: Request) -> Any:
+        from dexta_intelligence.agents.base import AgentContext  # noqa: PLC0415
+        from dexta_intelligence.agents.reconciliation import (  # noqa: PLC0415
+            PredictionReconciliationAgent,
+        )
+
+        now = datetime.now(tz=UTC)
+        store = store_opener(config, None)
+        try:
+            coverage = store.coverage()
+            gates = ColdStartReport.from_coverage(coverage)
+            end = coverage.last_ts.date() if coverage.last_ts is not None else None
+            ctx = AgentContext(
+                store=store,
+                window=_analysis_window(config, end),
+                gates=gates,
+                run_id="gui-reconciliation",
+                timezone=config.analysis.timezone,
+            )
+            try:
+                findings = PredictionReconciliationAgent().run(ctx)
+            except Exception:
+                findings = []
+            view = reconciliation_page_view(store, findings, now=now)
+        finally:
+            _close(store, store_opener)
+        return _render("reconciliation.html", request, "/reconciliation", **view)
 
     @app.post("/actions/connectors/sync")
     async def action_connectors_sync(request: Request) -> Any:

@@ -104,3 +104,8 @@
 .run-tools { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .run-tools li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
 .answer-card { margin-top: 12px; }
+
+/* prediction reconciliation page */
+.recon-traces { display: flex; gap: 24px; flex-wrap: wrap; margin: 10px 0; }
+.recon-trace { display: flex; flex-direction: column; gap: 4px; }
+.recon-trace .gm-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
