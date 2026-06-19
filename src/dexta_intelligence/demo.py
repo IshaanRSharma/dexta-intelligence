@@ -5,6 +5,11 @@ plus a planted recurring late-bolus dinner spike, enough that
 :func:`~dexta_intelligence.investigations.spike.explain_spike` produces the
 "late/insufficient meal insulin context" finding with high confidence.
 
+Around that hero spike the store is populated so every surface has something to
+show: sleep and activity context, logged forecast curves (so prediction
+reconciliation has real material), two therapy-profile versions (so versioned
+profiles matter), and a few user-reported manual notes aligned to the spike.
+
 Fully deterministic (seeded RNG, fixed dates — no ``random.random`` / ``now``).
 This mirrors the ``late_bolus`` golden dataset; tests/ cannot be imported by
 shipped code, so the planting logic lives here independently.
@@ -12,11 +17,23 @@ shipped code, so the planting logic lives here independently.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import random
 from datetime import UTC, date, datetime, timedelta
 
-from dexta_intelligence.models import GlucoseEvent, InsulinEvent, InsulinKind, MealEvent
+from dexta_intelligence.models import (
+    ActivityEvent,
+    GlucoseEvent,
+    InsulinEvent,
+    InsulinKind,
+    ManualEvent,
+    MealEvent,
+    PredictionEvent,
+    SleepEvent,
+    TherapyProfile,
+)
 from dexta_intelligence.store import SQLiteStore
 
 __all__ = ["DEMO_SPIKE_DATE", "DEMO_SPIKE_TS", "build_demo_store"]
@@ -134,14 +151,204 @@ def _patient() -> tuple[list[GlucoseEvent], list[InsulinEvent], list[MealEvent]]
     return glucose, insulin, meals
 
 
+def _demo_sleep(rng: random.Random) -> list[SleepEvent]:
+    """One scored sleep event per night across the window."""
+    out: list[SleepEvent] = []
+    midnight = _START.replace(hour=0, minute=0)
+    for i in range(_DAYS - 1):
+        day = midnight + timedelta(days=i)
+        ts_start = day + timedelta(hours=22, minutes=30 + rng.uniform(-30.0, 30.0))
+        ts_end = day + timedelta(days=1, hours=6, minutes=30 + rng.uniform(-30.0, 30.0))
+        out.append(
+            SleepEvent(
+                ts_start=ts_start,
+                ts_end=ts_end,
+                duration_min=round((ts_end - ts_start).total_seconds() / 60.0, 1),
+                score=round(rng.uniform(45.0, 95.0), 1),
+            )
+        )
+    return out
+
+
+def _demo_activity(rng: random.Random) -> list[ActivityEvent]:
+    """Afternoon workouts on roughly half the days."""
+    out: list[ActivityEvent] = []
+    midnight = _START.replace(hour=0, minute=0)
+    for i in range(_DAYS):
+        if rng.random() < 0.55:
+            continue
+        ts = midnight + timedelta(days=i, hours=14, minutes=rng.uniform(-45.0, 45.0))
+        out.append(
+            ActivityEvent(
+                ts=ts,
+                kind=rng.choice(["run", "ride", "strength"]),
+                duration_min=round(rng.uniform(30.0, 75.0), 1),
+                intensity=round(rng.uniform(0.4, 0.9), 2),
+            )
+        )
+    return out
+
+
+#: Evenings (days before the hero spike) given a prolonged high — a recurring
+#: forecast miss for prediction reconciliation. Kept below the 246 hero peak and
+#: off DEMO_SPIKE_DATE so the canonical explain_spike contract is unaffected.
+_MISS_DAY_OFFSETS = (3, 9, 16, 23, 37, 51)
+_MISS_ELEVATION = 78
+
+
+def _miss_days() -> set[date]:
+    return {DEMO_SPIKE_DATE - timedelta(days=d) for d in _MISS_DAY_OFFSETS}
+
+
+def _with_prolonged_highs(glucose: list[GlucoseEvent]) -> list[GlucoseEvent]:
+    """Elevate 21:00-24:00 on the miss days to a prolonged high the forecast
+    fails to anticipate (the reconciliation ground truth)."""
+    days = _miss_days()
+    out: list[GlucoseEvent] = []
+    for g in glucose:
+        if g.ts.date() in days and 21 <= g.ts.hour < 24:
+            out.append(g.model_copy(update={"mg_dl": min(350, g.mg_dl + _MISS_ELEVATION)}))
+        else:
+            out.append(g)
+    return out
+
+
+def _demo_predictions(glucose: list[GlucoseEvent]) -> list[PredictionEvent]:
+    """Logged forecast curves anchored at 21:00 on the miss days.
+
+    Two oref curves per cycle: COB (carbs-as-announced) predicts a return toward
+    range — a big miss, because the actual CGM stays high (see
+    :func:`_with_prolonged_highs`); UAM (unannounced meal) tracks the high — a
+    small miss. UAM fitting far better than COB is the signature reconciliation
+    attributes to carb underestimation (the planted ground truth)."""
+    by_ts = {g.ts: g.mg_dl for g in glucose}
+    days = _miss_days()
+    by_day: dict[date, list[datetime]] = {}
+    for g in glucose:
+        if g.ts.date() in days and g.ts.hour >= 21:
+            by_day.setdefault(g.ts.date(), []).append(g.ts)
+    out: list[PredictionEvent] = []
+    horizon = 36  # 3h at 5-minute spacing
+    for slots in by_day.values():
+        cycle = min(slots)
+        start_bg = by_ts[cycle]
+        cob = [
+            round(110.0 + (start_bg - 110.0) * math.exp(-3.0 * step / horizon), 1)
+            for step in range(horizon)
+        ]
+        uam = [float(start_bg)] * horizon  # tracks the sustained high (small miss)
+        out.append(
+            PredictionEvent(ts=cycle, source="openaps", curve_kind="cob", values_mg_dl=cob)
+        )
+        out.append(
+            PredictionEvent(ts=cycle, source="openaps", curve_kind="uam", values_mg_dl=uam)
+        )
+    return out
+
+
+def _profile_payload(name: str, basal: float, isf: int, carb_ratio: int) -> dict[str, object]:
+    return {
+        "active_profile": name,
+        "pump_serial": "DEMO-CIQ-0001",
+        "profiles": [
+            {
+                "name": name,
+                "active": True,
+                "dia_hr": 5.0,
+                "segments": [
+                    {
+                        "start": "00:00",
+                        "basal_u_hr": basal,
+                        "isf_mg_dl_u": isf,
+                        "carb_ratio_g_u": carb_ratio,
+                        "target_mg_dl": 110,
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def _demo_profiles() -> list[TherapyProfile]:
+    """Two profile versions: a spring sensitivity change splits the window."""
+    v1 = _profile_payload("Winter", basal=0.85, isf=45, carb_ratio=10)
+    v2 = _profile_payload("Spring", basal=0.95, isf=50, carb_ratio=11)
+    mid = _START + timedelta(days=_DAYS // 2)
+    return [
+        TherapyProfile(
+            source="tandem",
+            name="Winter",
+            content=v1,
+            content_hash=_hash(v1),
+            active_from=_START,
+            created_at=_START,
+        ),
+        TherapyProfile(
+            source="tandem",
+            name="Spring",
+            content=v2,
+            content_hash=_hash(v2),
+            active_from=mid,
+            created_at=mid,
+        ),
+    ]
+
+
+def _hash(payload: dict[str, object]) -> str:
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _demo_manual() -> list[ManualEvent]:
+    """User-reported context aligned to the spike (the manual-context story)."""
+    return [
+        ManualEvent(
+            event_type="meal",
+            event_ts=DEMO_SPIKE_TS - timedelta(minutes=42),
+            title="High-fat dinner",
+            description="Pizza night, ate out",
+            tags=["fat", "dinner"],
+            created_at=DEMO_SPIKE_TS,
+        ),
+        ManualEvent(
+            event_type="stress",
+            event_ts=DEMO_SPIKE_TS - timedelta(hours=6),
+            description="Stressful workday",
+            tags=["stress"],
+            created_at=DEMO_SPIKE_TS,
+        ),
+        ManualEvent(
+            event_type="site_change",
+            event_ts=datetime.combine(
+                DEMO_SPIKE_DATE - timedelta(days=27), datetime.min.time(), tzinfo=UTC
+            )
+            + timedelta(hours=8),
+            title="Infusion site change",
+            tags=["site"],
+            created_at=DEMO_SPIKE_TS,
+        ),
+    ]
+
+
 def build_demo_store() -> SQLiteStore:
     """An in-memory, migrated store loaded with the synthetic patient.
 
-    Deterministic: repeated calls produce byte-identical timelines. Fast (<2s)."""
+    Deterministic: repeated calls produce byte-identical timelines. Fast (<2s).
+    Beyond the hero CGM/insulin/meal timeline it adds sleep, activity, logged
+    forecast curves, two therapy-profile versions, and manual notes so every
+    surface (investigations, reconciliation, profiles, manual context) has data."""
     store = SQLiteStore(":memory:")
     store.migrate()
     glucose, insulin, meals = _patient()
+    glucose = _with_prolonged_highs(glucose)
     store.insert_glucose(glucose)
     store.insert_insulin(insulin)
     store.insert_meals(meals)
+    rng = random.Random(_SEED + 1)  # separate stream so the hero timeline is unchanged
+    store.insert_sleep(_demo_sleep(rng))
+    store.insert_activity(_demo_activity(rng))
+    store.insert_predictions(_demo_predictions(glucose))
+    for profile in _demo_profiles():
+        store.add_profile_version(profile)
+    for event in _demo_manual():
+        store.add_manual_event(event)
     return store

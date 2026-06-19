@@ -47,6 +47,50 @@ def test_demo_store_explains_canonical_spike() -> None:
     assert "late" in report["headline"].lower()
 
 
+def test_demo_store_populates_every_surface() -> None:
+    """The demo carries all streams so each page (and differentiator) has data."""
+    store = build_demo_store()
+    try:
+        cov = store.coverage()
+        wide = (datetime(2000, 1, 1, tzinfo=UTC), datetime(2100, 1, 1, tzinfo=UTC))
+        assert cov.glucose_coverage_pct > 90.0  # no false "limited" banner
+        assert cov.n_sleep > 0
+        assert cov.n_activity > 0
+        assert len(store.get_predictions(*wide)) > 0
+        assert len(store.get_profile_versions()) == 2
+        assert len(store.get_manual_events(*wide)) >= 3
+        # The right profile version is active at the hero spike.
+        active = store.get_active_profile(datetime(2026, 3, 14, 20, 0, tzinfo=UTC))
+        assert active is not None and active.name == "Spring"
+    finally:
+        store.close()
+
+
+def test_demo_reconciliation_finds_the_planted_miss() -> None:
+    """The logged forecast curves diverge from realized CGM by design, so the
+    reconciliation agent surfaces a carb-underestimate forecast miss."""
+    import uuid as _uuid  # noqa: PLC0415
+
+    from dexta_intelligence.agents.reconciliation import (  # noqa: PLC0415
+        PredictionReconciliationAgent,
+    )
+
+    store = build_demo_store()
+    try:
+        cov = store.coverage()
+        ctx = AgentContext(
+            store=store,
+            window=(cov.first_ts.date(), cov.last_ts.date()),  # type: ignore[union-attr]
+            gates=ColdStartReport.from_coverage(cov),
+            run_id=str(_uuid.uuid4()),
+        )
+        findings = PredictionReconciliationAgent().run(ctx)
+    finally:
+        store.close()
+    assert findings
+    assert any("carb underestimate" in f.headline.lower() for f in findings)
+
+
 def test_cmd_demo_output() -> None:
     out = io.StringIO()
     rc = cmd_demo(out=out)
