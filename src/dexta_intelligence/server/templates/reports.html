@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}dexta · reports{% endblock %}
+{% block content %}
+{% from "_components.html" import chip %}
+
+{% macro item_block(it) %}
+<li class="discuss-item">
+  <span class="discuss-head">{{ it.item }}</span>
+  {% if it.rationale %}<p class="muted small">{{ it.rationale }}</p>{% endif %}
+  <div class="chips">
+    {% for ref in it.evidence_refs %}{{ chip("evidence", ref) }}{% endfor %}
+    {% for pmid in it.citations %}<a class="chip" href="https://pubmed.ncbi.nlm.nih.gov/{{ pmid }}/">PMID {{ pmid }}</a>{% endfor %}
+  </div>
+</li>
+{% endmacro %}
+
+<div class="page-head">
+  <h1>Discussion brief</h1>
+  <p class="page-sub">A clinician-facing brief built from this person's own findings, grounded in their evidence and (where available) published literature. Decision support for a visit. Your clinician decides. Pattern analysis only. Not a dosing recommendation.</p>
+  <a class="btn btn-ghost" href="/actions/reports/export">Download Markdown ↓</a>
+</div>
+
+{% if brief.question %}<p class="muted"><strong>Focus:</strong> {{ brief.question }}</p>{% endif %}
+
+{% if brief.analysis %}
+<section class="findings-section">
+  <h2 class="section-title">Analysis</h2>
+  <ul>{% for a in brief.analysis %}<li>{{ a }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if brief.goals %}
+<section class="findings-section">
+  <h2 class="section-title">Goals to discuss</h2>
+  <ul>{% for g in brief.goals %}<li>{{ g }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if brief.discuss_now %}
+<section class="findings-section">
+  <h2 class="section-title">Discuss now</h2>
+  <ul class="discuss-list">{% for it in brief.discuss_now %}{{ item_block(it) }}{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if brief.monitoring %}
+<section class="findings-section">
+  <h2 class="section-title">Suggested monitoring</h2>
+  <ul class="discuss-list">{% for it in brief.monitoring %}{{ item_block(it) }}{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if brief.questions_for_clinician %}
+<section class="findings-section">
+  <h2 class="section-title">Questions for your clinician</h2>
+  <ul class="discuss-list">{% for it in brief.questions_for_clinician %}{{ item_block(it) }}{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section class="findings-section">
+  <h2 class="section-title">Limitations</h2>
+  <ul>{% for limit in brief.limitations %}<li>{{ limit }}</li>{% endfor %}</ul>
+</section>
+{% endblock %}

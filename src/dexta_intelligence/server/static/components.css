@@ -109,3 +109,8 @@
 .recon-traces { display: flex; gap: 24px; flex-wrap: wrap; margin: 10px 0; }
 .recon-trace { display: flex; flex-direction: column; gap: 4px; }
 .recon-trace .gm-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+
+/* discussion brief (Reports) */
+.discuss-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.discuss-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+.discuss-head { font-weight: 600; }

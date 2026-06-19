@@ -167,6 +167,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         ("/chat", "Chat"),
         ("/investigations", "Investigations"),
         ("/findings", "Findings"),
+        ("/reports", "Reports"),
         ("/goals", "Goals"),
         ("/connectors", "Connectors"),
         ("/system", "System"),
@@ -696,6 +697,45 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
         return _render("evals.html", request, "/evals", **view)
+
+    def _build_discussion_brief(store: StoragePort) -> Any:
+        from dexta_intelligence.agents.advisory import ClinicalAdvisoryAgent  # noqa: PLC0415
+        from dexta_intelligence.agents.discovery_tools import evidence_backend  # noqa: PLC0415
+
+        coverage = store.coverage()
+        active = store.get_findings(status=FindingStatus.ACTIVE, limit=50)
+        active = [f for f in active if f.kind not in _INTERNAL_FINDING_KINDS]
+        # Deterministic on page load (no synchronous LLM call); literature
+        # citations come from the configured backend, best-effort and bounded.
+        backend = evidence_backend() if config.evidence.enabled else None
+        agent = ClinicalAdvisoryAgent(model=None, evidence=backend)
+        return agent.build(active, coverage, now=datetime.now(tz=UTC))
+
+    @app.get("/reports", response_class=HTMLResponse)
+    def reports(request: Request) -> Any:
+        store = store_opener(config, None)
+        try:
+            brief = _build_discussion_brief(store)
+        finally:
+            _close(store, store_opener)
+        return _render("reports.html", request, "/reports", brief=brief)
+
+    @app.get("/actions/reports/export")
+    def action_reports_export() -> Any:
+        from dexta_intelligence.agents.advisory import render_markdown  # noqa: PLC0415
+
+        store = store_opener(config, None)
+        try:
+            brief = _build_discussion_brief(store)
+        finally:
+            _close(store, store_opener)
+        from fastapi.responses import Response  # noqa: PLC0415
+
+        return Response(
+            render_markdown(brief),
+            media_type="text/markdown",
+            headers={"Content-Disposition": 'attachment; filename="dexta-discussion-brief.md"'},
+        )
 
     @app.post("/actions/connectors/sync")
     async def action_connectors_sync(request: Request) -> Any:
