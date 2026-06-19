@@ -466,7 +466,15 @@ class TestUpload:
 
 
 class TestAsk:
-    def test_without_model_explains_how_to_enable(self, tmp_path: Path) -> None:
+    def test_without_model_explains_how_to_enable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Establish the "no model" precondition the test name promises: with no
+        # provider credential, model_for_role returns None regardless of the
+        # developer's shell. (Otherwise an ambient key resolves a real model and
+        # the command correctly reports the data floor instead.)
+        for var in ("ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
         store = _tmp_store(tmp_path)
         out = io.StringIO()
         code = cmd_ask(
