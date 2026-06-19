@@ -11,7 +11,7 @@ Always-on, like ``recall``/``coverage``:
   - parse_relative_date(expr)    — "last Tuesday" / "3 days ago" → ISO date
 
 Each tool's evidence dict carries the resolved date components (year/month/
-day, plus hour/minute for "now") because the faithfulness guard's number
+day, plus hour/minute for "now")     because the faithfulness guard's number
 extractor parses bare years and day-of-month integers out of prose — a date
 the model cites must trace to the pool like any other figure.
 """

@@ -61,6 +61,7 @@ from dexta_intelligence.server.settings_schema import (
     FieldKind,
     source_nav,
 )
+from dexta_intelligence.server.views_evals import evals_page_view
 from dexta_intelligence.server.views_findings import (
     evidence_strength,
     findings_page_view,
@@ -167,6 +168,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         ("/log", "Log"),
         ("/connectors", "Connectors"),
         ("/system", "System"),
+        ("/evals", "Evals"),
         ("/settings", "Settings"),
     )
     templates.env.globals["source_nav"] = source_nav()
@@ -683,6 +685,16 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
         return _render("reconciliation.html", request, "/reconciliation", **view)
+
+    @app.get("/evals", response_class=HTMLResponse)
+    def evals(request: Request) -> Any:
+        now = datetime.now(tz=UTC)
+        store = store_opener(config, None)
+        try:
+            view = evals_page_view(store, config, now=now)
+        finally:
+            _close(store, store_opener)
+        return _render("evals.html", request, "/evals", **view)
 
     @app.post("/actions/connectors/sync")
     async def action_connectors_sync(request: Request) -> Any:
