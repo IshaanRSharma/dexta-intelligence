@@ -135,85 +135,12 @@ Every tool returns: ok, n_a, n_b, mean_a, mean_b, delta (mean_a - mean_b),
 cohen_d, interpretation ("negligible"|"small"|"moderate"|"large"), and the
 raw per-day/per-event groups used.
 
-TIME-TRAVERSAL TOOLS (re-scope the window the analysis tools above operate on):
-
-7. list_segments()
-   Coarse structure of the whole record so you can decide where to drill: one
-   row per month (or per week if the span is under 60 days), each with period,
-   n_days, mean_glucose, tir_pct, n_lows. Cheap and deterministic. Call this
-   FIRST to orient before narrowing.
-
-8. set_window(start, end)
-   start/end: ISO dates ("2026-03-01"). Narrows the ACTIVE window every later
-   tool (tod_compare, groupby_compare, event_proximity, daily_series, ...) reads
-   from. Clamps to available data and returns {active_start, active_end, n_days,
-   n_readings} so you see exactly what you selected. Out-of-range dates clamp.
-
-9. zoom_event(timestamp, pad_hours=12)
-   timestamp: ISO datetime of a spike/event. Sets the active window tight around
-   it (+/- pad_hours) and returns the minute-level trace: {readings:[{ts,mg_dl}],
-   pre_mean, post_mean, peak, nadir}. The spike-drill primitive.
-
-10. daily_series(metric)
-    metric: "tir" | "mean_glucose" | "tbr" | "cv". Returns the per-day time
-    series over the ACTIVE window as [{date, value}] so you can spot trends and
-    change-points yourself before comparing groups.
-
-TREATMENT TOOLS (insulin/carb context - exposed only when the data exists;
-REQUIRED before claiming a likely cause for a spike/high/meal/correction):
-
-11. get_carb_entries()
-    Carb entries inside the ACTIVE window: [{ts, carbs_g, ...}], n_entries,
-    total_carbs_g. An empty result around a spike is itself a signal
-    (possible missing carb entry).
-
-12. get_boluses()
-    Boluses inside the ACTIVE window: [{ts, units, minutes_after_carb_entry}],
-    n_boluses, total_units. minutes_after_carb_entry is the late-bolus signal.
-
-13. get_basal_timeline()
-    Basal / temp-basal / suspend events inside the ACTIVE window plus
-    basal_stable (no temp-basal/suspend interruptions) - rules basal in or out.
-
-14. get_iob(timestamp) / 15. get_cob(timestamp)
-    Insulin-on-board / carbs-on-board at an ISO datetime (computed, oref0
-    curves, tier B - analysis context only, never dosing).
-
-16. get_insulin_profile()
-    Pump-reported basal/ISF/carb-ratio/target segments for the active profile
-    (and all stored profiles). Synced from Tandem on pull; tier B - analysis
-    context only, never dosing.
-
-17. find_spikes(threshold=200, top_n=10)
-    Excursion peaks inside the ACTIVE window: [{ts, peak_mg_dl, duration_min}],
-    largest first. Locates the spike when the user names a day but not a time.
-
-18. find_similar_events(timestamp, threshold=200)
-    Recurrence over the WHOLE record: same-time-of-day events (carb entries
-    when logged) with per-event peak, spiked flag, and bolus_delay_min →
-    n_similar, n_spiking, mean bolus delays spiking vs not.
-
-CALENDAR TOOLS (always available - never compute dates in your head):
-
-19. get_current_time(timezone)   what "now"/"today" is, with weekday
-20. get_weekday(date)            weekday for any ISO date
-21. parse_relative_date(expression, timezone)
-    "last Tuesday" / "yesterday" / "3 days ago" → concrete ISO date for
-    set_window / zoom_event arguments.
-
-WORKFLOW: orient with list_segments, narrow with set_window, drill a spike with
-zoom_event, read trends with daily_series, THEN compare with tod_compare /
-groupby_compare / event_proximity. The analysis tools always honor the active
-window; call set_window again (or with the full span) to widen back out.
-
-SPIKE/CAUSE WORKFLOW: resolve dates (calendar tools) → list_segments →
-set_window → find_spikes / zoom_event → get_carb_entries → get_boluses +
-get_iob → get_basal_timeline → find_similar_events → only THEN state the most
-consistent contributor. NEVER claim a likely cause from glucose shape alone
-while treatment tools are available; if they are absent, say explicitly:
-"Insulin/carb data unavailable. This is glucose-shape inference only."
-Ground a confirmed pattern with search_evidence AFTER the data work, never
-instead of it. Observation and discussion only - never dosing advice."""
+Each tool compares two groups over the whole analysis window. Form one
+hypothesis, pick the single tool that tests it, and read the effect size and
+direction. Choose a group split the data actually supports (enough days/events
+per side). The rigor gate and an independent skeptic re-check every result after
+you, so prefer running a comparison over guessing its outcome. Observation and
+discussion only - never dosing advice."""
 
 
 @dataclass(frozen=True, slots=True)
