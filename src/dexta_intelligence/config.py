@@ -241,6 +241,10 @@ class EvidenceConfig(_Section):
     backend: str = "pubmed"
     email: str = ""
     enabled: bool = True
+    cache_ttl_minutes: int = 1440
+    """How long a literature lookup is cached (default 1 day). Published evidence
+    for a stable query does not change minute to minute, so citations are reused
+    across page loads and overlapping findings. ``0`` disables caching."""
 
 
 class WikiConfig(_Section):

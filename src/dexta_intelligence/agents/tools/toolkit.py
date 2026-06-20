@@ -1465,13 +1465,18 @@ def _error(tool: str, args: dict[str, Any], message: str) -> ToolResult:
 # ── clinical-evidence grounding (reasoning-loop only) ────────────────────────
 
 
-def evidence_backend() -> Any:
+def evidence_backend(*, interactive: bool = False) -> Any:
     """Build the configured evidence backend (lazy; PubMed default).
 
     Imports inside the function so the deterministic toolkit never pulls in
     ``httpx`` / the evidence package unless a reasoning loop actually grounds a
     pattern. Falls back to the zero-auth PubMed backend if the config names an
     unknown backend, so a bad ``[evidence].backend`` value never breaks search.
+
+    ``interactive`` tightens the network timeout for page-load lookups so a slow
+    NCBI cannot stall a request. When ``[evidence].cache_ttl_minutes`` is set
+    (the default), the backend is wrapped in a process-wide TTL cache so repeated
+    lookups across loads and overlapping findings are served without a round-trip.
     """
     from dexta_intelligence.config import load_config  # noqa: PLC0415
     from dexta_intelligence.evidence.pubmed import PubMedBackend  # noqa: PLC0415
@@ -1480,8 +1485,14 @@ def evidence_backend() -> Any:
     if cfg.backend == "openevidence":
         from dexta_intelligence.evidence.openevidence import OpenEvidenceBackend  # noqa: PLC0415
 
-        return OpenEvidenceBackend()
-    return PubMedBackend(email=cfg.email)
+        backend: Any = OpenEvidenceBackend()
+    else:
+        backend = PubMedBackend(email=cfg.email, interactive=interactive)
+    if cfg.cache_ttl_minutes > 0:
+        from dexta_intelligence.evidence.cache import CachingEvidenceBackend  # noqa: PLC0415
+
+        return CachingEvidenceBackend(backend, ttl_seconds=cfg.cache_ttl_minutes * 60)
+    return backend
 
 
 def _search_evidence(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:

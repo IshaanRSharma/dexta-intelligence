@@ -250,3 +250,51 @@ def test_reports_empty_store(tmp_path: Path) -> None:
     resp = client.get("/reports")
     assert resp.status_code == 200
     assert "not enough" in resp.text.lower()
+
+
+def test_reports_get_does_no_literature_lookup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The /reports GET is deterministic: even with evidence enabled it never
+    constructs the backend, so a slow NCBI cannot stall first paint. Citations
+    are deferred to the HTMX fragment."""
+    import dexta_intelligence.agents.tools.toolkit as tk  # noqa: PLC0415
+
+    db = tmp_path / "reports.db"
+    _seeded(db)
+
+    def _tracker(*, interactive: bool = False) -> object:
+        raise AssertionError("evidence backend must not be built on the page GET")
+
+    monkeypatch.setattr(tk, "evidence_backend", _tracker)
+    client = TestClient(create_app(Config(), store_opener=_opener(db)))  # evidence on
+    resp = client.get("/reports")
+    assert resp.status_code == 200
+    assert 'hx-get="/reports/citations"' in resp.text  # deferred lookup wired
+
+
+def test_reports_citations_fragment_renders_pmids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dexta_intelligence.agents.tools.toolkit as tk  # noqa: PLC0415
+
+    db = tmp_path / "reports.db"
+    _seeded(db)
+    hit = EvidenceHit(title="Prebolus trial", source="pubmed", id="25188375", snippet="x")
+
+    class _Backend:
+        source = "pubmed"
+
+        def search(self, _query: str, *, limit: int = 5) -> list[EvidenceHit]:
+            return [hit]
+
+    def _factory(*, interactive: bool = False) -> _Backend:
+        return _Backend()
+
+    monkeypatch.setattr(tk, "evidence_backend", _factory)
+    client = TestClient(create_app(Config(), store_opener=_opener(db)))
+    resp = client.get("/reports/citations")
+    assert resp.status_code == 200
+    assert "PMID 25188375" in resp.text
+    assert "pubmed.ncbi.nlm.nih.gov/25188375" in resp.text
+    assert "<html" not in resp.text.lower()  # a fragment, not the full page

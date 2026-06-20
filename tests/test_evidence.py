@@ -344,3 +344,62 @@ def test_markdown_linkifies_pmid_with_colon() -> None:
 
     html = markdown_to_html("See PMID: 30100000 for the trial.")
     assert "https://pubmed.ncbi.nlm.nih.gov/30100000/" in html
+
+
+# ── caching backend ───────────────────────────────────────────────────────────
+
+
+def _one_hit() -> list[EvidenceHit]:
+    return [EvidenceHit(title="T", source="pubmed", id="123", snippet="T")]
+
+
+def test_cache_serves_repeat_lookup_without_hitting_inner() -> None:
+    from dexta_intelligence.evidence.cache import (  # noqa: PLC0415
+        CachingEvidenceBackend,
+        reset_cache,
+    )
+
+    reset_cache()
+    clock = [0.0]
+    inner = _StubBackend(_one_hit())
+    cached = CachingEvidenceBackend(inner, ttl_seconds=60, clock=lambda: clock[0])
+
+    first = cached.search("overnight lows", limit=2)
+    clock[0] = 30.0
+    second = cached.search("overnight lows", limit=2)
+
+    assert first == second == _one_hit()
+    assert inner.calls == [("overnight lows", 2)]  # inner hit exactly once
+
+
+def test_cache_expires_after_ttl() -> None:
+    from dexta_intelligence.evidence.cache import (  # noqa: PLC0415
+        CachingEvidenceBackend,
+        reset_cache,
+    )
+
+    reset_cache()
+    clock = [0.0]
+    inner = _StubBackend(_one_hit())
+    cached = CachingEvidenceBackend(inner, ttl_seconds=60, clock=lambda: clock[0])
+
+    cached.search("q", limit=2)
+    clock[0] = 61.0  # past the TTL
+    cached.search("q", limit=2)
+
+    assert len(inner.calls) == 2  # re-fetched after expiry
+
+
+def test_cache_does_not_pin_empty_result() -> None:
+    from dexta_intelligence.evidence.cache import (  # noqa: PLC0415
+        CachingEvidenceBackend,
+        reset_cache,
+    )
+
+    reset_cache()
+    inner = _StubBackend([])  # empty == "no results" or a transient failure
+    cached = CachingEvidenceBackend(inner, ttl_seconds=600)
+
+    assert cached.search("q") == []
+    assert cached.search("q") == []
+    assert len(inner.calls) == 2  # empty never cached, so it re-checks

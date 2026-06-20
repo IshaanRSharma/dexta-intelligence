@@ -1,18 +1,6 @@
 {% extends "base.html" %}
 {% block title %}dexta · reports{% endblock %}
 {% block content %}
-{% from "_components.html" import chip %}
-
-{% macro item_block(it) %}
-<li class="discuss-item">
-  <span class="discuss-head">{{ it.item }}</span>
-  {% if it.rationale %}<p class="muted small">{{ it.rationale }}</p>{% endif %}
-  <div class="chips">
-    {% for ref in it.evidence_refs %}{{ chip("evidence", ref) }}{% endfor %}
-    {% for pmid in it.citations %}<a class="chip" href="https://pubmed.ncbi.nlm.nih.gov/{{ pmid }}/">PMID {{ pmid }}</a>{% endfor %}
-  </div>
-</li>
-{% endmacro %}
 
 <div class="page-head">
   <h1>Discussion brief</h1>
@@ -36,26 +24,12 @@
 </section>
 {% endif %}
 
-{% if brief.discuss_now %}
-<section class="findings-section">
-  <h2 class="section-title">Discuss now</h2>
-  <ul class="discuss-list">{% for it in brief.discuss_now %}{{ item_block(it) }}{% endfor %}</ul>
-</section>
-{% endif %}
-
-{% if brief.monitoring %}
-<section class="findings-section">
-  <h2 class="section-title">Suggested monitoring</h2>
-  <ul class="discuss-list">{% for it in brief.monitoring %}{{ item_block(it) }}{% endfor %}</ul>
-</section>
-{% endif %}
-
-{% if brief.questions_for_clinician %}
-<section class="findings-section">
-  <h2 class="section-title">Questions for your clinician</h2>
-  <ul class="discuss-list">{% for it in brief.questions_for_clinician %}{{ item_block(it) }}{% endfor %}</ul>
-</section>
-{% endif %}
+{# Citation-bearing sections render instantly without literature, then HTMX
+   swaps in the cited version once PubMed responds (deferred off the page GET so
+   a slow NCBI never blocks first paint). #}
+<div id="cited-sections"{% if cite_enabled %} hx-get="/reports/citations" hx-trigger="load" hx-swap="outerHTML"{% endif %}>
+  {% include "_reports_sections.html" %}
+</div>
 
 <section class="findings-section">
   <h2 class="section-title">Limitations</h2>

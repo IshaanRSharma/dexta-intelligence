@@ -698,16 +698,23 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             _close(store, store_opener)
         return _render("evals.html", request, "/evals", **view)
 
-    def _build_discussion_brief(store: StoragePort) -> Any:
+    def _build_discussion_brief(store: StoragePort, *, with_citations: bool) -> Any:
         from dexta_intelligence.agents.advisory import ClinicalAdvisoryAgent  # noqa: PLC0415
         from dexta_intelligence.agents.tools.toolkit import evidence_backend  # noqa: PLC0415
 
         coverage = store.coverage()
         active = store.get_findings(status=FindingStatus.ACTIVE, limit=50)
         active = [f for f in active if f.kind not in _INTERNAL_FINDING_KINDS]
-        # Deterministic on page load (no synchronous LLM call); literature
-        # citations come from the configured backend, best-effort and bounded.
-        backend = evidence_backend() if config.evidence.enabled else None
+        # The page GET is deterministic and never touches the network
+        # (with_citations=False). Literature citations are a separate, deferred
+        # lookup (the /reports/citations fragment and the export), built on a
+        # tighter interactive timeout and a TTL cache so a slow NCBI can never
+        # stall a page load.
+        backend = (
+            evidence_backend(interactive=True)
+            if with_citations and config.evidence.enabled
+            else None
+        )
         agent = ClinicalAdvisoryAgent(model=None, evidence=backend)
         return agent.build(active, coverage, now=datetime.now(tz=UTC))
 
@@ -715,10 +722,29 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     def reports(request: Request) -> Any:
         store = store_opener(config, None)
         try:
-            brief = _build_discussion_brief(store)
+            brief = _build_discussion_brief(store, with_citations=False)
         finally:
             _close(store, store_opener)
-        return _render("reports.html", request, "/reports", brief=brief)
+        return _render(
+            "reports.html",
+            request,
+            "/reports",
+            brief=brief,
+            cite_enabled=config.evidence.enabled,
+        )
+
+    @app.get("/reports/citations", response_class=HTMLResponse)
+    def reports_citations(request: Request) -> Any:
+        # Deferred enrichment: re-render only the discussion sections, now with
+        # literature citations. HTMX swaps this into the deterministic page.
+        store = store_opener(config, None)
+        try:
+            brief = _build_discussion_brief(store, with_citations=True)
+        finally:
+            _close(store, store_opener)
+        return templates.TemplateResponse(
+            request, "_reports_sections.html", {"brief": brief}
+        )
 
     @app.get("/actions/reports/export")
     def action_reports_export() -> Any:
@@ -726,7 +752,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
 
         store = store_opener(config, None)
         try:
-            brief = _build_discussion_brief(store)
+            brief = _build_discussion_brief(store, with_citations=True)
         finally:
             _close(store, store_opener)
         from fastapi.responses import Response  # noqa: PLC0415

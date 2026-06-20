@@ -1,0 +1,25 @@
+{# The discussion sections that may carry literature citations. Rendered once
+   deterministically in the page (citations empty) and re-rendered by the
+   /reports/citations fragment once the PubMed lookup completes. #}
+{% from "_components.html" import item_block %}
+
+{% if brief.discuss_now %}
+<section class="findings-section">
+  <h2 class="section-title">Discuss now</h2>
+  <ul class="discuss-list">{% for it in brief.discuss_now %}{{ item_block(it) }}{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if brief.monitoring %}
+<section class="findings-section">
+  <h2 class="section-title">Suggested monitoring</h2>
+  <ul class="discuss-list">{% for it in brief.monitoring %}{{ item_block(it) }}{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if brief.questions_for_clinician %}
+<section class="findings-section">
+  <h2 class="section-title">Questions for your clinician</h2>
+  <ul class="discuss-list">{% for it in brief.questions_for_clinician %}{{ item_block(it) }}{% endfor %}</ul>
+</section>
+{% endif %}
