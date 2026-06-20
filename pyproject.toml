@@ -48,7 +48,12 @@ libre = ["pylibrelinkup>=0.10"]
 whoop = ["httpx>=0.27"]
 oura = ["httpx>=0.27"]
 tandem = ["tconnectsync>=1.0"]
-carelink = ["carelink-client>=0.4"]
+# The CareLink client (import name carelink_client) is not published on PyPI;
+# pinning it made the whole project unresolvable. It must be installed from its
+# upstream project (github.com/ondrej1024/carelink-python-client). The connector
+# imports it lazily and raises an actionable error when it is absent, so this
+# extra is intentionally empty.
+carelink = []
 dexcom-api = ["httpx>=0.27"]
 postgres = ["psycopg[binary]>=3.2"]
 mcp = ["fastmcp>=2.0"]

@@ -338,5 +338,5 @@ class TestCareLinkConnector:
         reason="carelink_client is installed; the install-hint path is unreachable",
     )
     def test_missing_dependency_raises_install_hint(self) -> None:
-        with pytest.raises(RuntimeError, match=r"dexta-intelligence\[carelink\]"):
+        with pytest.raises(RuntimeError, match=r"carelink-python-client"):
             CareLinkConnector(CONFIG).check()

@@ -22,7 +22,8 @@ The module follows the house connector split:
   ``recentData()`` returns) and emits typed timeline events. No I/O, no
   carelink_client import required - tests run on tiny dict fixtures.
 - **CareLinkConnector** owns the session: lazy carelink_client import
-  (optional ``[carelink]`` extra), credential/region/patient handling via
+  (``carelink_client`` is not on PyPI; install it from upstream - see the
+  import-error message), credential/region/patient handling via
   :class:`CareLinkConfig`, and the ``recentData()`` fetch.
 
 Payload shapes (against documented CareLink recent-data responses):
@@ -367,8 +368,9 @@ class CareLinkConnector:
             carelink = importlib.import_module("carelink_client")
         except ImportError as exc:  # pragma: no cover - import-path guard
             msg = (
-                "Medtronic CareLink support is not installed. "
-                "Install it with: pip install 'dexta-intelligence[carelink]'"
+                "Medtronic CareLink support needs the 'carelink_client' package, "
+                "which is not published on PyPI. Install it from upstream: "
+                "pip install 'git+https://github.com/ondrej1024/carelink-python-client'"
             )
             raise RuntimeError(msg) from exc
 
