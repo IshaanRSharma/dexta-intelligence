@@ -1,4 +1,4 @@
-"""Tests for the Insulin agent — the LLM curiosity loop over insulin/meal tools.
+"""Tests for the Insulin agent - the LLM curiosity loop over insulin/meal tools.
 
 Covers the deterministic fallback (no model) and the scripted-model reasoning
 loop, so the plan -> judge -> claim/wonder -> guard machinery runs end to end
@@ -88,7 +88,7 @@ def _store_with_insulin_scenarios() -> SQLiteStore:
 
     for day in range(_WINDOW_DAYS):
         base = _START + timedelta(days=day)
-        # background filler — every hour a flat-ish ~100 reading
+        # background filler - every hour a flat-ish ~100 reading
         for hour in range(24):
             glucose.append(GlucoseEvent(ts=base.replace(hour=hour), mg_dl=100 + rng.randint(-8, 8)))
 

@@ -1,4 +1,4 @@
-"""Tests for the monitoring pipeline — deterministic anomaly detectors.
+"""Tests for the monitoring pipeline - deterministic anomaly detectors.
 
 Plants severe lows / highs / TIR cliffs / sensor gaps in an in-memory store
 and asserts the right anomalies fire with the correct numbers; clean data
@@ -174,7 +174,7 @@ def test_worsened_anomaly_supersedes_and_renotifies() -> None:
     ctx = _ctx(store)
     run_monitor(ctx, persist=True, now=_END)  # records severe_low:48
 
-    # A deeper low appears (new key) — re-run supersedes the stale one and notifies.
+    # A deeper low appears (new key) - re-run supersedes the stale one and notifies.
     # Off-grid ts so it's a fresh reading (the store dedups glucose on timestamp).
     store.insert_glucose([GlucoseEvent(ts=glucose[120].ts + timedelta(minutes=1), mg_dl=40)])
     sink = CollectingNotifier()

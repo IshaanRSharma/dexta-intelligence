@@ -1,13 +1,13 @@
-"""StoragePort — the single seam between the system and persistence.
+"""StoragePort - the single seam between the system and persistence.
 
 Everything above this module is backend-agnostic. Postgres is the reference
 backend (TIMESTAMPTZ / JSONB / pgvector); SQLite is the zero-setup on-ramp.
-Nothing outside ``dexta_intelligence.store`` may import a database driver —
+Nothing outside ``dexta_intelligence.store`` may import a database driver -
 CI enforces this.
 
 The port is deliberately narrow: connectors write, analytics read windows,
 agents read/write findings. If a feature needs a new query, it gets a new
-*named* method here — agents never build SQL.
+*named* method here - agents never build SQL.
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ class StoragePort(Protocol):
     def upsert_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
         """Insert raw events, skipping ``(source, source_id)`` duplicates.
 
-        Returns a ``source_id -> assigned id`` map covering every input event —
+        Returns a ``source_id -> assigned id`` map covering every input event -
         both newly-inserted and already-existing rows. This both reports the
         idempotency outcome (callers derive ``new`` counts from it) and exposes
         the ids so the sync workflow can wire ``raw_event_id`` provenance onto

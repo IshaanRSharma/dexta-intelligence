@@ -1,12 +1,12 @@
-"""E1 numeric faithfulness — guard catch rate on simulated model prose.
+"""E1 numeric faithfulness - guard catch rate on simulated model prose.
 
 Ground truth is non-LLM: we synthesize an evidence pool of Finding-like dicts
 with known numbers, then generate prose with planted ground-truth labels:
 
-- ``faithful`` — cites only pool numbers (± small rounding within tolerance).
-- ``fabricated`` — cites a planted number absent from the pool (and far from
+- ``faithful`` - cites only pool numbers (± small rounding within tolerance).
+- ``fabricated`` - cites a planted number absent from the pool (and far from
   every allowed constant), so the guard *must* reject it.
-- ``miscontextualized`` — cites pool numbers plus one out-of-pool derived
+- ``miscontextualized`` - cites pool numbers plus one out-of-pool derived
   figure; the guard rejects on the untraceable figure.
 
 The guard (:func:`dexta_intelligence.guard.faithfulness.audit`) is the unit
@@ -83,7 +83,7 @@ def _fabricated_text(pool: dict[str, float | int], rng: random.Random) -> str:
     tir = float(pool["tir_pct"])
     return (
         f"Time in range was {tir:.1f}%, but the standout was a sustained "
-        f"excursion peaking at {planted:.1f} mg/dL — the dominant driver of the "
+        f"excursion peaking at {planted:.1f} mg/dL - the dominant driver of the "
         f"window's variability."
     )
 

@@ -1,4 +1,4 @@
-"""OpenEvidence backend — optional, gated, experimental.
+"""OpenEvidence backend - optional, gated, experimental.
 
 OpenEvidence is a clinical-evidence service behind an API key; this backend is
 a thin, clearly-marked sketch against a *plausible* REST shape, not a verified
@@ -7,7 +7,7 @@ who has access can wire it without touching the agent code.
 
 Gating: the constructor raises a clear :class:`RuntimeError` (pointing at the
 docs) when ``OPENEVIDENCE_API_KEY`` is absent, so misconfiguration fails loudly
-at build time. Once built, :meth:`search` follows the house rule — any error
+at build time. Once built, :meth:`search` follows the house rule - any error
 degrades to ``[]`` and never raises into a reasoning loop.
 """
 

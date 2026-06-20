@@ -1,4 +1,4 @@
-"""PostgresStore tests — the StoragePort contract against a real Postgres.
+"""PostgresStore tests - the StoragePort contract against a real Postgres.
 
 The parity suite is gated on ``TEST_DATABASE_URL``: without a server, CI skips
 the whole class cleanly. It mirrors the key cases from ``test_sqlite_store.py``

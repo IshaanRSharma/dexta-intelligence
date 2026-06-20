@@ -1,4 +1,4 @@
-"""Coordinator — the LLM-planned counterpart to the fixed deep-analysis fan-out.
+"""Coordinator - the LLM-planned counterpart to the fixed deep-analysis fan-out.
 
 ``deep_analysis`` runs every producer unconditionally. The coordinator keeps the
 same rails but lets the model DECIDE which investigations are worth running for a
@@ -8,12 +8,12 @@ post-pass and optional synthesis.
 
 Most producers are deterministic gated instruments; ``discovery`` is the one
 open-ended arm (an LLM hypothesis sweep over the tool belt). The coordinator
-plans which to run, runs them, then — with a model — may run ONE bounded
+plans which to run, runs them, then - with a model - may run ONE bounded
 follow-up round that pivots on what the first round surfaced (only investigations
 not already run; it stops as soon as there is nothing new to add).
 
 The division of labour is strict: the LLM only PLANS (which investigations, and
-whether a follow-up is warranted). It never computes or accepts a statistic —
+whether a follow-up is warranted). It never computes or accepts a statistic -
 rigor lives inside each producer, the skeptic re-checks every finding, and the
 faithfulness guard gates prose. "LLM decides, determinism computes and gates."
 
@@ -22,8 +22,8 @@ receives the compact ``recall`` digest (prior-finding headlines + skeptic
 confound notes + open questions), so a long-running record cannot blow the
 planning context budget no matter how many findings have accumulated.
 
-With ``model=None`` planning degrades to the full producer set — exactly what
-``deep_analysis`` would run — so the engine works with no API key.
+With ``model=None`` planning degrades to the full producer set - exactly what
+``deep_analysis`` would run - so the engine works with no API key.
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ WHAT DEXTA ALREADY BELIEVES (do not re-derive these; pick investigations that
 extend, challenge, or fill gaps around them):
 {recall}
 
-PAST INVESTIGATIONS (what was already run before — build on these, don't repeat):
+PAST INVESTIGATIONS (what was already run before - build on these, don't repeat):
 {past}
 
 Choose the subset most relevant to the goal. Selecting all is valid when the goal
@@ -118,7 +118,7 @@ is broad or the record is thin. Use ONLY names from the list above.
 Output STRICT JSON: {{"investigations": ["<name>", ...], "reason": "<one sentence>"}}"""
 
 _REPLAN_PROMPT = """A first round of investigations ran for this goal and produced the findings
-below. Decide whether a focused FOLLOW-UP round is warranted — only investigations NOT already
+below. Decide whether a focused FOLLOW-UP round is warranted - only investigations NOT already
 run, chosen to drill into or challenge what the first round surfaced. If the first round already
 covers the goal, return an empty list.
 
@@ -146,8 +146,8 @@ class CoordinatorAgent:
     """Plans, composes, and runs deep investigations under the standard rails.
 
     The model (role ``discovery``) selects which producers run; everything that
-    enforces honesty — data-requirement gating, per-agent exception isolation,
-    rigor inside each agent, the skeptic re-check, the faithfulness guard — is
+    enforces honesty - data-requirement gating, per-agent exception isolation,
+    rigor inside each agent, the skeptic re-check, the faithfulness guard - is
     deterministic and non-negotiable.
     """
 
@@ -168,7 +168,7 @@ class CoordinatorAgent:
         process (which investigations ran, for which goal, and what came back) is
         saved to memory so a later run can recall and build on it. Returns
         reviewed findings; the caller persists. Never raises on thin data or
-        planner failure — it degrades to the full producer set, never an exception.
+        planner failure - it degrades to the full producer set, never an exception.
         """
         started_at = datetime.now(UTC)
         rec = trace if trace is not None else RunTrace()
@@ -299,7 +299,7 @@ class CoordinatorAgent:
         return [name for name in full if name in set(selected)]
 
     def _build_registry(self, selected: list[str]) -> AgentRegistry:
-        """Producers only — the skeptic is applied separately via ``review`` so it
+        """Producers only - the skeptic is applied separately via ``review`` so it
         runs over the collected findings rather than re-reading the store."""
         registry = AgentRegistry()
         for name in selected:
@@ -432,7 +432,7 @@ def _recall_digest(ctx: AgentContext, goal: str | None) -> str:
         lines.append(f"- {head}" + (f" [skeptic: {note}]" if note else ""))
     for question in payload.get("open_questions", []):
         lines.append(f"- open question: {question}")
-    return "\n".join(lines) if lines else "(nothing yet — early run)"
+    return "\n".join(lines) if lines else "(nothing yet - early run)"
 
 
 def _past_investigations(ctx: AgentContext) -> str:

@@ -1,4 +1,4 @@
-"""Finding memory helpers — recurrence, similarity, and supersession.
+"""Finding memory helpers - recurrence, similarity, and supersession.
 
 The store owns persistence; this module owns the *semantics* of how findings
 relate to each other across analysis runs.

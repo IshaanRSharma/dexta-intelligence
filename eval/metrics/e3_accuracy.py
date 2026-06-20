@@ -1,4 +1,4 @@
-"""E3 clinical accuracy — oref0 forecast vs realized glucose on synthetic data.
+"""E3 clinical accuracy - oref0 forecast vs realized glucose on synthetic data.
 
 Report-style: there is no hard pass/fail bar, since absolute forecast accuracy
 depends on assumed physiology (ISF, DIA) that synthetic data only approximates.

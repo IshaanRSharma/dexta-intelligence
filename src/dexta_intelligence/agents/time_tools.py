@@ -1,4 +1,4 @@
-"""LLM-callable date/time tools — deterministic calendar grounding.
+"""LLM-callable date/time tools - deterministic calendar grounding.
 
 The model must call these whenever it interprets ANY date, including dates
 from other tools' output. Computing date properties from a string in-head
@@ -6,13 +6,13 @@ produces silent errors (the donor repo recorded the LLM calling 2026-05-02
 "Wednesday"; it's a Saturday); these tools answer deterministically.
 
 Always-on, like ``recall``/``coverage``:
-  - get_current_time(timezone)   — what's "now"
-  - get_weekday(date)            — Monday/.../Sunday for a given date
-  - parse_relative_date(expr)    — "last Tuesday" / "3 days ago" → ISO date
+  - get_current_time(timezone)   - what's "now"
+  - get_weekday(date)            - Monday/.../Sunday for a given date
+  - parse_relative_date(expr)    - "last Tuesday" / "3 days ago" → ISO date
 
 Each tool's evidence dict carries the resolved date components (year/month/
 day, plus hour/minute for "now")     because the faithfulness guard's number
-extractor parses bare years and day-of-month integers out of prose — a date
+extractor parses bare years and day-of-month integers out of prose - a date
 the model cites must trace to the pool like any other figure.
 """
 
@@ -50,7 +50,7 @@ def _resolve_tz(name: str) -> tuple[tzinfo, str]:
     try:
         return ZoneInfo(name), name
     except Exception:
-        logger.debug("invalid timezone %r — falling back to UTC", name)
+        logger.debug("invalid timezone %r - falling back to UTC", name)
         return UTC, "UTC"
 
 
@@ -83,7 +83,7 @@ def time_tool_specs(
         raw = str(args.get("date") or "")
         d = cal.parse_iso_date(raw)
         if d is None:
-            return {"ok": False, "error": f"could not parse date {raw!r} — pass ISO YYYY-MM-DD"}, {}
+            return {"ok": False, "error": f"could not parse date {raw!r} - pass ISO YYYY-MM-DD"}, {}
         result = {
             "ok": True,
             "date": d.isoformat(),
@@ -102,7 +102,7 @@ def time_tool_specs(
             return {
                 "ok": False,
                 "error": (
-                    f"could not parse {expr!r} — try 'yesterday', 'last tuesday', "
+                    f"could not parse {expr!r} - try 'yesterday', 'last tuesday', "
                     "'N days ago', or a concrete ISO date"
                 ),
             }, {}
@@ -134,7 +134,7 @@ def time_tool_specs(
             name="get_weekday",
             description=(
                 "Return the weekday name for a given ISO date. Call this whenever you "
-                "need the day of the week a date falls on — NEVER compute the weekday "
+                "need the day of the week a date falls on - NEVER compute the weekday "
                 "yourself from a date string; you will get it wrong."
             ),
             parameters={
@@ -156,7 +156,7 @@ def time_tool_specs(
                 "pass to data tools like set_window. Recognized: 'today', 'yesterday', "
                 "'tomorrow', 'N days ago', 'in N days', 'last/this/next monday'..'sunday', "
                 "'last week', 'last month'. Returns ok=false with an error when the "
-                "phrase isn't understood — ask the user to be more specific, don't guess."
+                "phrase isn't understood - ask the user to be more specific, don't guess."
             ),
             parameters={
                 "type": "object",

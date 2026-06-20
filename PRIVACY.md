@@ -7,7 +7,7 @@ analytics or telemetry.
 ## Where your data lives
 
 - All glucose, insulin, meal, wearable, and derived data is stored in **your own
-  database** — a local SQLite file (default `~/.dexta/dexta.db`) or a Postgres
+  database** - a local SQLite file (default `~/.dexta/dexta.db`) or a Postgres
   instance you run.
 - Findings, hypotheses, goals, and the generated wiki are stored in that same
   database and on your filesystem (`~/.dexta/wiki`).
@@ -19,15 +19,15 @@ analytics or telemetry.
 Every outbound request comes from a source you turn on:
 
 1. **Connectors you configure.** Pulling data means contacting that vendor with
-   the credentials you provided — Nightscout, Dexcom (Share or official API),
+   the credentials you provided - Nightscout, Dexcom (Share or official API),
    Libre (LibreLinkUp), Whoop, Oura, Tandem (t:connect), Medtronic (CareLink),
    Tidepool. **Unofficial/reverse-engineered connectors** (Dexcom Share, Libre,
    CareLink, Tandem) send your account credentials to the vendor's own endpoints;
    they are opt-in and carry an "unofficial API" banner.
 2. **The LLM provider you choose (optional).** If you set a model
    (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, etc.), the agentic surfaces send
-   prompts to that provider. **Those prompts include your computed evidence —
-   numbers, summaries, and finding text — for the question being answered.** If
+   prompts to that provider. **Those prompts include your computed evidence -
+   numbers, summaries, and finding text - for the question being answered.** If
    you want zero data leaving your machine, run a local model (e.g. Ollama) or
    use the deterministic, no-model paths (`explain`, `analyze`, `monitor`,
    `demo`), which never call an external model.
@@ -43,7 +43,7 @@ evidence search, dexta makes no outbound requests at all.
 Secrets are read from environment variables or a local `~/.dexta/dexta.toml`
 (written `0600`). The settings UI never echoes stored secrets back (it shows only
 the last few characters). Config files are designed to be safe to share when
-asking for help — keep real secrets in the environment.
+asking for help - keep real secrets in the environment.
 
 ## The web GUI
 

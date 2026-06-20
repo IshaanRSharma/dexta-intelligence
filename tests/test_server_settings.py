@@ -1,4 +1,4 @@
-"""Settings & credentials page — per-source cards, TOML writes, secret hygiene.
+"""Settings & credentials page - per-source cards, TOML writes, secret hygiene.
 
 Drive the FastAPI app through TestClient against a tmp_path-pointed config
 file. No network: the test-connection endpoint is exercised through a fake

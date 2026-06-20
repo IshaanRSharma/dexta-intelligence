@@ -1,4 +1,4 @@
-"""Oura connector — sleep, readiness, workouts, and daily activity to timeline events.
+"""Oura connector - sleep, readiness, workouts, and daily activity to timeline events.
 
 Oura is the template community driver: personal-access-token auth against the
 official v2 REST API (``/v2/usercollection/...``), ``next_token`` pagination,
@@ -20,7 +20,7 @@ rows and rows missing a bedtime window.
 Day-level timestamp convention: daily summaries (``daily_readiness``,
 ``daily_sleep``, ``daily_activity``) use the API ``timestamp`` when present
 (ISO string with offset, normalized to UTC). When ``timestamp`` is absent, the
-canonical event time is ``day`` at 00:00 UTC — the same midnight anchor used
+canonical event time is ``day`` at 00:00 UTC - the same midnight anchor used
 when comparing date-filtered windows.
 
 Field mapping notes: :class:`~dexta_intelligence.models.RecoveryEvent` has no
@@ -75,7 +75,7 @@ _WORKOUT_INTENSITY = {
 
 
 # -----------------------------------------------------------------------------
-# Pure parsing — raw Oura v2 JSON dicts in, typed events out
+# Pure parsing - raw Oura v2 JSON dicts in, typed events out
 # -----------------------------------------------------------------------------
 
 
@@ -109,7 +109,7 @@ def _as_float(value: Any) -> float | None:
 
 
 def _daily_scored(raw: dict[str, Any]) -> bool:
-    """Daily summaries with ``score: null`` are still syncing — skip normalization."""
+    """Daily summaries with ``score: null`` are still syncing - skip normalization."""
     return raw.get("score") is not None
 
 
@@ -248,7 +248,7 @@ def parse_daily_activity(raw: dict[str, Any]) -> ActivityEvent | None:
 
 
 # -----------------------------------------------------------------------------
-# Connector — thin HTTP layer over the pure parsers
+# Connector - thin HTTP layer over the pure parsers
 # -----------------------------------------------------------------------------
 
 
@@ -308,7 +308,7 @@ class OuraConnector:
     def pull(self, since: datetime) -> NormalizedBatch:
         """Fetch everything newer than ``since`` (minus a small dedupe margin).
 
-        Raises ``httpx.HTTPError`` on provider hiccups — the sync workflow
+        Raises ``httpx.HTTPError`` on provider hiccups - the sync workflow
         owns retries. Raw rows are returned for every fetched record
         (including unscored ones, so provenance survives rescoring);
         normalized events only where parsing succeeds.

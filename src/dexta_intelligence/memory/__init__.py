@@ -1,4 +1,4 @@
-"""Agent memory — finding semantics over the store, plus its wiki projection."""
+"""Agent memory - finding semantics over the store, plus its wiki projection."""
 
 from dexta_intelligence.memory import embeddings
 from dexta_intelligence.memory.findings import (

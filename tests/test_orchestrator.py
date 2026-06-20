@@ -1,4 +1,4 @@
-"""Orchestrator — the LLM is the top-level decider over workflows-as-tools.
+"""Orchestrator - the LLM is the top-level decider over workflows-as-tools.
 
 Proves: the model can choose a whole investigation workflow; the treatment gate
 credits that composite (no fade); numbers from the workflow bundle stay
@@ -71,7 +71,7 @@ def test_workflow_tool_is_exposed() -> None:
 def test_orchestrator_belt_includes_workflows_and_instruments() -> None:
     model = _FakeToolModel(["nothing"])
     OrchestratorAgent(model=model).ask(_ctx("late_bolus"), "hello")
-    # The model sees both whole workflows and granular instruments — it chooses.
+    # The model sees both whole workflows and granular instruments - it chooses.
     assert "investigate_spike" in model.seen_tools
     assert "zoom_event" in model.seen_tools
     assert "recall" in model.seen_tools
@@ -81,7 +81,7 @@ def test_model_chooses_workflow_then_answers_faithfully() -> None:
     model = _FakeToolModel(
         [
             [_spike_call()],
-            "The March 14 spike peaked at 246 mg/dL — more consistent with late "
+            "The March 14 spike peaked at 246 mg/dL - more consistent with late "
             "meal insulin context than basal drift.",
         ]
     )

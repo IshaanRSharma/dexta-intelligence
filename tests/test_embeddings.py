@@ -37,7 +37,7 @@ def test_rank_orders_relevant_above_irrelevant() -> None:
 
 def test_rank_trigrams_catch_morphological_near_match() -> None:
     # "nocturnal" never appears as a whole word, but shares trigrams with
-    # "nocturn" — the fuzzy bridge must surface it above an unrelated doc.
+    # "nocturn" - the fuzzy bridge must surface it above an unrelated doc.
     docs = [
         ("nocturnal hypoglycemia overnight", "nocturnal"),
         ("weekend mealtime carbohydrate ratios", "weekend"),

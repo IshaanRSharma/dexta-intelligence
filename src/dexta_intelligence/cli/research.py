@@ -59,7 +59,7 @@ def cmd_nof1(
         gates = ColdStartReport.from_coverage(coverage)
         if gates.below_hard_floor:
             out.write(
-                f"Only {coverage.span_days:.1f} days of data — too little to test.\n"
+                f"Only {coverage.span_days:.1f} days of data - too little to test.\n"
             )
             return 1
         end_date = coverage.last_ts.date() if coverage.last_ts is not None else None
@@ -94,7 +94,7 @@ def cmd_nof1(
     verdict_label = {
         "supported": "SUPPORTED",
         "not_supported": "NOT SUPPORTED",
-        "underpowered": "UNDERPOWERED — collect more data",
+        "underpowered": "UNDERPOWERED - collect more data",
     }[result.verdict]
     out.write(f"Verdict: {verdict_label}\n")
     out.write(f"  {result.reason}\n")

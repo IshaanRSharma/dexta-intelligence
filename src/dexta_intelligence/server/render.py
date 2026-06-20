@@ -1,14 +1,14 @@
-"""Hand-rolled rendering helpers — no extra dependencies.
+"""Hand-rolled rendering helpers - no extra dependencies.
 
 Three small renderers the GUI needs and we refuse to pull a library for:
 
-- :func:`markdown_to_html` — a small, dependency-free general Markdown renderer.
+- :func:`markdown_to_html` - a small, dependency-free general Markdown renderer.
   It covers what our wiki generator emits *and* the prose LLM answers produce
   (headings, ordered/unordered lists, tables, links, bold/italic/code, fenced
   code, blockquotes, horizontal rules, paragraphs). It is escape-first.
-- :func:`emit_toml` — serialize a :class:`Config` back to the flat schema the
+- :func:`emit_toml` - serialize a :class:`Config` back to the flat schema the
   loader accepts. Comments are not preserved (regenerated from current values).
-- :func:`sparkline_svg` — a hand-drawn polyline of a goal's checkpoint arc.
+- :func:`sparkline_svg` - a hand-drawn polyline of a goal's checkpoint arc.
 
 Everything here escapes untrusted text; the wiki is generated, but findings
 carry user/model prose, so HTML escaping is non-negotiable.
@@ -50,7 +50,7 @@ def _safe_href(url: str) -> str:
     lowered = url.strip().lower()
     if lowered.startswith(_SAFE_SCHEMES):
         return url
-    # Relative paths and same-page anchors carry no scheme — keep them.
+    # Relative paths and same-page anchors carry no scheme - keep them.
     if ":" not in lowered.split("/", 1)[0] and not lowered.startswith("//"):
         return url
     return "#"
@@ -59,7 +59,7 @@ def _safe_href(url: str) -> str:
 def _inline(text: str) -> str:
     """Escape, then re-introduce the small set of inline spans we support."""
     out = html.escape(text)
-    # Code first — its contents are literal (no further inline parsing).
+    # Code first - its contents are literal (no further inline parsing).
     out = _INLINE_CODE.sub(lambda m: f"<code>{m.group(1)}</code>", out)
     out = _LINK.sub(lambda m: f'<a href="{_safe_href(m.group(2))}">{m.group(1)}</a>', out)
     out = _PMID.sub(
@@ -222,7 +222,7 @@ def _toml_str(value: str) -> str:
 def emit_toml(config: Config) -> str:
     """Serialize a Config to the flat TOML schema ``load_config`` accepts.
 
-    Comments are regenerated, not preserved — the panel writes the *current*
+    Comments are regenerated, not preserved - the panel writes the *current*
     state. Secrets are intentionally written as the empty strings they hold in
     a shared-safe config (the GUI never persists env-sourced secrets to disk).
     """

@@ -1,4 +1,4 @@
-"""E6 causal-attribution accuracy — does the real agent name the planted cause.
+"""E6 causal-attribution accuracy - does the real agent name the planted cause.
 
 Each benchmark scenario builds a deterministic synthetic store with a known
 planted cause and the keywords a correct attribution must contain. This metric

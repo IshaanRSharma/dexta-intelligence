@@ -1,8 +1,8 @@
-"""Daemon — the cadence driver behind "continuous health intelligence".
+"""Daemon - the cadence driver behind "continuous health intelligence".
 
 On an interval the daemon runs one :func:`run_cycle`: sync every source, scan
 for anomalies, tick due goals, and (less often) run a coordinator deep pass.
-Each step is exception-isolated — a step that raises is logged, its error is
+Each step is exception-isolated - a step that raises is logged, its error is
 recorded on the :class:`CycleReport`, and the cycle continues. ``run_cycle``
 never raises.
 
@@ -48,7 +48,7 @@ __all__ = ["CycleReport", "run_cycle", "run_daemon"]
 
 @dataclass(frozen=True, slots=True)
 class CycleReport:
-    """Outcome of one daemon cycle — per-step counts and any step errors.
+    """Outcome of one daemon cycle - per-step counts and any step errors.
 
     ``errors`` carries ``(step, message)`` pairs; an empty tuple means every
     step that ran completed cleanly.

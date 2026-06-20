@@ -1,4 +1,4 @@
-"""Investigator — the shared reasoning-investigation machinery.
+"""Investigator - the shared reasoning-investigation machinery.
 
 This is the community-plugin surface. A domain agent is just configuration: an
 ``Investigator`` holds the generic plan → probe → judge → claim/wonder loop and
@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["Investigator"]
 
-#: Hard cap on tool calls per run — cheap insurance against runaway loops.
+#: Hard cap on tool calls per run - cheap insurance against runaway loops.
 _DEFAULT_BUDGET = 8
 
 _REFLECT_PROMPT = """Your hypothesis: {claim}
@@ -57,7 +57,7 @@ You called {tool}({args}) and it returned:
 The statistic is computed; you only JUDGE. Decide:
 - "claim": the effect looks real and worth formally testing (interpretation
   moderate/large, groups adequately sized).
-- "wonder": suggestive but underpowered or ambiguous — bank it as an open
+- "wonder": suggestive but underpowered or ambiguous - bank it as an open
   question for a future run rather than claiming it now.
 - "drop": no meaningful effect.
 
@@ -105,8 +105,8 @@ class Investigator:
     identity + gating), ``rigor_seed`` (permutation seed), ``fallback_plan``
     (deterministic sweep when no model), ``plan_prompt`` (domain blurb), the
     finding ``kind_prefix``/``scope``, and a ``seed_headline`` formatter. The
-    machinery — tool probing, judging, rigor-gated claiming, guard auditing,
-    wonder banking, JSON I/O — is shared.
+    machinery - tool probing, judging, rigor-gated claiming, guard auditing,
+    wonder banking, JSON I/O - is shared.
     """
 
     name: str = "investigator"
@@ -277,7 +277,7 @@ class Investigator:
         note = result.summary.get("error") or (
             f"{plan.tool}: {result.summary.get('interpretation', 'unclear')} effect"
             f" (delta={result.summary.get('delta')}, n={result.summary.get('n_a')}"
-            f"/{result.summary.get('n_b')}) — revisit with more data"
+            f"/{result.summary.get('n_b')}) - revisit with more data"
         )
         return Hypothesis(
             statement=f"{plan.claim} [{note}]",
@@ -291,7 +291,7 @@ class Investigator:
         if self.model is None:
             return None
         # Dict-form messages are accepted by every LangChain chat model, so the
-        # call path never imports langchain_core — the optional ``llm`` extra is
+        # call path never imports langchain_core - the optional ``llm`` extra is
         # only needed to *construct* the model, not to invoke it.
         messages = [
             {"role": "system", "content": "Respond with ONE JSON object only, no prose."},
@@ -330,7 +330,7 @@ class Investigator:
 def _memory_digest(ctx: AgentContext, *, limit: int = 8) -> str:
     findings = ctx.store.get_findings(limit=limit)
     if not findings:
-        return "(nothing yet — this is an early run)"
+        return "(nothing yet - this is an early run)"
     return "\n".join(f"- {f.headline}" for f in findings)
 
 

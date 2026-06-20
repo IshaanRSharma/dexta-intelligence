@@ -206,7 +206,7 @@ def test_replan_runs_a_bounded_followup_round(store: SQLiteStore) -> None:
         _full_coverage_ctx(store), goal="why is my variability high"
     )
 
-    # The re-plan fired (a second planning call) and the loop is bounded to 2 —
+    # The re-plan fired (a second planning call) and the loop is bounded to 2 -
     # so the planner is consulted exactly twice, never a third time.
     assert len(model.prompts) == 2
     assert "observation" in {f.agent for f in findings}  # round 1 ran (null data → no patterns)
@@ -258,7 +258,7 @@ def test_thin_data_returns_empty_without_crash(store: SQLiteStore) -> None:
 
 
 def test_planner_failure_falls_back(store: SQLiteStore) -> None:
-    """A model whose invoke raises must not abort the run — full set instead."""
+    """A model whose invoke raises must not abort the run - full set instead."""
     _seed_glucose(store)
 
     class _BoomModel:

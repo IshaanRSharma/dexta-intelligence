@@ -5,7 +5,7 @@ safety invariant (zero dosing-advice across persisted outputs), the user's own
 consensus glycemic metrics, the model in use, and the reproducible commands.
 
 Page-load stays cheap: it describes the eval methodology and runs only a
-substring safety scan and direct glycemic formulas — never a model call or a
+substring safety scan and direct glycemic formulas - never a model call or a
 permutation eval. The heavy suite is reproducible from the listed commands.
 """
 

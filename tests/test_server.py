@@ -1,4 +1,4 @@
-"""GUI tests — gated on the optional [gui] extra.
+"""GUI tests - gated on the optional [gui] extra.
 
 Drive the FastAPI app through TestClient against a seeded SQLiteStore injected
 via the ``store_opener`` seam. Skipped wholesale when fastapi is absent.
@@ -435,7 +435,7 @@ def test_wiki_blocks_sibling_prefix_traversal(tmp_path: Path) -> None:
 
     client = _client(store, _wiki_config(wiki_root))
     resp = client.get("/wiki/../wiki_evil/pwn", follow_redirects=False)
-    # Either rejected outright (3xx/404) or rendered as the empty state — never leaked.
+    # Either rejected outright (3xx/404) or rendered as the empty state - never leaked.
     assert "SIBLING-PREFIX-LEAK" not in resp.text
     store.close()
 
@@ -592,7 +592,7 @@ def test_upload_empty_file_flashes(tmp_path: Path) -> None:
 
 
 class _FakeCoordinator:
-    """Coordinator stand-in — echoes the goal as one finding, no model needed."""
+    """Coordinator stand-in - echoes the goal as one finding, no model needed."""
 
     def __init__(self, *_a: object, **_kw: object) -> None:
         pass

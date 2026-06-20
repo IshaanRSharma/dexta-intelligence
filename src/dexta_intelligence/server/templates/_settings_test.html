@@ -1,5 +1,5 @@
 {% if report is none %}
-<p class="test-msg test-neutral">Not configured — fill in credentials and save first.</p>
+<p class="test-msg test-neutral">Not configured - fill in credentials and save first.</p>
 {% elif report.ok %}
 <p class="test-msg test-ok">
   <span class="dot set"></span>
@@ -7,7 +7,7 @@
   {% if report.detail %} · {{ report.detail }}{% endif %}
   {% if report.latest_data_ts %} · latest data {{ report.latest_data_ts.strftime('%b %d, %H:%M') }}{% endif %}
 </p>
-<p class="test-msg test-neutral">Credentials look good — click <strong>Sync now</strong> to pull pump data.</p>
+<p class="test-msg test-neutral">Credentials look good - click <strong>Sync now</strong> to pull pump data.</p>
 {% else %}
 <p class="test-msg test-bad">
   <span class="dot unset"></span>

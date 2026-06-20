@@ -1,4 +1,4 @@
-"""E_consensus — rollup metrics exactly match the published consensus formulas.
+"""E_consensus - rollup metrics exactly match the published consensus formulas.
 
 A faithfulness check on the deterministic analytics layer: the daily rollup's
 glycemic metrics must equal the international-consensus definitions, recomputed
@@ -8,11 +8,11 @@ formulas is a correctness bug, so the bar is *exact* agreement.
 
 Definitions recomputed (mg/dL):
 
-- mean — arithmetic mean of in-day readings.
-- TIR — % of readings in [70, 180] inclusive (Battelino et al., *Diabetes Care*
+- mean - arithmetic mean of in-day readings.
+- TIR - % of readings in [70, 180] inclusive (Battelino et al., *Diabetes Care*
   2019;42(8):1593-1603).
-- CV — coefficient of variation, ``100 * sample_sd / mean`` (sample sd, n-1).
-- GMI — ``3.31 + 0.02392 * mean`` (Bergenstal et al., *Diabetes Care*
+- CV - coefficient of variation, ``100 * sample_sd / mean`` (sample sd, n-1).
+- GMI - ``3.31 + 0.02392 * mean`` (Bergenstal et al., *Diabetes Care*
   2018;41(11):2275-2280).
 
 Ground truth is non-LLM: a deterministic synthetic glucose series.

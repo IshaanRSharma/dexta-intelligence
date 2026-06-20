@@ -1,9 +1,9 @@
-# Dexta OSS — Technical Build Specification
+# Dexta OSS - Technical Build Specification
 
-**Status:** v1.1 — engineering source of truth for the open-source platform build
+**Status:** v1.1 - engineering source of truth for the open-source platform build
 **Audience:** contributors + AI sub-agents executing workstreams
 **Companion:** the product vision doc (MVP Build Specification v1). This document is the *how*.
-**One-line frame:** an **AI clinic brain for Type 1 diabetes** — an agent harness (memory + rigor + faithfulness guard) sitting on a pluggable sensor plane (CGM, pump, wearable, file upload), self-hosted, BYO-model.
+**One-line frame:** an **AI clinic brain for Type 1 diabetes** - an agent harness (memory + rigor + faithfulness guard) sitting on a pluggable sensor plane (CGM, pump, wearable, file upload), self-hosted, BYO-model.
 
 ---
 
@@ -13,20 +13,20 @@
 2. **Vanilla-first.** `pipx install dexta && dexta init && dexta run` must work with zero config beyond a Nightscout URL and one LLM API key. Everything else has defaults. Postgres, per-agent models, plugins are opt-in upgrades, never prerequisites.
 3. **Cold-start is a first-class state.** Every capability declares its minimum data requirement and degrades with an explicit warning, never silently and never with fabricated confidence.
 4. **The faithfulness guard is non-negotiable.** Any LLM-authored prose passes the numeric-traceability gate or the system falls back to deterministic output. This pattern already exists in three places; it becomes one shared module.
-5. **Safety boundary:** pattern analysis, research context, discussion support, hypothesis generation — yes. Dosing, medication adjustment, treatment recommendation — never. Port `agents/safety/pha_output.py` as the final output gate on every surface.
+5. **Safety boundary:** pattern analysis, research context, discussion support, hypothesis generation - yes. Dosing, medication adjustment, treatment recommendation - never. Port `agents/safety/pha_output.py` as the final output gate on every surface.
 
 ---
 
-## 1. Donor map — current repo → OSS component
+## 1. Donor map - current repo → OSS component
 
 This is the single most important table in the document. Build order, estimates, and sub-agent task boundaries all derive from it.
 
 | OSS spec component | Donor in current repo | Reuse level |
 |---|---|---|
-| Sensor plane (MCP tool contract) | **`mcp-server-dexcom-health` v0.2 (our own published PyPI package — 10 FastMCP tools)** | The contract template |
-| Nightscout provider + MCP (**pump unlock: Tandem t:slim X2 via tconnectsync → Nightscout**) | — | **NEW** (small; REST + token) |
+| Sensor plane (MCP tool contract) | **`mcp-server-dexcom-health` v0.2 (our own published PyPI package - 10 FastMCP tools)** | The contract template |
+| Nightscout provider + MCP (**pump unlock: Tandem t:slim X2 via tconnectsync → Nightscout**) | - | **NEW** (small; REST + token) |
 | Dexcom provider | `mcp_server_dexcom/server.py` (pydexcom) + `pipeline/pod_worker.py` ingest | Port/adopt |
-| Libre provider + MCP (LibreLinkUp) | — | **NEW** (unofficial API; also covered indirectly via Nightscout/CSV) |
+| Libre provider + MCP (LibreLinkUp) | - | **NEW** (unofficial API; also covered indirectly via Nightscout/CSV) |
 | Whoop provider | `pipeline/whoop_client.py` (`WhoopClient`, `flatten_sleep/recovery/workout/cycle`) | **Port** (drop Supabase + web OAuth flow; token-based config) |
 | CSV/file upload connector (Clarity, LibreView export) | `parse_external_data` pattern in the MCP server | **NEW** (small) |
 | Raw event store | `glucose_readings` + `events` patterns in `pipeline/database.py` | Schema redesign, code pattern reuse |
@@ -38,25 +38,25 @@ This is the single most important table in the document. Build order, estimates,
 | Pattern Agent | `agents/coach/correlators/*` (sleep, workout, recovery, weekday, cause_recurrence) + `agents/insights/detectors/*` (tod_baseline_drift, cpd_overnight_avg, post_meal_outlier, episode_frequency) | **Port** |
 | Basal Agent | `analytics.py` `_overnight_basal_signal`, `_safety` (rebound logic) | Port + **extend with Nightscout `treatments` (real basal/temp-basal data)** |
 | Meal Agent | `analytics.py` `_post_meal_signal`, `_daily_meal_excursions`, `_classify_meal` (timing/counting/dose differential) | Port + extend with real carb/bolus entries |
-| Correction Agent | `_safety` rebound estimate (lows-after-highs) | Port + **NEW** (correction-effectiveness needs bolus data — Nightscout unlocks it) |
+| Correction Agent | `_safety` rebound estimate (lows-after-highs) | Port + **NEW** (correction-effectiveness needs bolus data - Nightscout unlocks it) |
 | Research Agent (guidelines/literature) | `agents/tools/clinical_kb.py` (curated KB) | Port + extend corpus |
-| Skeptic Agent | — (closest: reflect node pattern in `agents/nodes/reflect.py`) | **NEW** (uses stats core, below) |
+| Skeptic Agent | - (closest: reflect node pattern in `agents/nodes/reflect.py`) | **NEW** (uses stats core, below) |
 | Discovery Agent | `agents/researcher/agent.py` (plan → test → reflect → finalize, tool budget, 24h cache) + `researcher/tools.py` (6 stat tools) | **Port** + add rigor layer |
 | Stats core (+ rigor) | `agents/coach/correlators/_stats.py` (Cohen's d, min-N) + `researcher/tools.py` | Port + **NEW: FDR correction, permutation tests, split-half replication** |
 | Faithfulness guard | `agents/clinical/brief.py` `_flatten_numbers` / `_has_untraceable` (5% tolerance, allowed-ints whitelist) + the parallel guards in insights agent & coach | **Unify into one module** |
 | Clinical Brief Agent | `agents/clinical/brief.py` (evidence bundle → LLM rank/explain → guard → deterministic fallback → provenance meta) | **Port nearly verbatim** |
 | Explain This Spike | reasoner evidence pattern in `agents/monitoring/reasoner.py` + `event_proximity` tool | Recompose |
 | Agent memory (findings DB) | `pod_insights` schema (`scripts/setup_pod_insights.sql`) + `Insight`/`CoachFinding` DTOs | **Unify into one `Finding` record** |
-| Wiki layer | — | **NEW** (generator over findings store) |
-| Embeddings/retrieval | — | **NEW** (small; local-first) |
+| Wiki layer | - | **NEW** (generator over findings store) |
+| Embeddings/retrieval | - | **NEW** (small; local-first) |
 | BYOM (model factory) | 18 `ChatAnthropic` call sites (inventoried §5) | **Refactor to one factory** |
 | Safety framework | `agents/safety/pha_output.py` + reflect-node dosing hard-fail rules | Port |
 | Orchestration | `agents/graph.py` LangGraph (interactive) + `agents/insights/registry.py` `@register`/`run_all` (batch fan-out) | Port both patterns |
-| TUI | — | **NEW** (Textual) |
+| TUI | - | **NEW** (Textual) |
 | Report export | clinical brief `copySummary` content model | Port content model, new renderer |
 | Deep Analysis | composition of the above | Composition only |
 
-**What we deliberately do NOT port:** Supabase coupling, the SvelteKit app, share-tokens/followers/audit (multi-user clinical sharing is out of OSS-MVP scope), the Whoop *web OAuth flow* (replaced by token-based config; the data client IS ported), the LightGBM forecasting stack (`pipeline/training/`, `pipeline/forecast/` — valuable but heavy; Phase 7+), Resend email, Railway configs.
+**What we deliberately do NOT port:** Supabase coupling, the SvelteKit app, share-tokens/followers/audit (multi-user clinical sharing is out of OSS-MVP scope), the Whoop *web OAuth flow* (replaced by token-based config; the data client IS ported), the LightGBM forecasting stack (`pipeline/training/`, `pipeline/forecast/` - valuable but heavy; Phase 7+), Resend email, Railway configs.
 
 ---
 
@@ -71,13 +71,13 @@ dexta/
 │   │   ├── factory.py          # BYOM: get_model(role) → BaseChatModel (§5)
 │   │   └── roles.py            # role registry + per-role defaults
 │   ├── store/
-│   │   ├── port.py             # StoragePort protocol — ALL persistence goes through this
+│   │   ├── port.py             # StoragePort protocol - ALL persistence goes through this
 │   │   ├── postgres_backend.py # REFERENCE backend (Postgres-native: JSONB, TIMESTAMPTZ, pgvector)
 │   │   ├── sqlite_backend.py   # quick-start backend (zero-setup; `dexta migrate --to-postgres` later)
 │   │   ├── schema.py           # table definitions + migrations (§3)
 │   │   └── models.py           # typed records: GlucoseEvent, InsulinEvent, MealEvent,
 │   │                           #   ActivityEvent, DeviceEvent, Rollup, Finding, Hypothesis
-│   ├── providers/              # raw API clients — shared by connectors AND mcp_servers (§6)
+│   ├── providers/              # raw API clients - shared by connectors AND mcp_servers (§6)
 │   │   ├── nightscout.py       # REST + token (entries/treatments/devicestatus)
 │   │   ├── dexcom.py           # pydexcom Share (port)
 │   │   ├── libre.py            # LibreLinkUp (unofficial)
@@ -137,7 +137,7 @@ dexta/
 │   ├── golden/                 # synthetic datasets with planted ground-truth patterns
 │   ├── fixtures/               # recorded Nightscout/Dexcom API responses
 │   └── ...
-├── eval/                       # the reportable benchmark (§14) — separate from tests/
+├── eval/                       # the reportable benchmark (§14) - separate from tests/
 │   ├── datasets/               # synthetic generator + null sets + regime-change labeler
 │   ├── metrics/                # faithfulness, consistency, recall, robustness, safety
 │   ├── runners/                # cross-model matrix runner (BYOM factory)
@@ -147,17 +147,17 @@ dexta/
 └── docs/
 ```
 
-**Key decision — storage: Postgres-native, SQLite quick-start.** The schema is *designed for Postgres* (TIMESTAMPTZ, JSONB, pgvector for embeddings, partial indexes); Postgres is the reference backend — CI runs the full suite against it, docker-compose ships it, and it's the documented deployment for real longitudinal use. SQLite exists purely as the zero-setup on-ramp (`dexta init` with no DATABASE_URL → local file DB; embeddings fall back to float-blob + numpy cosine). `dexta migrate --to-postgres` moves a quick-start DB into Postgres losslessly (raw_events replay makes this trivial). The `StoragePort` protocol is the seam; nothing above `store/` may import sqlite3 or psycopg directly.
+**Key decision - storage: Postgres-native, SQLite quick-start.** The schema is *designed for Postgres* (TIMESTAMPTZ, JSONB, pgvector for embeddings, partial indexes); Postgres is the reference backend - CI runs the full suite against it, docker-compose ships it, and it's the documented deployment for real longitudinal use. SQLite exists purely as the zero-setup on-ramp (`dexta init` with no DATABASE_URL → local file DB; embeddings fall back to float-blob + numpy cosine). `dexta migrate --to-postgres` moves a quick-start DB into Postgres losslessly (raw_events replay makes this trivial). The `StoragePort` protocol is the seam; nothing above `store/` may import sqlite3 or psycopg directly.
 
-**Key decision — orchestration:** two modes, both ported:
-- **Batch (Deep Analysis, sync):** blackboard pattern — agents never call each other; they read the store + memory and write `Finding`s. This is the `registry.run_all` pattern from insights, and it parallelizes trivially.
+**Key decision - orchestration:** two modes, both ported:
+- **Batch (Deep Analysis, sync):** blackboard pattern - agents never call each other; they read the store + memory and write `Finding`s. This is the `registry.run_all` pattern from insights, and it parallelizes trivially.
 - **Interactive (Ask/chat, later phase):** the LangGraph plan→execute→reflect graph from `agents/graph.py`. Not in MVP critical path.
 
 ---
 
 ## 3. Storage schema
 
-### Layer 1 — `raw_events` (immutable)
+### Layer 1 - `raw_events` (immutable)
 ```sql
 raw_events(
   id, source TEXT,            -- 'nightscout' | 'dexcom' | 'csv'
@@ -170,7 +170,7 @@ raw_events(
 ```
 Never updated, never deleted. Re-normalization is always possible.
 
-### Layer 2 — clinical timeline (typed, normalized)
+### Layer 2 - clinical timeline (typed, normalized)
 ```sql
 glucose_events(ts, mg_dl, trend, raw_event_id)
 insulin_events(ts, kind,            -- 'bolus' | 'basal' | 'temp_basal' | 'suspend'
@@ -183,7 +183,7 @@ device_events(ts, kind, note, raw_event_id)   -- site change, sensor start, batt
 ```
 Nightscout mapping: `entries` → glucose_events; `treatments` → insulin/meal events (eventType: Bolus, Carb Correction, Temp Basal, Suspend); `devicestatus` → device_events + IOB snapshots. **This is the unlock the current repo lacks: real insulin data** (for us: t:slim X2 → tconnectsync → Nightscout). Whoop mapping: port the `flatten_*` helpers from `pipeline/whoop_client.py` → sleep/recovery/activity events. Every event keeps `raw_event_id` provenance. All timestamps TIMESTAMPTZ, all flexible payloads JSONB (Postgres-native; SQLite backend emulates).
 
-### Layer 3 — rollups
+### Layer 3 - rollups
 ```sql
 rollups(period TEXT,          -- '15m' | '1h' | '1d' | '1w'
         period_start, n, mean, sd, cv, tir, tar, tar2, tbr, tbr2, gmi,
@@ -191,7 +191,7 @@ rollups(period TEXT,          -- '15m' | '1h' | '1d' | '1w'
 ```
 Computed incrementally on sync; recomputable from timeline at any time (rollups are a cache, not truth).
 
-### Layer 4 — agent memory
+### Layer 4 - agent memory
 ```sql
 findings(
   id, agent TEXT, kind TEXT, scope TEXT,
@@ -208,7 +208,7 @@ hypotheses(id, statement, status,    -- 'open' | 'supported' | 'refuted' | 'stal
 reports(id, kind,                    -- 'deep_analysis' | 'brief' | 'explain_spike'
         content JSON, created_at)
 ```
-`findings` is the unification of `pod_insights` + `Insight` + `CoachFinding` + clinical-brief dict (the current repo has four shapes; the OSS gets one). The `stats` block is new and mandatory for any quantitative claim — it's what the Skeptic and the rigor layer fill in.
+`findings` is the unification of `pod_insights` + `Insight` + `CoachFinding` + clinical-brief dict (the current repo has four shapes; the OSS gets one). The `stats` block is new and mandatory for any quantitative claim - it's what the Skeptic and the rigor layer fill in.
 
 ---
 
@@ -229,7 +229,7 @@ token = ""
 [connectors.whoop]                     # optional
 access_token = ""                      # token-based; no web OAuth flow in OSS
 
-[connectors.libre]                     # optional, opt-in (unofficial API — see §6.2)
+[connectors.libre]                     # optional, opt-in (unofficial API - see §6.2)
 email = ""
 password = ""
 region = "us"
@@ -257,9 +257,9 @@ guard = "strict"                       # numeric-traceability guard; cannot be d
 
 ---
 
-## 5. BYOM — the model factory
+## 5. BYOM - the model factory
 
-Current state (inventoried): **18 `ChatAnthropic` instantiation sites** across `agents/`, three selection patterns — `settings.anthropic_model`, hardcoded `"claude-haiku-4-5"`, and a Sonnet upgrade rule for user-facing Domain Expert / brief calls. Zero non-Anthropic clients.
+Current state (inventoried): **18 `ChatAnthropic` instantiation sites** across `agents/`, three selection patterns - `settings.anthropic_model`, hardcoded `"claude-haiku-4-5"`, and a Sonnet upgrade rule for user-facing Domain Expert / brief calls. Zero non-Anthropic clients.
 
 Design:
 
@@ -270,8 +270,8 @@ from langchain.chat_models import init_chat_model
 ROLE_DEFAULTS = {
     # role         (tier,     temperature, max_tokens)
     "plan":        ("fast",    0.0, 1024),   # structured routing
-    "observation": (None,      None, None),  # deterministic — NO model
-    "pattern":     (None,      None, None),  # deterministic — NO model
+    "observation": (None,      None, None),  # deterministic - NO model
+    "pattern":     (None,      None, None),  # deterministic - NO model
     "discovery":   ("primary", 0.2, 1800),
     "skeptic":     ("primary", 0.0, 1200),
     "research":    ("fast",    0.2, 1200),
@@ -287,7 +287,7 @@ def get_model(role: str) -> BaseChatModel:
 ```
 
 Rules:
-- `init_chat_model` (LangChain) gives Anthropic/OpenAI/Ollama/Groq/Mistral/etc. for free — we do not write per-provider clients.
+- `init_chat_model` (LangChain) gives Anthropic/OpenAI/Ollama/Groq/Mistral/etc. for free - we do not write per-provider clients.
 - **`provider = "openrouter"` is special-cased** onto the OpenAI-compatible endpoint
   (`base_url=https://openrouter.ai/api/v1`, `OPENROUTER_API_KEY`). This is the recommended
   BYOM quick-start: one key → Claude/GPT/Gemini/Llama/free models, and it makes the §14
@@ -299,7 +299,7 @@ Rules:
 
 ---
 
-## 6. Sensor plane — providers, connectors, MCP servers
+## 6. Sensor plane - providers, connectors, MCP servers
 
 Three layers sharing one API client per source:
 
@@ -311,7 +311,7 @@ mcp_servers/ live FastMCP tool servers per provider             ── feeds ANY
 
 ### 6.1 The MCP tool contract (v1 = our published server)
 
-`mcp-server-dexcom-health` v0.2 (our own PyPI package, MIT, FastMCP, stdio default / SSE in-app on :8001, env-var creds) already defines the de-facto contract — **10 tools**: `get_current_glucose`, `get_glucose_readings`, `get_statistics`, `get_status_summary`, `detect_episodes`, `get_episode_details`, `analyze_time_blocks`, `check_alerts`, `export_data`, `get_agp_report`. It also has the `parse_external_data` hook (tools accept injected readings), which becomes the CSV path.
+`mcp-server-dexcom-health` v0.2 (our own PyPI package, MIT, FastMCP, stdio default / SSE in-app on :8001, env-var creds) already defines the de-facto contract - **10 tools**: `get_current_glucose`, `get_glucose_readings`, `get_statistics`, `get_status_summary`, `detect_episodes`, `get_episode_details`, `analyze_time_blocks`, `check_alerts`, `export_data`, `get_agp_report`. It also has the `parse_external_data` hook (tools accept injected readings), which becomes the CSV path.
 
 `mcp_servers/_contract.py` freezes this as **glucose-over-MCP v1**. Every sensor MCP implements the same 10 tools, so an agent (Claude Desktop, Cursor, our harness, anyone's) is source-agnostic. Pump-capable sources add the **insulin extension**: `get_boluses`, `get_basal_timeline`, `get_carb_entries`, `get_iob`.
 
@@ -322,24 +322,24 @@ mcp_servers/ live FastMCP tool servers per provider             ── feeds ANY
 | **Nightscout** | REST `/api/v1/{entries,treatments,devicestatus}.json`, token auth | glucose + **bolus/carb/temp-basal/suspend + IOB** | Official-ish, stable, no reverse-engineering. **First.** |
 | **Tandem t:slim X2** (our pump) | via **tconnectsync → Nightscout** (documented recipe, not our code) | real pump data lands in `treatments` | We document the recipe; Nightscout MCP/connector picks it up for free |
 | **Dexcom** | pydexcom (Share API) | glucose, 24h window | Already shipped as our published MCP server; connector port for history |
-| **Freestyle Libre** | LibreLinkUp (unofficial) | glucose | ToS-gray, breaks occasionally — ship as opt-in with a clear banner. Most Libre DIY users are *already* on Nightscout via xDrip+/Juggluco, and LibreView CSV covers the rest, so this is a convenience, not a dependency |
-| **Whoop** | official OAuth API — port `pipeline/whoop_client.py` | sleep, recovery/HRV, strain, workouts | Clean; token-based config in OSS (no web OAuth flow) |
-| **Oura** | official REST API v2, personal access token | sleep stages, readiness, HRV, temperature, activity | Cleanest wearable API there is — ideal first community driver |
+| **Freestyle Libre** | LibreLinkUp (unofficial) | glucose | ToS-gray, breaks occasionally - ship as opt-in with a clear banner. Most Libre DIY users are *already* on Nightscout via xDrip+/Juggluco, and LibreView CSV covers the rest, so this is a convenience, not a dependency |
+| **Whoop** | official OAuth API - port `pipeline/whoop_client.py` | sleep, recovery/HRV, strain, workouts | Clean; token-based config in OSS (no web OAuth flow) |
+| **Oura** | official REST API v2, personal access token | sleep stages, readiness, HRV, temperature, activity | Cleanest wearable API there is - ideal first community driver |
 | **Dexcom official API** | OAuth2, `/egvs` endpoints | glucose history (~1–3h delay, no real-time) | ToS-clean complement to pydexcom Share; sandbox available |
-| **Apple Watch / HealthKit** | **no cloud API exists** — export bridge only | HR, HRV, sleep, workouts | Path: Health Auto Export app → webhook/JSON ingest, or CSV. Documented recipe, not a connector we own |
-| **Garmin / Fitbit** | official OAuth APIs | HR, sleep, activity | Tier 4 — community drivers once the protocol proves itself |
+| **Apple Watch / HealthKit** | **no cloud API exists** - export bridge only | HR, HRV, sleep, workouts | Path: Health Auto Export app → webhook/JSON ingest, or CSV. Documented recipe, not a connector we own |
+| **Garmin / Fitbit** | official OAuth APIs | HR, sleep, activity | Tier 4 - community drivers once the protocol proves itself |
 | **File upload** | Clarity / LibreView CSV export | glucose history (one-shot bulk) | Zero-integration on-ramp: `dexta upload my_export.csv` |
 
 **Driver expansion strategy (the GlycemicGPT lesson, inverted):** breadth via Nightscout-as-meta-driver
-(everything that uploads to NS — xDrip+, Loop, AAPS, Omnipod, Medtronic — arrives through one connector)
+(everything that uploads to NS - xDrip+, Loop, AAPS, Omnipod, Medtronic - arrives through one connector)
 plus a deliberately cheap plug-in seam, NOT solo grinding through 15 integrations. A driver is one
 `connectors/<source>.py` file implementing the frozen `Connector` protocol + recorded fixtures + tests.
-Each missing driver is a labeled `good-first-issue` with the Oura/Whoop connectors as templates — the
+Each missing driver is a labeled `good-first-issue` with the Oura/Whoop connectors as templates - the
 contribution surface that makes the repo a community project instead of a solo demo. Sources with
 real-time reads (pydexcom Share) additionally implement `current()` (optional `RealtimeConnector`
 protocol) which backs the live MCP tools.
 
-Libre coverage strategy, explicitly: **three paths** — (1) already-on-Nightscout (majority of DIY Libre users) → Nightscout connector; (2) LibreView CSV upload; (3) direct LibreLinkUp MCP for those who want live data. We never *depend* on the reverse-engineered path.
+Libre coverage strategy, explicitly: **three paths** - (1) already-on-Nightscout (majority of DIY Libre users) → Nightscout connector; (2) LibreView CSV upload; (3) direct LibreLinkUp MCP for those who want live data. We never *depend* on the reverse-engineered path.
 
 ### 6.2.1 Unofficial-API connector tier (reverse-engineered, opt-in)
 
@@ -353,14 +353,14 @@ tier rather than ad-hoc exceptions:
 | **LibreLinkUp** (shipped) | Libre cloud | live Libre readings | ToS-gray, banner'd |
 | **tconnectsync (direct)** | Tandem t:connect | pump events without running a Nightscout site | today documented only as the →Nightscout recipe; a direct connector removes the NS prerequisite for Control-IQ users |
 | **carelink client** (e.g. carelink-python-client) | Medtronic CareLink | 670G/780G pump + CGM data | largest unreached pump population; fragile auth, EU/US split |
-| **Tidepool API** | Tidepool platform | multi-device normalized history | actually an *official* open API — cheap win, listed here because it arrives via the same evaluation process |
+| **Tidepool API** | Tidepool platform | multi-device normalized history | actually an *official* open API - cheap win, listed here because it arrives via the same evaluation process |
 
 Tier rules (binding):
-1. **Opt-in only, never a dependency** — core capabilities must all be reachable via Nightscout or CSV; this tier is convenience.
-2. **Labeled in UI and docs** — each carries an "unofficial API — may break without notice" banner, same as Libre today.
-3. **Fixture-tested like every connector** — recorded sanitized responses; CI never hits the live service.
-4. **Same `Connector` protocol, same normalize path** — an unofficial source is one file in `connectors/`, indistinguishable downstream.
-5. **Read-only forever** — no tier member may ever gain a write/command surface.
+1. **Opt-in only, never a dependency** - core capabilities must all be reachable via Nightscout or CSV; this tier is convenience.
+2. **Labeled in UI and docs** - each carries an "unofficial API - may break without notice" banner, same as Libre today.
+3. **Fixture-tested like every connector** - recorded sanitized responses; CI never hits the live service.
+4. **Same `Connector` protocol, same normalize path** - an unofficial source is one file in `connectors/`, indistinguishable downstream.
+5. **Read-only forever** - no tier member may ever gain a write/command surface.
 6. Each is a labeled `good-first-issue`; the pydexcom connector is the reference implementation.
 
 ### 6.3 Connector contract (batch side)
@@ -374,11 +374,11 @@ class Connector(Protocol):
 
 - `sync` workflow: `pull → raw_events upsert (UNIQUE source,source_id) → normalize new rows → incremental rollups`. Watermark per source in `sync_state`.
 - File upload is a degenerate connector: `pull` reads the file once; same normalize path, same provenance.
-- Every provider ships **recorded-fixture tests** (sanitized JSON in `tests/fixtures/`) — CI never needs live credentials.
+- Every provider ships **recorded-fixture tests** (sanitized JSON in `tests/fixtures/`) - CI never needs live credentials.
 
 ### 6.4 Why both planes matter for the "AI clinic brain" story
 
-The connector plane gives the brain longitudinal memory (Postgres timeline, years of data). The MCP plane makes the same sensors available to *any* agent ecosystem — which is the adoption wedge: someone who never installs the harness can still `uvx mcp-server-nightscout-health` into Claude Desktop, and the harness is the natural upgrade. The published Dexcom server proves the model; Nightscout (pump-aware) is the strategically important sibling.
+The connector plane gives the brain longitudinal memory (Postgres timeline, years of data). The MCP plane makes the same sensors available to *any* agent ecosystem - which is the adoption wedge: someone who never installs the harness can still `uvx mcp-server-nightscout-health` into Claude Desktop, and the harness is the natural upgrade. The published Dexcom server proves the model; Nightscout (pump-aware) is the strategically important sibling.
 
 ---
 
@@ -393,13 +393,13 @@ class AgentContext:
 
 class DextaAgent(Protocol):
     name: str
-    requires: DataRequirement     # declared minimums — checked BEFORE run
+    requires: DataRequirement     # declared minimums - checked BEFORE run
     def run(self, ctx: AgentContext) -> list[Finding]
 ```
 
 - Agents are registered with the `@register` decorator (direct port of `insights/registry.py`), executed by `run_all` with per-agent exception isolation, **in parallel** (they share read-only context and write only their own findings).
 - Deterministic agents (observation, pattern, basal, meal, correction) never touch the LLM factory. LLM-bearing agents (discovery, skeptic, research, brief) must pass every claim through `guard.faithfulness` before returning.
-- This contract **is** the Phase-2 plugin interface — community agents implement the same protocol, so the plugin system costs nothing extra at MVP time beyond keeping the contract clean.
+- This contract **is** the Phase-2 plugin interface - community agents implement the same protocol, so the plugin system costs nothing extra at MVP time beyond keeping the contract clean.
 
 ### Mapping spec agents → donors
 | Agent | Donor | Notes |
@@ -412,7 +412,7 @@ class DextaAgent(Protocol):
 | Research | `clinical_kb.py` corpus + retrieval | citations attached to findings as `research_context` |
 | Discovery | `researcher/agent.py` whole pipeline | keeps plan→test→reflect→finalize, tool budget (8), 24h cache; tools come from `stats/core` |
 | Skeptic | NEW | see §8 |
-| **Prediction Reconciliation** | NEW (seed: `pattern_baselines` Welford logic in `monitoring/memory_writer.py` + `event_proximity`) | see §7.1 — expected-vs-actual trajectory, contributor attribution, recurrence memory |
+| **Prediction Reconciliation** | NEW (seed: `pattern_baselines` Welford logic in `monitoring/memory_writer.py` + `event_proximity`) | see §7.1 - expected-vs-actual trajectory, contributor attribution, recurrence memory |
 | Brief | `clinical/brief.py` | evidence bundle → rank/explain → guard → fallback → provenance meta. Add a "data sources used" line (glucose-only vs glucose+insulin) |
 
 ---
@@ -422,7 +422,7 @@ class DextaAgent(Protocol):
 Compares **expected** glucose trajectory vs **actual**, attributes the error, and counts recurrence.
 
 **The unlock:** for looping users, Nightscout `devicestatus` already logs the dosing algorithm's own
-forecast each cycle — oref0/AAPS upload `openaps.suggested` prediction curves (**IOBpredBGs** insulin-only,
+forecast each cycle - oref0/AAPS upload `openaps.suggested` prediction curves (**IOBpredBGs** insulin-only,
 **COBpredBGs** carbs-as-announced, **UAMpredBGs** unannounced-meal), Loop uploads `loop.predicted`. Expected
 trajectory is *logged ground truth of the algorithm's belief*, not something we model.
 
@@ -430,7 +430,7 @@ trajectory is *logged ground truth of the algorithm's belief*, not something we 
 - **Tier A (OpenAPS/AAPS/Loop/Trio):** reconcile realized CGM against the logged predBG curves.
   Attribution from curve geometry: UAM fits better than COB → carb estimate off; all curves overshoot →
   sensitivity shift (sensitivity, site aging); IOB fine + COB wrong → absorption timing.
-- **Tier B (Control-IQ via tconnectsync, MDI):** no published forecasts — reconcile against our own
+- **Tier B (Control-IQ via tconnectsync, MDI):** no published forecasts - reconcile against our own
   deterministic expectation computed by `analytics/oref.py`, a pure-Python port of oref0's documented
   math (MIT): exponential insulin-activity curves (tau/S formulation, peak 75/55 min presets), net IOB
   incl. temp-basal micro-bolus decomposition, BGI = activity × ISF, deviations, deviation-based COB
@@ -442,23 +442,23 @@ trajectory is *logged ground truth of the algorithm's belief*, not something we 
 reconciliation runs as a deterministic agent (no LLM) → per-episode error records
 (`+42 mg/dL at 120 min, contributor=carb_underestimate, tier=A`) → recurrence counted against the
 findings store ("similar pattern, N occurrences") → rigor layer gates significance → discovery/skeptic/brief
-consume it like any finding. NOT routed through MCP internally — MCP stays the external exposure layer.
+consume it like any finding. NOT routed through MCP internally - MCP stays the external exposure layer.
 
 **Schema addition (layer 2):** `prediction_events(ts, source, horizon_min, curve_kind, pred_mg_dl[], raw_event_id)`.
 
-**Eval hook (E6+):** reconciliation findings against documented regime changes — the agent should localize
+**Eval hook (E6+):** reconciliation findings against documented regime changes - the agent should localize
 "sensitivity shifted" to the window where the user actually changed sites/profile.
 
-## 8. Statistical rigor layer (NEW — the credibility core)
+## 8. Statistical rigor layer (NEW - the credibility core)
 
 Current state, honestly: `groupby_compare` has Cohen's d and min-N guards; **nothing has p-values, multiple-testing correction, or replication.** A discovery engine mining years of data across dozens of dimensions without this is a p-hacking machine and will be dismissed by exactly the audience we want.
 
 `stats/rigor.py` provides:
 
-1. **Permutation p-values** — `perm_test(metric_fn, groups, n=2000)`. No distributional assumptions, works for every comparison the tools make.
-2. **Benjamini-Hochberg FDR** — applied per Deep-Analysis run across *all* hypotheses tested in that run. Findings carry `q_fdr`; default surfacing threshold `q ≤ 0.10`.
-3. **Split-half replication** — every candidate pattern is re-tested on a temporally disjoint half of the window. `replicated: bool` on the finding; non-replicated findings are demoted to `hypotheses` (status `open`), not surfaced as discoveries.
-4. **Power gate** — given the observed effect size and N, refuse to claim anything when power < 0.5; emit a "collecting more data" hypothesis instead.
+1. **Permutation p-values** - `perm_test(metric_fn, groups, n=2000)`. No distributional assumptions, works for every comparison the tools make.
+2. **Benjamini-Hochberg FDR** - applied per Deep-Analysis run across *all* hypotheses tested in that run. Findings carry `q_fdr`; default surfacing threshold `q ≤ 0.10`.
+3. **Split-half replication** - every candidate pattern is re-tested on a temporally disjoint half of the window. `replicated: bool` on the finding; non-replicated findings are demoted to `hypotheses` (status `open`), not surfaced as discoveries.
+4. **Power gate** - given the observed effect size and N, refuse to claim anything when power < 0.5; emit a "collecting more data" hypothesis instead.
 
 **The Skeptic agent** consumes findings and:
 - re-runs the rigor checks independently (different random seed, different split),
@@ -476,14 +476,14 @@ Pipeline ordering in Deep Analysis: deterministic agents → discovery → **rig
 
 | Capability | Minimum | Degraded mode below minimum |
 |---|---|---|
-| Metrics snapshot (TIR/GMI/CV) | 7 days, ≥70% coverage | shown with "low confidence — N days" banner |
+| Metrics snapshot (TIR/GMI/CV) | 7 days, ≥70% coverage | shown with "low confidence - N days" banner |
 | AGP | 14 days | rendered with consensus-standard warning |
 | Pattern agents (weekday, ToD) | 21 days | skipped, listed as "pending: needs ≥21d" |
 | Sleep/workout correlations | 8 nights / 6 sessions per bucket | skipped with progress counter ("3 of 8 nights collected") |
 | What Changed | 2× window | skipped |
 | Discovery (longitudinal) | 60 days | runs in "early signals" mode: hypotheses only, no discoveries |
 | Trajectory / long-term | 90 days | skipped |
-| Insulin-grounded agents (basal/meal/correction) | ≥50% of days with treatments data | falls back to glucose-shape inference **with explicit "inferred — no insulin data" labeling** (current repo behavior becomes the labeled fallback) |
+| Insulin-grounded agents (basal/meal/correction) | ≥50% of days with treatments data | falls back to glucose-shape inference **with explicit "inferred - no insulin data" labeling** (current repo behavior becomes the labeled fallback) |
 
 Rules:
 - Gates are computed once and injected into every agent's context; agents *declare* requirements (`DataRequirement`) and the registry refuses to run them under-data rather than trusting each agent to check.
@@ -496,13 +496,13 @@ Rules:
 
 ```mermaid
 flowchart TD
-    subgraph F["Phase 0 — Foundation"]
+    subgraph F["Phase 0 - Foundation"]
         F1[F1 repo scaffold + CI]
         F2[F2 StoragePort + SQLite + schema]
         F3[F3 LLM factory BYOM]
         F4[F4 config + coldstart framework]
     end
-    subgraph D["Phase 1 — Data plane"]
+    subgraph D["Phase 1 - Data plane"]
         D1[D1 Nightscout provider + connector]
         D2[D2 normalize → timeline]
         D3[D3 rollups + metrics port]
@@ -511,25 +511,25 @@ flowchart TD
         D6[D6 Whoop provider + connector]
         D7[D7 MCP servers: nightscout/libre/whoop]
     end
-    subgraph I["Phase 2 — Deterministic intelligence"]
+    subgraph I["Phase 2 - Deterministic intelligence"]
         I1[I1 stats core port]
         I2[I2 rigor layer NEW]
         I3[I3 observation + pattern agents]
         I4[I4 basal/meal/correction agents]
         I5[I5 guard unification]
     end
-    subgraph M["Phase 3 — Memory"]
+    subgraph M["Phase 3 - Memory"]
         M1[M1 findings store unified]
         M2[M2 embeddings + retrieval]
         M3[M3 wiki generator]
     end
-    subgraph A["Phase 4 — Agentic layer"]
+    subgraph A["Phase 4 - Agentic layer"]
         A1[A1 discovery agent port]
         A2[A2 skeptic agent NEW]
         A3[A3 research agent KB]
         A4[A4 clinical brief port]
     end
-    subgraph W["Phase 5 — Workflows + surfaces"]
+    subgraph W["Phase 5 - Workflows + surfaces"]
         W1[W1 deep analysis]
         W2[W2 explain spike]
         W3[W3 what changed]
@@ -561,9 +561,9 @@ flowchart TD
 
 **Sequencing notes:**
 - F2/F3/F4 are mutually independent after F1 → build in parallel.
-- D4/D5/D6/D7 are off the critical path — pure parallel work once D2's normalize contract (and for D7, the provider clients) exist. The MCP servers (D7) are stateless wrappers over `providers/` and can ship to PyPI independently, like the Dexcom one already did.
-- I1+I2 (stats) only depend on F1 — can start day one, in parallel with the data plane.
-- M1 only needs the schema (F2) — also early-parallel.
+- D4/D5/D6/D7 are off the critical path - pure parallel work once D2's normalize contract (and for D7, the provider clients) exist. The MCP servers (D7) are stateless wrappers over `providers/` and can ship to PyPI independently, like the Dexcom one already did.
+- I1+I2 (stats) only depend on F1 - can start day one, in parallel with the data plane.
+- M1 only needs the schema (F2) - also early-parallel.
 - The TUI (W4) needs only *stub* workflow outputs to start; build it against fixture JSON in parallel with Phase 4.
 
 ---
@@ -610,24 +610,24 @@ Explicit spawn points. Each task lists its contract (input → output) so a sub-
 | `agent-workflows` | W1–W3 composition | workflow specs → CLI commands producing report JSON |
 
 ### Continuous testing agents (run every wave)
-- `agent-test-runner` — executes full suite per merged task, bisects regressions.
-- `agent-parity-auditor` — re-runs donor-vs-port numeric parity on every analytics change (the OSS must produce *identical* metrics to the battle-tested originals).
-- `agent-adversary` — grows the guard/safety adversarial corpus: tries to get dosing advice out of every LLM surface, tries to sneak fabricated numbers past the guard; any success becomes a permanent regression test.
-- `agent-docs` — keeps README quickstart + module docs in sync with merged interfaces.
+- `agent-test-runner` - executes full suite per merged task, bisects regressions.
+- `agent-parity-auditor` - re-runs donor-vs-port numeric parity on every analytics change (the OSS must produce *identical* metrics to the battle-tested originals).
+- `agent-adversary` - grows the guard/safety adversarial corpus: tries to get dosing advice out of every LLM surface, tries to sneak fabricated numbers past the guard; any success becomes a permanent regression test.
+- `agent-docs` - keeps README quickstart + module docs in sync with merged interfaces.
 
-**Coordination rules for sub-agents:** (1) interfaces frozen before spawn — protocol changes go through the lead; (2) one module per agent, no cross-module edits; (3) every agent delivers code + tests + a 10-line summary of deviations from spec; (4) parity-with-donor is the acceptance bar for all ports, golden-data ground truth for all new intelligence.
+**Coordination rules for sub-agents:** (1) interfaces frozen before spawn - protocol changes go through the lead; (2) one module per agent, no cross-module edits; (3) every agent delivers code + tests + a 10-line summary of deviations from spec; (4) parity-with-donor is the acceptance bar for all ports, golden-data ground truth for all new intelligence.
 
 ---
 
-## 12. Testing strategy (summary — CI pass/fail; the reportable benchmark is §14)
+## 12. Testing strategy (summary - CI pass/fail; the reportable benchmark is §14)
 
-1. **Parity tests** — ported analytics produce numerically identical output to donor modules on shared input. Non-negotiable for `metrics/agp/windows/trajectory`.
-2. **Golden datasets** — synthetic CGM+insulin with planted, documented effects + null sets. Pattern/discovery agents must achieve: 100% planted-pattern recall, 0 findings on null data at default thresholds.
-3. **Guard adversarial corpus** — crafted LLM outputs with fabricated/miscontextualized numbers; corpus only grows.
-4. **Connector fixtures** — recorded sanitized API responses; idempotency (double-ingest → no dupes) and watermark tests.
-5. **Rigor calibration** — false-positive rate of the full discovery pipeline on null datasets ≤ FDR target.
-6. **Cold-start matrix** — every capability exercised at 0/3/10/30/90/365 days of data; assert correct gating + messaging, never a crash, never a silent fabrication.
-7. **E2E smoke** — `dexta init → sync (fixture server) → analyze → brief → wiki` in CI.
+1. **Parity tests** - ported analytics produce numerically identical output to donor modules on shared input. Non-negotiable for `metrics/agp/windows/trajectory`.
+2. **Golden datasets** - synthetic CGM+insulin with planted, documented effects + null sets. Pattern/discovery agents must achieve: 100% planted-pattern recall, 0 findings on null data at default thresholds.
+3. **Guard adversarial corpus** - crafted LLM outputs with fabricated/miscontextualized numbers; corpus only grows.
+4. **Connector fixtures** - recorded sanitized API responses; idempotency (double-ingest → no dupes) and watermark tests.
+5. **Rigor calibration** - false-positive rate of the full discovery pipeline on null datasets ≤ FDR target.
+6. **Cold-start matrix** - every capability exercised at 0/3/10/30/90/365 days of data; assert correct gating + messaging, never a crash, never a silent fabrication.
+7. **E2E smoke** - `dexta init → sync (fixture server) → analyze → brief → wiki` in CI.
 
 ---
 
@@ -639,9 +639,9 @@ Web UI (Phase 8), plugin packaging/`pip install dexta-agent-*` (contract is read
 
 ## 14. Evaluation framework (the reportable benchmark)
 
-Distinct from `tests/` (CI pass/fail): `eval/` produces **the results table** — the artifact that makes the harness credible to the health-AI audience and reproducible by anyone on their own model. Design rule: **every eval's ground truth is non-LLM** (set membership, arithmetic invariants, planted effects, documented real events, or clinician rubric). LLM-as-judge is banned from reported numbers.
+Distinct from `tests/` (CI pass/fail): `eval/` produces **the results table** - the artifact that makes the harness credible to the health-AI audience and reproducible by anyone on their own model. Design rule: **every eval's ground truth is non-LLM** (set membership, arithmetic invariants, planted effects, documented real events, or clinician rubric). LLM-as-judge is banned from reported numbers.
 
-### Tier 1 — hard ground truth, fully automatic (runs in CI, every model in the matrix)
+### Tier 1 - hard ground truth, fully automatic (runs in CI, every model in the matrix)
 
 | Eval | Protocol | Metrics | Bar |
 |---|---|---|---|
@@ -651,37 +651,37 @@ Distinct from `tests/` (CI pass/fail): `eval/` produces **the results table** �
 
 E2 codifies the two real bugs already caught in production (single-vs-combined projection conflation; coverage-blind exposure hours). The class is the eval.
 
-### Tier 2 — constructed ground truth (the discovery evals)
+### Tier 2 - constructed ground truth (the discovery evals)
 
 | Eval | Protocol | Metrics | Bar |
 |---|---|---|---|
 | **E4 Planted-effect recovery** | generator plants effects at controlled sizes (dawn rise, weekend TIR drop, under-bolused dinners, basal drift, rebound over-corrections) + pure-null sets; include **confounded pairs** the system should *flag, not claim* | recall vs (effect size × data span) → **power curve**; null false-discovery rate at q; confound-flag rate | null FDR ≤ q (0.10); 100% recall at large effect/90d |
 | **E5 Perturbation robustness** | same data ± 15% dropout, compression lows, dup timestamps, tz shifts, 3-day gap | finding stability (Jaccard clean-vs-corrupted); new spurious findings | Jaccard ≥ 0.8; 0 corruption-induced findings |
-| **E6 Regime-change recovery** | real data with **documented true events as labels** (pump setting changes, site changes, illness, travel — timestamps from Nightscout `treatments` / user log) | localization accuracy (right window) + attribution accuracy (right axis) | report-only (no hard bar v1) |
+| **E6 Regime-change recovery** | real data with **documented true events as labels** (pump setting changes, site changes, illness, travel - timestamps from Nightscout `treatments` / user log) | localization accuracy (right window) + attribution accuracy (right axis) | report-only (no hard bar v1) |
 
 E4's power curve is itself a publishable result ("a 7-point weekday effect needs ~45 days to detect reliably"). E6 is the closest available proxy for "found something true" with ground truth we didn't invent.
 
-### Tier 3 — human ground truth (per major version, not CI)
+### Tier 3 - human ground truth (per major version, not CI)
 
 | Eval | Protocol | Metrics |
 |---|---|---|
 | **E7 Clinician rubric** | 1–3 endocrinologists rate ~20 briefs: clinically valid / would change what I examine / unsafe / misleading (Likert) | mean scores + inter-rater agreement |
-| **E8 Safety red-team** | adversarial corpus extracting dosing math through every LLM surface, incl. indirect framings; corpus only grows; every hit becomes a permanent regression case | dose-advice leakage rate — **zero tolerance, also run in CI** |
+| **E8 Safety red-team** | adversarial corpus extracting dosing math through every LLM surface, incl. indirect framings; corpus only grows; every hit becomes a permanent regression case | dose-advice leakage rate - **zero tolerance, also run in CI** |
 
 ### Explicitly NOT evals
-LLM-as-judge "insight quality" (circular; dev-time smoke check only). Outcome claims ("users improved TIR") — that is a clinical study, not an eval; never imply it. Testimonials.
+LLM-as-judge "insight quality" (circular; dev-time smoke check only). Outcome claims ("users improved TIR") - that is a clinical study, not an eval; never imply it. Testimonials.
 
 ### The headline artifact
-One table from `eval/report.py` — rows = models (Claude / GPT / Gemini / local Llama), columns = E1 fabrication (raw vs harness), E2 violations, E4 recall + null-FDR, E5 stability, E8 leakage. Cross-model with harness guarantees holding regardless of model **is** the BYOM pitch, reproducible by anyone.
+One table from `eval/report.py` - rows = models (Claude / GPT / Gemini / local Llama), columns = E1 fabrication (raw vs harness), E2 violations, E4 recall + null-FDR, E5 stability, E8 leakage. Cross-model with harness guarantees holding regardless of model **is** the BYOM pitch, reproducible by anyone.
 
 ---
 
-## 15. Web GUI — settings & credentials page
+## 15. Web GUI - settings & credentials page
 
 The shipped web GUI (`server/`, `dexta serve`, localhost:8787) currently renders
 credentials as a **status-only flat env list** (every var an identical gray dot,
 "set these in your shell"). That fails two ways: configuration state is
-illegible (per-source grouping is absent — users miss that pydexcom creds are
+illegible (per-source grouping is absent - users miss that pydexcom creds are
 even listed), and the quickstart promise breaks at the first hurdle (a new user
 should never need to learn shell env to connect a source).
 
@@ -694,14 +694,14 @@ event ts from `sync_state`), and a **Test connection** button that runs
 `connector.check()` inline and renders the `HealthReport`.
 
 **Editable, with the right storage.** Form fields write to
-`~/.dexta/dexta.toml` (created `0600`), the same file `dexta init` writes — the
+`~/.dexta/dexta.toml` (created `0600`), the same file `dexta init` writes - the
 GUI is an alternative front-end to the config, not a second config system.
 Environment variables remain **read-only status** (highest-precedence override,
-shown as "set via env — managed in your shell"). Precedence stays:
+shown as "set via env - managed in your shell"). Precedence stays:
 env > dexta.toml > defaults.
 
 **Secret hygiene (binding):**
-- Masked inputs; stored secrets are **never echoed back** — a configured field
+- Masked inputs; stored secrets are **never echoed back** - a configured field
   renders as `••••` + last 4 characters and a "replace" affordance.
 - No secret ever appears in a GET URL, server log line, or HTML source.
 - The server binds localhost by default and has no auth; the settings page
@@ -718,4 +718,4 @@ their "unofficial API" banner on the card itself, at the moment of decision.
 
 ## 16. Success criteria (engineering restatement)
 
-A new user with a Nightscout site and one API key can: install with pipx, `dexta init` in under 2 minutes, sync years of history, run Deep Analysis and get rigor-gated discoveries with evidence traces, ask "explain this spike," generate a physician brief, watch the wiki accumulate knowledge across runs, swap `[llm]` to any provider — all self-hosted, with every number traceable, every claim statistically gated, and every cold-start state explicitly labeled.
+A new user with a Nightscout site and one API key can: install with pipx, `dexta init` in under 2 minutes, sync years of history, run Deep Analysis and get rigor-gated discoveries with evidence traces, ask "explain this spike," generate a physician brief, watch the wiki accumulate knowledge across runs, swap `[llm]` to any provider - all self-hosted, with every number traceable, every claim statistically gated, and every cold-start state explicitly labeled.

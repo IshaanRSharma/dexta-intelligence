@@ -35,7 +35,7 @@
       {% if card.env_keys %}
       <div class="env-keys">
         <p class="field-label env-keys-head">API keys</p>
-        <p class="field-hint env-keys-sub">Saved to <code>~/.dexta/secrets.env</code> — never written to dexta.toml.</p>
+        <p class="field-hint env-keys-sub">Saved to <code>~/.dexta/secrets.env</code> - never written to dexta.toml.</p>
         {% for ev in card.env_keys %}
         <div class="field env-field">
           <label class="field-label" for="{{ card.key }}-env-{{ ev.name }}">{{ ev.label }}</label>

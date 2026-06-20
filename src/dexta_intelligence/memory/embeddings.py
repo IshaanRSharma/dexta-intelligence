@@ -1,8 +1,8 @@
-"""Dependency-free lexical-vector retrieval — honest fuzzy ranking, no model.
+"""Dependency-free lexical-vector retrieval - honest fuzzy ranking, no model.
 
 This is **not** semantic embedding: there is no learned model and no notion of
-meaning. It is a sparse lexical vector — sublinear-TF word features plus
-character-trigram features — scored by cosine. That upgrades brittle substring
+meaning. It is a sparse lexical vector - sublinear-TF word features plus
+character-trigram features - scored by cosine. That upgrades brittle substring
 matching to fuzzy *ranked* retrieval ("nocturnal" still pulls a "nocturn" doc)
 with zero dependencies. The :func:`rank` API is the seam: a real vector backend
 (pgvector, sentence-transformers) can swap in behind it later without callers
@@ -28,7 +28,7 @@ T = TypeVar("T")
 
 #: Words shorter than this carry little signal and are dropped.
 _MIN_WORD_LEN = 3
-#: Character-trigram width — fuzzy bridge across spelling/morphology.
+#: Character-trigram width - fuzzy bridge across spelling/morphology.
 _TRIGRAM_N = 3
 #: Trigram features are down-weighted relative to whole-word matches.
 _TRIGRAM_WEIGHT = 0.5
@@ -38,7 +38,7 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 #: the same thing in this domain; :func:`expand` appends every other member of a
 #: group whenever any member appears, so a "workout" finding still matches a
 #: "lifting" query. This is hand-maintained domain knowledge, NOT learned
-#: synonymy — keep it small and obviously-correct. Multi-word phrases are matched
+#: synonymy - keep it small and obviously-correct. Multi-word phrases are matched
 #: as substrings before tokenization, single words as whole tokens.
 _SYNONYM_GROUPS: tuple[frozenset[str], ...] = (
     frozenset({"workout", "exercise", "activity", "strain", "training", "lifting", "cardio"}),
@@ -75,7 +75,7 @@ def expand(text: str) -> str:
     "workout" finding. :data:`_SYNONYM_GROUPS` encodes the equivalences this
     domain needs; this folds every group member of any matched term back into the
     text. Applied to BOTH query and document before :func:`embed`. This is curated
-    domain knowledge, not learned synonymy — and not semantic embedding.
+    domain knowledge, not learned synonymy - and not semantic embedding.
     """
     lowered = text.lower()
     extra: list[str] = []
@@ -165,7 +165,7 @@ def _trigrams(word: str) -> list[str]:
 
 # ── finding-aware ranking ────────────────────────────────────────────────────
 
-#: Multiplicative weight by finding status — active beliefs outrank retired ones
+#: Multiplicative weight by finding status - active beliefs outrank retired ones
 #: at equal text relevance. There is no "hypothesis" FindingStatus; the lowest
 #: tier covers superseded/rejected/dismissed (still recallable, just down-ranked).
 _STATUS_WEIGHT: dict[str, float] = {
@@ -191,13 +191,13 @@ def rank_findings(
     """Rank findings by synonym-expanded lexical relevance, status, and recency.
 
     Scores each finding's ``headline + kind + scope`` by synonym-aware lexical
-    cosine to ``query`` (see :func:`expand`/:func:`embed` — lexical + curated
+    cosine to ``query`` (see :func:`expand`/:func:`embed` - lexical + curated
     synonyms, not semantic embeddings), then multiplies by a status weight
     (:data:`_STATUS_WEIGHT`) and a mild recency boost off the finding's
     ``window_end`` (falling back to ``window_start``). Returns the ``top_k``
     highest ``(score, finding)`` pairs, descending; ties keep input order.
 
-    An empty/garbage query (no usable tokens) or empty input yields ``[]`` — the
+    An empty/garbage query (no usable tokens) or empty input yields ``[]`` - the
     weights only ever scale a real text match, so they never invent relevance.
     """
     if top_k <= 0 or not findings:

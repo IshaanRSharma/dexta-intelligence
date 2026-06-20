@@ -1,4 +1,4 @@
-"""Evidence grounding tests — PubMed backend via MockTransport, hit shape, tool wiring.
+"""Evidence grounding tests - PubMed backend via MockTransport, hit shape, tool wiring.
 
 No live network: the PubMed backend runs against an ``httpx.MockTransport`` that
 emulates the NCBI E-utilities ``esearch`` + ``esummary`` JSON responses from
@@ -69,7 +69,7 @@ class TestEvidenceHit:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PubMed backend — mocked NCBI E-utilities transport
+# PubMed backend - mocked NCBI E-utilities transport
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -183,7 +183,7 @@ class TestPubMedBackend:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# OpenEvidence backend — missing-key gate
+# OpenEvidence backend - missing-key gate
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -212,7 +212,7 @@ class TestOpenEvidenceBackend:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# search_evidence tool spec — wiring + guard-facing numbers
+# search_evidence tool spec - wiring + guard-facing numbers
 # ─────────────────────────────────────────────────────────────────────────────
 
 

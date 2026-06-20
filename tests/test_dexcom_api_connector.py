@@ -1,4 +1,4 @@
-"""Dexcom official API connector tests — pure conversion + mocked transport.
+"""Dexcom official API connector tests - pure conversion + mocked transport.
 
 No live network: the connector tests run against an ``httpx.MockTransport``
 emulating the Dexcom developer API v3 (bearer auth, ``startDate``/``endDate``
@@ -142,7 +142,7 @@ class TestEgvToEvent:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Connector — mocked transport emulating the Dexcom official API
+# Connector - mocked transport emulating the Dexcom official API
 # ─────────────────────────────────────────────────────────────────────────────
 
 

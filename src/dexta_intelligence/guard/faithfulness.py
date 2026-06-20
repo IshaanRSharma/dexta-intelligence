@@ -1,16 +1,16 @@
-"""Numeric-faithfulness guard — no model may introduce numbers the data lacks.
+"""Numeric-faithfulness guard - no model may introduce numbers the data lacks.
 
 The core safety property of the platform: **every number in LLM-authored
 prose must trace to the deterministic evidence pool**, within a small
 relative tolerance. Untraceable output is rejected and the caller falls back
-to deterministic text. The model is the intelligence layer — it discovers,
-ranks, and explains — but every number it cites must trace to the evidence pool.
+to deterministic text. The model is the intelligence layer - it discovers,
+ranks, and explains - but every number it cites must trace to the evidence pool.
 
 This is a hardened port of the guard that shipped in the donor codebase's
 clinical brief (where it ran in production against real endocrinologist
 review). Improvements over the donor:
 
-- Reports **all** violations with surrounding context, not a boolean — so
+- Reports **all** violations with surrounding context, not a boolean - so
   false rejections are debuggable and measurable (eval E1's
   false-rejection-rate metric depends on this).
 - The allowed-constants set is explicit, documented, and per-call
@@ -84,7 +84,7 @@ class FaithfulnessReport:
 def extract_numbers(obj: Any) -> list[float]:
     """Recursively collect every numeric value reachable in ``obj``.
 
-    Walks dicts/lists, takes ints and floats directly (bools excluded —
+    Walks dicts/lists, takes ints and floats directly (bools excluded -
     they are not citable figures), and parses numbers embedded in strings.
     This builds the evidence pool the guard checks prose against.
     """

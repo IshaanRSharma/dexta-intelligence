@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 _INIT_TEMPLATE = """\
 # dexta-intelligence configuration
-# Secrets belong in the environment — see comments per section.
+# Secrets belong in the environment - see comments per section.
 
 [data]
 backend = "sqlite"
@@ -38,7 +38,7 @@ token = ""  # API token (or NIGHTSCOUT_TOKEN)
 
 [whoop]
 access_token = ""  # or WHOOP_ACCESS_TOKEN
-# refresh_token = ""  # WHOOP_REFRESH_TOKEN — enables auto-refresh on 401
+# refresh_token = ""  # WHOOP_REFRESH_TOKEN - enables auto-refresh on 401
 # client_id = ""      # WHOOP_CLIENT_ID
 # client_secret = ""  # WHOOP_CLIENT_SECRET
 
@@ -235,7 +235,7 @@ def cmd_sync(
 ) -> int:
     connectors = connector_factory(config)
     if not connectors:
-        out.write("No data sources configured — nothing to sync.\n")
+        out.write("No data sources configured - nothing to sync.\n")
         return 0
 
     store = opener(config, db_path)

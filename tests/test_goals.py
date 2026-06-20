@@ -1,4 +1,4 @@
-"""Tests for goal workflows — composition, measurement, and background ticks."""
+"""Tests for goal workflows - composition, measurement, and background ticks."""
 
 from __future__ import annotations
 

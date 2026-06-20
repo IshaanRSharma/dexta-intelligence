@@ -1,4 +1,4 @@
-"""Tests for the Discovery agent — the LLM curiosity loop.
+"""Tests for the Discovery agent - the LLM curiosity loop.
 
 Two paths are covered: the deterministic fallback (no model) and the full
 reasoning loop driven by a scripted fake model, so the plan -> judge ->

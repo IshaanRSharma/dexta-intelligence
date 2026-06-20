@@ -7,7 +7,7 @@
       {{ f.label }}{% if f.optional %} <span class="field-opt">optional</span>{% endif %}
     </label>
     {% if f.hint %}<p class="field-hint">{{ f.hint }}</p>{% endif %}
-    {% if f.env_set %}<p class="field-hint">Set via <code>{{ f.env }}</code> — managed in your shell</p>{% endif %}
+    {% if f.env_set %}<p class="field-hint">Set via <code>{{ f.env }}</code> - managed in your shell</p>{% endif %}
   </div>
 </div>
 {% elif f.kind == 'select' %}
@@ -22,7 +22,7 @@
     {% endfor %}
   </select>
   {% if f.hint %}<p class="field-hint">{{ f.hint }}</p>{% endif %}
-  <p class="field-hint">Set via <code>{{ f.env }}</code> — managed in your shell</p>
+  <p class="field-hint">Set via <code>{{ f.env }}</code> - managed in your shell</p>
   {% else %}
   <select id="{{ prefix }}-{{ f.name }}" name="{{ f.name }}" {{ 'disabled' if f.disabled else '' }}>
     {% for opt in f.options %}
@@ -41,7 +41,7 @@
          value="{{ f.value }}" placeholder="{{ f.placeholder or ('••••' if f.secret else '') }}"
          disabled autocomplete="{{ f.autocomplete }}" />
   {% if f.hint %}<p class="field-hint">{{ f.hint }}</p>{% endif %}
-  <p class="field-hint">Set via <code>{{ f.env }}</code> — managed in your shell</p>
+  <p class="field-hint">Set via <code>{{ f.env }}</code> - managed in your shell</p>
 </div>
 {% else %}
 <div class="field">
@@ -50,7 +50,7 @@
   </label>
   <input type="{{ f.input_type }}" id="{{ prefix }}-{{ f.name }}" name="{{ f.name }}"
          value="{{ f.value }}"
-         {% if f.placeholder %}placeholder="{{ f.placeholder }}"{% elif f.secret and f.mask %}placeholder="{{ f.mask }} — leave blank to keep"{% endif %}
+         {% if f.placeholder %}placeholder="{{ f.placeholder }}"{% elif f.secret and f.mask %}placeholder="{{ f.mask }} - leave blank to keep"{% endif %}
          {% if f.min is not none %}min="{{ f.min }}"{% endif %}
          {% if f.max is not none %}max="{{ f.max }}"{% endif %}
          {{ 'disabled' if f.disabled else '' }}

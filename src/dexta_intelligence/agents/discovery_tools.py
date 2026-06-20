@@ -4,7 +4,7 @@ Every tool is a pure read over the store. Results carry the exact numbers any
 prose will be audited against, plus the raw day-level groups so the rigor
 layer and skeptic can re-test claims independently.
 
-Context policy: data enters the model's context only when a tool is called —
+Context policy: data enters the model's context only when a tool is called -
 nothing here is injected eagerly. Every list-returning tool is bounded (see
 ``_MAX_LISTED_EVENTS`` / ``_MAX_RECALL_ITEMS``) with a truncation note, so a
 single call can never blow the context budget. Descriptions are kept terse on
@@ -77,7 +77,7 @@ _SPIKE_THRESHOLD = 200.0
 _MAX_LISTED_EVENTS = 40
 #: Max findings / connections / open-questions recall returns (context budget).
 _MAX_RECALL_ITEMS = 8
-#: Analysis-only oref profile defaults — mirrors the reconciliation agent.
+#: Analysis-only oref profile defaults - mirrors the reconciliation agent.
 #: Never used for dosing; tier-B labeling on every result that uses them.
 _ANALYSIS_ISF = 50.0
 _ANALYSIS_CARB_RATIO = 10.0
@@ -159,7 +159,7 @@ TIME-TRAVERSAL TOOLS (re-scope the window the analysis tools above operate on):
     series over the ACTIVE window as [{date, value}] so you can spot trends and
     change-points yourself before comparing groups.
 
-TREATMENT TOOLS (insulin/carb context — exposed only when the data exists;
+TREATMENT TOOLS (insulin/carb context - exposed only when the data exists;
 REQUIRED before claiming a likely cause for a spike/high/meal/correction):
 
 11. get_carb_entries()
@@ -173,15 +173,15 @@ REQUIRED before claiming a likely cause for a spike/high/meal/correction):
 
 13. get_basal_timeline()
     Basal / temp-basal / suspend events inside the ACTIVE window plus
-    basal_stable (no temp-basal/suspend interruptions) — rules basal in or out.
+    basal_stable (no temp-basal/suspend interruptions) - rules basal in or out.
 
 14. get_iob(timestamp) / 15. get_cob(timestamp)
     Insulin-on-board / carbs-on-board at an ISO datetime (computed, oref0
-    curves, tier B — analysis context only, never dosing).
+    curves, tier B - analysis context only, never dosing).
 
 16. get_insulin_profile()
     Pump-reported basal/ISF/carb-ratio/target segments for the active profile
-    (and all stored profiles). Synced from Tandem on pull; tier B — analysis
+    (and all stored profiles). Synced from Tandem on pull; tier B - analysis
     context only, never dosing.
 
 17. find_spikes(threshold=200, top_n=10)
@@ -193,7 +193,7 @@ REQUIRED before claiming a likely cause for a spike/high/meal/correction):
     when logged) with per-event peak, spiked flag, and bolus_delay_min →
     n_similar, n_spiking, mean bolus delays spiking vs not.
 
-CALENDAR TOOLS (always available — never compute dates in your head):
+CALENDAR TOOLS (always available - never compute dates in your head):
 
 19. get_current_time(timezone)   what "now"/"today" is, with weekday
 20. get_weekday(date)            weekday for any ISO date
@@ -213,12 +213,12 @@ consistent contributor. NEVER claim a likely cause from glucose shape alone
 while treatment tools are available; if they are absent, say explicitly:
 "Insulin/carb data unavailable. This is glucose-shape inference only."
 Ground a confirmed pattern with search_evidence AFTER the data work, never
-instead of it. Observation and discussion only — never dosing advice."""
+instead of it. Observation and discussion only - never dosing advice."""
 
 
 @dataclass(frozen=True, slots=True)
 class ToolResult:
-    """One tool invocation's outcome — the evidence pool for any prose about it."""
+    """One tool invocation's outcome - the evidence pool for any prose about it."""
 
     ok: bool
     tool: str
@@ -254,7 +254,7 @@ class DiscoveryToolkit:
         start = datetime.combine(ctx.window[0], time.min, tzinfo=self._tz).astimezone(UTC)
         end = datetime.combine(ctx.window[1], time.max, tzinfo=self._tz).astimezone(UTC)
         self._target = (target_low, target_high)
-        #: Full ctx.window bounds — the active sub-window can never exceed these.
+        #: Full ctx.window bounds - the active sub-window can never exceed these.
         self._full_start = start
         self._full_end = end
         #: Active sub-window (defaults to the full window: today's behavior).
@@ -331,7 +331,7 @@ class DiscoveryToolkit:
         return self._tz
 
     def capabilities(self) -> CapabilitySet:
-        """Which streams exist in this window — drives tool exposure."""
+        """Which streams exist in this window - drives tool exposure."""
         return CapabilitySet(
             has_insulin=self._has_insulin,
             has_meals=bool(self._meals),
@@ -349,7 +349,7 @@ class DiscoveryToolkit:
         the clamped (start, end) actually applied."""
         lo = max(start, self._full_start)
         hi = min(end, self._full_end)
-        if lo > hi:  # degenerate request — fall back to the full window
+        if lo > hi:  # degenerate request - fall back to the full window
             lo, hi = self._full_start, self._full_end
         self._active_start = lo
         self._active_end = hi
@@ -390,7 +390,7 @@ class DiscoveryToolkit:
             return None
         local = self._last_insulin_ts.astimezone(self._tz).strftime("%b %d %H:%M")
         return (
-            f"pump/insulin data in dexta ends {local} — before this window. "
+            f"pump/insulin data in dexta ends {local} - before this window. "
             "CGM may be newer than Tandem uploads; open t:connect/Tandem Source on your "
             "phone to upload recent pump history, then Sync now."
         )
@@ -486,7 +486,7 @@ class DiscoveryToolkit:
             return _error(
                 "tod_compare",
                 args,
-                "need at least 2 days in the active window — widen with set_window first",
+                "need at least 2 days in the active window - widen with set_window first",
             )
         group_a = self._daily_window_means(hours_a)
         group_b = self._daily_window_means(hours_b)
@@ -580,7 +580,7 @@ class DiscoveryToolkit:
 
     def zoom_event(self, timestamp_iso: str, pad_hours: int = 12) -> dict[str, Any]:
         """Set the active window tight around ``timestamp`` (+/- pad_hours) and
-        return the minute-level glucose trace there — the spike-drill primitive.
+        return the minute-level glucose trace there - the spike-drill primitive.
         Never raises on bad args."""
         try:
             center = datetime.fromisoformat(timestamp_iso)
@@ -657,7 +657,7 @@ class DiscoveryToolkit:
     def glucose_stats(
         self, *, day: str = "", hours: tuple[int, int] | None = None
     ) -> dict[str, Any]:
-        """Descriptive stats over a window — the answer to "what was my mean / SD /
+        """Descriptive stats over a window - the answer to "what was my mean / SD /
         variance / CV / TIR for <period>". Defaults to the ACTIVE window; ``day``
         (ISO date) scopes to one local calendar day; ``hours`` = [start, end) filters
         to a local time-of-day band. All bucketing is patient-local; never raises."""
@@ -750,7 +750,7 @@ class DiscoveryToolkit:
                 "x": x,
                 "y": y,
                 "n": n,
-                "note": "fewer than 4 overlapping days — not enough to correlate",
+                "note": "fewer than 4 overlapping days - not enough to correlate",
             }
         xs = [sx[d] for d in days]
         ys = [sy[d] for d in days]
@@ -790,7 +790,7 @@ class DiscoveryToolkit:
             return _error(
                 "basal_overnight",
                 args,
-                "need at least 4 nights in the active window — widen with set_window "
+                "need at least 4 nights in the active window - widen with set_window "
                 "(e.g. 14+ days)",
             )
         drift: list[tuple[date, float]] = []
@@ -871,7 +871,7 @@ class DiscoveryToolkit:
             result.summary["n_boluses"] = len(rows)
         return result
 
-    # ── treatment inspection — read the events, not just aggregates ──
+    # ── treatment inspection - read the events, not just aggregates ──
 
     def get_carb_entries(self) -> dict[str, Any]:
         """Carb entries inside the ACTIVE window, listed individually so the
@@ -891,7 +891,7 @@ class DiscoveryToolkit:
                 out["note"] = gap
             else:
                 out["note"] = (
-                    "no carb entries in the active window — widen with set_window "
+                    "no carb entries in the active window - widen with set_window "
                     "or treat this as a possible missing-carb-entry pattern"
                 )
             return out
@@ -916,7 +916,7 @@ class DiscoveryToolkit:
 
     def get_boluses(self) -> dict[str, Any]:
         """Boluses inside the ACTIVE window with their timing vs the nearest
-        carb entry — ``minutes_after_carb_entry`` is the late-bolus signal."""
+        carb entry - ``minutes_after_carb_entry`` is the late-bolus signal."""
         boluses = [
             i
             for i in self._insulin
@@ -932,7 +932,7 @@ class DiscoveryToolkit:
                 out["note"] = gap
             else:
                 out["note"] = (
-                    "no boluses in the active window — widen with set_window; "
+                    "no boluses in the active window - widen with set_window; "
                     "if a meal is present this may be a missed-bolus pattern"
                 )
             return out
@@ -990,7 +990,7 @@ class DiscoveryToolkit:
         if not events:
             gap = self._treatment_gap_note()
             out["note"] = gap or (
-                "no basal records in the active window — basal context unavailable here"
+                "no basal records in the active window - basal context unavailable here"
             )
         if len(events) > _MAX_LISTED_EVENTS:
             out["note"] = f"showing first {_MAX_LISTED_EVENTS} of {len(events)}"
@@ -999,12 +999,12 @@ class DiscoveryToolkit:
     def get_insulin_profile(self) -> dict[str, Any]:
         """Pump-reported basal/ISF/carb-ratio/target segments (Tandem sync).
 
-        Tier B — analysis context only, never dosing."""
+        Tier B - analysis context only, never dosing."""
         if self._insulin_profile is None:
             return {
                 "error": "no insulin profile synced",
                 "note": (
-                    "Connect Tandem in Settings and Sync now — profile is captured "
+                    "Connect Tandem in Settings and Sync now - profile is captured "
                     "from pump settings on each sync"
                 ),
             }
@@ -1021,7 +1021,7 @@ class DiscoveryToolkit:
         return out
 
     def get_active_profile(self, timestamp_iso: str) -> dict[str, Any]:
-        """The therapy profile VERSION in effect at ``timestamp`` — so an event
+        """The therapy profile VERSION in effect at ``timestamp`` - so an event
         in March reads the March profile, not today's. Falls back to the current
         snapshot when no version history exists yet. Tier B, never dosing."""
         at = _parse_ts(timestamp_iso)
@@ -1036,7 +1036,7 @@ class DiscoveryToolkit:
                     "versioned": False,
                     "tier": "B",
                     "note": (
-                        "no profile version recorded at this time — showing the "
+                        "no profile version recorded at this time - showing the "
                         "current snapshot; versions accrue from future syncs"
                     ),
                 }
@@ -1058,7 +1058,7 @@ class DiscoveryToolkit:
 
     def get_iob(self, timestamp_iso: str) -> dict[str, Any]:
         """Insulin-on-board at ``timestamp`` from logged boluses (oref0
-        exponential curve, rapid-acting defaults). Tier B — computed for
+        exponential curve, rapid-acting defaults). Tier B - computed for
         analysis context, never dosing. Never raises on bad args."""
         at = _parse_ts(timestamp_iso)
         if at is None:
@@ -1087,7 +1087,7 @@ class DiscoveryToolkit:
 
     def get_cob(self, timestamp_iso: str) -> dict[str, Any]:
         """Carbs-on-board at ``timestamp`` from announced carb entries (oref0
-        deviation-based decay, analysis-profile defaults). Tier B — computed
+        deviation-based decay, analysis-profile defaults). Tier B - computed
         for analysis context, never dosing. Never raises on bad args."""
         at = _parse_ts(timestamp_iso)
         if at is None:
@@ -1104,7 +1104,7 @@ class DiscoveryToolkit:
                 "cob_g": 0.0,
                 "n_carb_entries": 0,
                 "tier": "B",
-                "note": "no announced carbs in the prior 6h — unannounced carbs "
+                "note": "no announced carbs in the prior 6h - unannounced carbs "
                 "would not appear here",
             }
         glucose = list(
@@ -1164,7 +1164,7 @@ class DiscoveryToolkit:
         return self._manual[lo:hi]
 
     _MANUAL_EMPTY_NOTE = (
-        "no user-reported context in this window — manual logs are added by the "
+        "no user-reported context in this window - manual logs are added by the "
         "user, never inferred"
     )
 
@@ -1228,7 +1228,7 @@ class DiscoveryToolkit:
     def find_spikes(
         self, threshold: float = _SPIKE_THRESHOLD, top_n: int = 10
     ) -> dict[str, Any]:
-        """Excursion peaks above ``threshold`` inside the ACTIVE window —
+        """Excursion peaks above ``threshold`` inside the ACTIVE window -
         contiguous above-threshold runs, one peak each, largest first."""
         threshold = max(140.0, min(float(threshold), 400.0))
         top_n = max(1, min(int(top_n), 25))
@@ -1277,8 +1277,8 @@ class DiscoveryToolkit:
         self, timestamp_iso: str, threshold: float = _SPIKE_THRESHOLD
     ) -> dict[str, Any]:
         """Recurrence check over the WHOLE record (ignores the active window,
-        like list_segments): events at the same time of day as ``timestamp`` —
-        carb entries when meals are logged, otherwise daily clock anchors —
+        like list_segments): events at the same time of day as ``timestamp`` -
+        carb entries when meals are logged, otherwise daily clock anchors -
         each with its post-event peak and bolus timing. The '14 of 18 similar
         dinners' instrument. Never raises on bad args."""
         anchor = _parse_ts(timestamp_iso)
@@ -1329,7 +1329,7 @@ class DiscoveryToolkit:
             return {
                 "n_similar": 0,
                 "events": [],
-                "note": "no comparable events found — not enough history at this "
+                "note": "no comparable events found - not enough history at this "
                 "time of day",
             }
         n_spiking = sum(1 for e in events if e["spiked"])
@@ -1517,7 +1517,7 @@ def _parse_ts(timestamp_iso: str) -> datetime | None:
 
 
 def _week_key(d: date) -> str:
-    """ISO-year + ISO-week label, e.g. ``2026-W11`` — sorts chronologically."""
+    """ISO-year + ISO-week label, e.g. ``2026-W11`` - sorts chronologically."""
     iso = d.isocalendar()
     return f"{iso.year:04d}-W{iso.week:02d}"
 
@@ -1677,7 +1677,7 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             description=(
                 "What dexta already believes: prior findings (with status, confidence "
                 "and the skeptic's confound notes), open questions, and cross-finding "
-                "connections. Call FIRST for known patterns — it tells you what was "
+                "connections. Call FIRST for known patterns - it tells you what was "
                 "already doubted so you pick better tools."
             ),
             parameters={
@@ -1762,7 +1762,7 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             description=(
                 "Descriptive stats over one window: n, mean, SD, variance, CV, median, "
                 "p10/25/75/90, min, max, TIR/TBR/TAR %, GMI. Use this for any "
-                "'what was my mean/variance/SD/TIR/GMI for <period>' question — never "
+                "'what was my mean/variance/SD/TIR/GMI for <period>' question - never "
                 "estimate these from a raw trace. Defaults to the ACTIVE window; pass "
                 "day (ISO date) for one local day and/or hours [start,end) for a "
                 "time-of-day band (evening=[17,24], overnight=[0,6], morning=[6,11])."
@@ -1911,7 +1911,7 @@ def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
     specs.extend(_treatment_specs(toolkit))
     caps = toolkit.capabilities()
     specs = [spec for spec in specs if caps.allows(_TOOL_NEEDS.get(spec.name))]
-    # Manual context is independent of glucose coverage — always available.
+    # Manual context is independent of glucose coverage - always available.
     specs.extend(_manual_specs(toolkit))
     specs.extend(time_tool_specs())
     return specs
@@ -1999,7 +1999,7 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             name="get_carb_entries",
             description=(
                 "Carb entries in the ACTIVE window ({ts, carbs_g, ...}, n_entries, "
-                "total_carbs_g). Call when explaining a spike/meal — an empty result "
+                "total_carbs_g). Call when explaining a spike/meal - an empty result "
                 "around a spike is itself a signal (possible missing carb entry)."
             ),
             parameters={"type": "object", "properties": {}},
@@ -2029,7 +2029,7 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             name="get_iob",
             description=(
                 "Insulin-on-board at an ISO datetime, computed from logged boluses "
-                "(oref0 curve, tier B — analysis context only, never dosing)."
+                "(oref0 curve, tier B - analysis context only, never dosing)."
             ),
             parameters={
                 "type": "object",
@@ -2044,7 +2044,7 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             name="get_insulin_profile",
             description=(
                 "Pump-reported basal/ISF/carb-ratio/target segments for the active "
-                "profile (and all stored profiles). Synced from Tandem; tier B — "
+                "profile (and all stored profiles). Synced from Tandem; tier B - "
                 "analysis context only, never dosing."
             ),
             parameters={"type": "object", "properties": {}},
@@ -2053,10 +2053,10 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
         ToolSpec(
             name="get_active_profile",
             description=(
-                "The therapy profile VERSION in effect at an ISO datetime — use when "
+                "The therapy profile VERSION in effect at an ISO datetime - use when "
                 "explaining a past event so it reads that period's settings, not "
                 "today's. Falls back to the current snapshot if no history exists. "
-                "Tier B — analysis context only, never dosing."
+                "Tier B - analysis context only, never dosing."
             ),
             parameters={
                 "type": "object",
@@ -2071,7 +2071,7 @@ def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             name="get_cob",
             description=(
                 "Carbs-on-board at an ISO datetime from announced carb entries "
-                "(oref0 decay, tier B — analysis context only). Unannounced carbs "
+                "(oref0 decay, tier B - analysis context only). Unannounced carbs "
                 "do not appear here."
             ),
             parameters={
@@ -2143,7 +2143,7 @@ def _manual_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
             name="get_manual_events",
             description=(
                 "User-reported context in the ACTIVE window (meals, stress, illness, "
-                "site changes, notes — {ts, event_type, title, description, tags}). "
+                "site changes, notes - {ts, event_type, title, description, tags}). "
                 "Provenance is user-reported, never device data. An empty result means "
                 "nothing was logged, not that nothing happened."
             ),
@@ -2189,9 +2189,9 @@ def _manual_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
 def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
     """The structured shared-context channel: what other agents already believe.
 
-    Returns each relevant finding's headline AND the reasoning left behind —
+    Returns each relevant finding's headline AND the reasoning left behind -
     ``status``, ``confidence`` and the skeptic's ``skeptic_notes`` (why it was
-    doubted / what confound was flagged) when present — plus the open
+    doubted / what confound was flagged) when present - plus the open
     hypotheses (what is suspected) and synthesis ``connections`` (what is
     contested across agents). The caller reads these to pick better tools.
 

@@ -119,7 +119,7 @@
     return out;
   }
 
-  /** Safe subset renderer — mirrors server ``markdown_to_html`` enough for chat. */
+  /** Safe subset renderer - mirrors server ``markdown_to_html`` enough for chat. */
   function renderMarkdown(md) {
     const lines = String(md || "").replace(/\r\n/g, "\n").split("\n");
     const out = [];
@@ -321,7 +321,7 @@
   // Restore this tab's conversation when returning to the chat page. The server
   // keeps per-session turns in memory; we re-render the completed Q&A pairs so
   // navigating away and back does not lose the thread. (An in-flight ask still
-  // ends when you leave the page — only finished turns are restored.)
+  // ends when you leave the page - only finished turns are restored.)
   function clearEmptyState() {
     const empty = root.querySelector(".chat-empty");
     if (empty) empty.remove();

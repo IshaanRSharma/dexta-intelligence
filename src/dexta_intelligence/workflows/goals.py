@@ -1,4 +1,4 @@
-"""Goal workflows — user objectives pursued by self-pacing background agents.
+"""Goal workflows - user objectives pursued by self-pacing background agents.
 
 A user states a want ("reduce my overnight lows"); the model composes it into a
 :class:`Goal` with a *deterministic* success metric and a plan of read-only
@@ -173,7 +173,7 @@ def tick_goal(
 ) -> GoalTick:
     """Advance a goal: measure the metric, investigate, record a checkpoint.
 
-    With a model, the investigation is a reasoning loop scoped to the goal —
+    With a model, the investigation is a reasoning loop scoped to the goal -
     the model picks which tools to run this cycle. Without one, the goal's
     stored plan is replayed deterministically. Either way the metric value is
     computed deterministically and the note is faithfulness-audited.
@@ -273,8 +273,8 @@ def _default_tools(metric: GoalMetric) -> list[dict[str, Any]]:
 def _investigate(goal: Goal, ctx: AgentContext, model: BaseChatModel | None) -> str | None:
     """This cycle's salient observation toward the goal.
 
-    With a model, the investigation is delegated to the coordinator — the one
-    agentic-investigation engine — so a goal inherits its planning, rigor gate,
+    With a model, the investigation is delegated to the coordinator - the one
+    agentic-investigation engine - so a goal inherits its planning, rigor gate,
     skeptic re-check, and persisted investigation memory. Without a model, the
     stored deterministic tool plan is replayed."""
     if model is None:

@@ -165,7 +165,7 @@ class TestTierA:
 
 class TestTierB:
     def test_tier_b_finding_labeled_weaker_evidence(self, store: SQLiteStore) -> None:
-        """No logged predictions — expectations from oref; planted rise is caught."""
+        """No logged predictions - expectations from oref; planted rise is caught."""
         base = T0
         values = [120, 118, 116, 115, 114, 113, 160, 185, 200, 195, 190, 185, 180]
         store.insert_glucose(_glucose_series(base, values))

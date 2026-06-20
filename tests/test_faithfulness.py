@@ -1,4 +1,4 @@
-"""Direct unit tests for the faithfulness guard — the central safety module.
+"""Direct unit tests for the faithfulness guard - the central safety module.
 
 `guard.faithfulness.audit` is the honesty mechanism the whole thesis rests on;
 it deserves a fast, deterministic suite over its edge cases (number extraction,
@@ -52,7 +52,7 @@ def test_rounding_within_tolerance_passes() -> None:
 
 
 def test_sign_formatting_does_not_false_reject() -> None:
-    # prose "-0.4" vs pool 0.4 — magnitudes compared, so the minus is fine
+    # prose "-0.4" vs pool 0.4 - magnitudes compared, so the minus is fine
     assert audit("the delta was -0.4", {"delta": 0.4}).ok
 
 

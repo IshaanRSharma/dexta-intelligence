@@ -1,4 +1,4 @@
-"""The glucose_stats tool — descriptive stats over an arbitrary window.
+"""The glucose_stats tool - descriptive stats over an arbitrary window.
 
 Closes the gap where the agent refused to compute variance/SD for a specific
 window because no tool produced it.

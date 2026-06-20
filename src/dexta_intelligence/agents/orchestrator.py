@@ -1,10 +1,10 @@
-"""Top-level orchestrator — the LLM decides the approach.
+"""Top-level orchestrator - the LLM decides the approach.
 
 ``run_reasoning_loop`` already lets the model pick granular tools. The
 orchestrator widens that authority: its belt includes whole investigation
 *workflows* as tools (e.g. ``investigate_spike``), so the model decides whether
 to run a full audited investigation in one call, do ad-hoc tool work, or chain
-both — and pivot on what it finds. Workflow SELECTION is the model's job, never
+both - and pivot on what it finds. Workflow SELECTION is the model's job, never
 a keyword map.
 
 Determinism lives only below the safety line: the instruments the model calls
@@ -40,19 +40,19 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["INVESTIGATION_DOCTRINE", "OrchestratorAgent", "workflow_tool_specs"]
 
-#: The shared framing of what an investigation IS — composed, not pre-baked.
+#: The shared framing of what an investigation IS - composed, not pre-baked.
 #: Both the chat orchestrator and the goal-seeker teach this so either can
 #: compose investigations toward a conclusion.
 INVESTIGATION_DOCTRINE = """An INVESTIGATION is a line of inquiry you COMPOSE to reach a \
-defensible conclusion — never a single tool call. Its shape: orient (list_segments) → locate \
+defensible conclusion - never a single tool call. Its shape: orient (list_segments) → locate \
 and narrow (set_window, find_spikes, zoom_event) → inspect treatment context (get_carb_entries, \
 get_boluses, get_iob, get_cob, get_basal_timeline) → compare against history \
 (find_similar_events; tod_compare / groupby_compare / basal_overnight only on windows with \
-enough days — never on a single-day set_window) → ground a confirmed pattern in published \
+enough days - never on a single-day set_window) → ground a confirmed pattern in published \
 literature (search_evidence) when the claim is non-trivial, citing only returned PMIDs → conclude \
 with the most consistent contributor, the evidence behind it, and what you could not check.
 
-There is NO fixed menu of investigations — you BUILD the one the question needs from these \
+There is NO fixed menu of investigations - you BUILD the one the question needs from these \
 instruments and pivot as the evidence directs. For a few common cases a certified shortcut \
 exists (investigate_spike runs the spike line of inquiry in one audited call and returns a \
 working_hypothesis to weigh, not to repeat); use a shortcut when it fits, otherwise compose \
@@ -60,7 +60,7 @@ the investigation yourself."""
 
 _HARD_RULES = """Hard rules:
 - Observation and discussion only. NEVER give dosing, insulin, carb-ratio, or medication \
-advice — that is for their care team; offer to show the pattern instead.
+advice - that is for their care team; offer to show the pattern instead.
 - Every number you state must come from a tool result you actually called.
 - If treatment data exists, inspect it (or run a shortcut that does) before naming a likely \
 cause; if it does not, say "Insulin/carb data unavailable. This is glucose-shape inference \
@@ -69,7 +69,7 @@ only."
 
 _SYSTEM = (
     "You are dexta, the reasoning core of a continuous health-intelligence system for one "
-    "Type-1 diabetes patient. You DECIDE how to investigate — you are not following a fixed "
+    "Type-1 diabetes patient. You DECIDE how to investigate - you are not following a fixed "
     "script.\n\n" + INVESTIGATION_DOCTRINE + "\n\n" + _HARD_RULES
 )
 
@@ -141,7 +141,7 @@ def workflow_tool_specs(
 class OrchestratorAgent:
     """The top-level decider for ``dexta ask``: full belt + workflows-as-tools.
 
-    No pre-filtering into a fixed family — the model sees every instrument and
+    No pre-filtering into a fixed family - the model sees every instrument and
     every workflow and chooses. The same guard + treatment gate run via
     :func:`agents.chat._finish`, so the rails are identical to every other surface.
     """

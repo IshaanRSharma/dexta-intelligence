@@ -15,7 +15,7 @@ PyPI release yet; fixes land on `main`.
 Report privately through GitHub's
 [private vulnerability reporting](https://github.com/ishaansharma/dexta-intelligence/security/advisories/new)
 ("Security" tab → "Report a vulnerability"). If that is unavailable, open a minimal public
-issue that says only "security report — please enable private contact" without details, and a
+issue that says only "security report - please enable private contact" without details, and a
 maintainer will follow up.
 
 Please include, where you can:
@@ -39,18 +39,18 @@ The highest-value areas:
 - **Data egress.** Dexta is self-hosted and your data stays on infrastructure you control.
   Report any unexpected network call, telemetry, or phone-home. Note that *you* opt into data
   egress when you configure a hosted LLM provider (prompts include computed evidence) or an
-  unofficial connector (credentials go to the vendor endpoint) — see `MEDICAL_DISCLAIMER.md`
+  unofficial connector (credentials go to the vendor endpoint) - see `MEDICAL_DISCLAIMER.md`
   and the connector tiers in `docs/CONNECTORS.md`.
 - **The safety guards.** `guard/faithfulness.audit` (prose may not cite numbers absent from
   evidence) and `guard/treatment_gate` (no dosing/treatment output) are safety-critical. A way
   to make the system emit a fabricated figure or dosing/treatment advice is a security-class
-  bug — report it here, not as a normal issue.
+  bug - report it here, not as a normal issue.
 - **Connectors.** Unofficial / reverse-engineered connectors talk to vendor APIs. Report
   credential-handling or injection issues.
 
 ## Out of scope
 
 - Vulnerabilities in third-party providers (Nightscout, Dexcom, LibreLinkUp, hosted LLM
-  vendors) themselves — report those upstream.
+  vendors) themselves - report those upstream.
 - The inherent risk of reverse-engineered connectors breaking when a vendor changes their site.
   That is a documented maintenance reality, not a vulnerability.

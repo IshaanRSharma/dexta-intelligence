@@ -17,7 +17,7 @@ A connector pulls provider records and returns them as immutable `RawEvent`
 rows plus their normalized timeline projections. Idempotency is structural
 (`(source, source_id)` dedup), so re-running a sync is always safe.
 
-Implement the `Connector` protocol — `source`, `check`, `pull`:
+Implement the `Connector` protocol - `source`, `check`, `pull`:
 
 ```python
 from dexta_intelligence.connectors.base import Connector, HealthReport, NormalizedBatch
@@ -52,7 +52,7 @@ source has a live "what is my glucose right now?" API, implement
 ## Add an analysis agent (a producer)
 
 An agent declares its data requirement up front (the registry refuses to run it
-under-data — cold start is explicit), does read-only work over an
+under-data - cold start is explicit), does read-only work over an
 `AgentContext`, and returns `Finding` records. Rigor lives inside the agent; the
 skeptic re-checks every finding downstream.
 
@@ -87,7 +87,7 @@ investigate`), add a `_register_myagent` and an entry in `PRODUCERS`
 
 A tool is a `ToolSpec`: a name, a description the model reads, a JSON-Schema for
 its arguments, and a function returning `(public_result, evidence_numbers)`. The
-second element is the guard-auditable numbers — anything the prose later cites
+second element is the guard-auditable numbers - anything the prose later cites
 must appear here.
 
 ```python

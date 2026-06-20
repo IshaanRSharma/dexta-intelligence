@@ -498,7 +498,7 @@ def format_insulin_profile(
 ) -> dict[str, Any]:
     """Convert Tandem Source pump settings into a readable insulin profile snapshot.
 
-    Pure function — no I/O. Values mirror tconnectsync's Nightscout profile
+    Pure function - no I/O. Values mirror tconnectsync's Nightscout profile
     mapping (basal/carb-ratio in pump milliunits, ISF/target in mg/dL).
     """
     profiles_block = settings.get("profiles") or {}
@@ -617,7 +617,7 @@ class TandemConnector:
                     ok=False,
                     source=self.source,
                     detail=(
-                        f"t:connect did not respond within {int(timeout_s)}s — "
+                        f"t:connect did not respond within {int(timeout_s)}s - "
                         "check network/VPN or try again later."
                     ),
                 )
@@ -654,7 +654,7 @@ class TandemConnector:
 
         Uses Tandem Source ``pump_events`` (tconnectsync v2+). Events before
         ``window_start`` are filtered out after normalization. Raises on provider
-        hiccups — the sync workflow owns retries.
+        hiccups - the sync workflow owns retries.
         """
         window_start = since.astimezone(UTC) - _DEDUPE_MARGIN
         now = datetime.now(tz=UTC)
@@ -692,31 +692,6 @@ class TandemConnector:
             return by_serial[serial]
         return self._pick_latest_pump(pumps)
 
-    # -- legacy ControlIQ conversion helpers (tests + Nightscout-shaped stubs) ─
-
-    @staticmethod
-    def _boluses(timeline: dict[str, Any]) -> Sequence[BolusLike]:
-        events = timeline.get("bolus")
-        return events if isinstance(events, list) else []
-
-    @staticmethod
-    def _basals(timeline: dict[str, Any]) -> Sequence[dict[str, Any]]:
-        events = timeline.get("basal")
-        if isinstance(events, dict):  # ControlIQ nests basal under {"events": [...]}
-            events = events.get("events")
-        if not isinstance(events, list):
-            return []
-        return [e for e in events if isinstance(e, dict)]
-
-    def _latest_ts(self, timeline: dict[str, Any]) -> datetime | None:
-        stamps: list[datetime] = []
-        for bolus in self._boluses(timeline):
-            stamps.extend(e.ts for e in bolus_to_events(bolus))
-        for basal in self._basals(timeline):
-            event = basal_to_event(basal)
-            if event is not None:
-                stamps.append(event.ts)
-        return max(stamps) if stamps else None
 
     @staticmethod
     def _parse_pump_date(value: object) -> datetime | None:

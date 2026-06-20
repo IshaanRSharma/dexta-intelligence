@@ -173,7 +173,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve_p.add_argument(
         "--host",
         default="127.0.0.1",
-        help="Bind address (default: 127.0.0.1; pass 0.0.0.0 to expose on the LAN — no auth)",
+        help="Bind address (default: 127.0.0.1; pass 0.0.0.0 to expose on the LAN - no auth)",
     )
     serve_p.add_argument(
         "--port",

@@ -1,6 +1,6 @@
 """explain_spike workflow contract over golden datasets (metrics M3/M5/M10).
 
-The canonical WAVE5 §1 question — "Why did I spike on March 14?" — must
+The canonical WAVE5 §1 question - "Why did I spike on March 14?" - must
 produce the canonical trace and evidence numbers from the late_bolus plant.
 """
 
@@ -157,7 +157,7 @@ def test_fabricating_model_falls_back_to_deterministic_headline() -> None:
 
 def test_faithful_model_phrasing_is_kept() -> None:
     fake = _FakeModel(
-        "This looks like late meal insulin rather than basal drift — a "
+        "This looks like late meal insulin rather than basal drift - a "
         "discussion point for your care team."
     )
     out = explain_spike(_ctx("late_bolus"), "2026-03-14", model=fake)

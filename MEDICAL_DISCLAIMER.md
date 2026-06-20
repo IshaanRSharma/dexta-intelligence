@@ -11,18 +11,18 @@ better evidence to talk about. It is a tool for understanding, not a tool for tr
 dexta-intelligence is **not a medical device** and has not been reviewed, cleared, or approved
 by the FDA or any other regulatory body. It is not certified, validated, or intended for
 clinical diagnosis, monitoring, or treatment. The evals shipped with this project (E1, E4, E5)
-are calibration and robustness checks on *synthetic* data — they are **not clinical
+are calibration and robustness checks on *synthetic* data - they are **not clinical
 validation**.
 
-## Not medical advice — and never dosing advice
+## Not medical advice - and never dosing advice
 
-Nothing dexta-intelligence produces — findings, hypotheses, briefs, chat answers, goal
-progress, wiki pages — is medical advice. In particular:
+Nothing dexta-intelligence produces - findings, hypotheses, briefs, chat answers, goal
+progress, wiki pages - is medical advice. In particular:
 
 - **Dexta never gives insulin dosing or treatment recommendations**, and is designed so that it
   cannot. The no-dosing rule and the faithfulness guard are not optional and not routable-out.
-- **Do not make any treatment decision** — dosing, basal/bolus changes, correction, carb
-  ratios, device settings, or anything else — based on dexta-intelligence output.
+- **Do not make any treatment decision** - dosing, basal/bolus changes, correction, carb
+  ratios, device settings, or anything else - based on dexta-intelligence output.
 - All findings are **hypotheses, not prescriptions.** Statistical patterns over your history
   can be wrong, confounded, or not apply to your future.
 
@@ -32,7 +32,7 @@ Always consult your physician, diabetes care team, or other qualified healthcare
 before acting on anything you see here, and before changing any aspect of your diabetes
 management. If you think you may be having a medical emergency (severe hypo- or hyperglycemia,
 DKA, or any urgent symptom), **contact your local emergency services or your care team
-immediately** — do not consult this software.
+immediately** - do not consult this software.
 
 ## Data, connectors, and accuracy
 

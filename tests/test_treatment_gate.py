@@ -1,7 +1,7 @@
 """The fade gate (M1/M2/M11) and the seeker's hard limits (M12).
 
 Gate mechanics run through the real ChatAgent with a scripted tool-calling
-model over the golden late_bolus dataset — the same path production takes.
+model over the golden late_bolus dataset - the same path production takes.
 """
 
 from __future__ import annotations
@@ -186,12 +186,12 @@ def test_retry_with_hint_recovers_and_keeps_the_answer() -> None:
 def test_exactly_one_retry_is_allowed() -> None:
     model = _FakeToolModel(["Cause claim.", "Another cause claim.", "A third."])
     ChatAgent(model=model).ask(_ctx("late_bolus"), _CAUSE_Q)
-    # initial loop + one retry — the third scripted turn is never consumed.
+    # initial loop + one retry - the third scripted turn is never consumed.
     assert model.invocations == 2
 
 
 def test_no_insulin_answer_carries_the_disclaimer() -> None:
-    model = _FakeToolModel(["Glucose rose after dinner — the shape suggests a meal."])
+    model = _FakeToolModel(["Glucose rose after dinner - the shape suggests a meal."])
     answer = ChatAgent(model=model).ask(_ctx("no_insulin"), _CAUSE_Q)
     assert NO_TREATMENT_DISCLAIMER in answer.text
     assert model.invocations == 1  # no retry needed; disclaimer is appended

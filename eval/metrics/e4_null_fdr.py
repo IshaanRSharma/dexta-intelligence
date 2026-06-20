@@ -1,4 +1,4 @@
-"""E4 null-set false discovery rate — pattern agent on pure-null synthetic data.
+"""E4 null-set false discovery rate - pattern agent on pure-null synthetic data.
 
 Ground truth: zero planted effects → any surfaced pattern finding is a
 false discovery. Reports the empirical FDR at the project default alpha=0.10.

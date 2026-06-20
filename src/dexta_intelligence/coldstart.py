@@ -1,4 +1,4 @@
-"""Cold-start gating — every capability declares its minimum data.
+"""Cold-start gating - every capability declares its minimum data.
 
 The whole platform's promise is longitudinal intelligence, but most users
 arrive with days of data, not months. The contract here: capabilities
@@ -7,7 +7,7 @@ never silently and never by fabricating confidence from thin data.
 
 A single :class:`ColdStartReport` is computed per run from
 :class:`~dexta_intelligence.models.CoverageStats` and injected into every
-agent's context. The registry — not the agents — enforces the gates.
+agent's context. The registry - not the agents - enforces the gates.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ __all__ = ["CAPABILITY_GATES", "CapabilitySet", "ColdStartReport", "Gate"]
 
 @dataclass(frozen=True, slots=True)
 class CapabilitySet:
-    """Which data streams exist in the analysis window — the single mechanism
+    """Which data streams exist in the analysis window - the single mechanism
     deciding which tools a reasoning loop (or the MCP server) exposes.
 
     Distinct from :class:`ColdStartReport`: gates ask "is there *enough* data
@@ -54,11 +54,11 @@ class CapabilitySet:
         notes: list[str] = []
         if not self.has_insulin:
             notes.append(
-                "insulin/pump data absent — treatment tools disabled "
+                "insulin/pump data absent - treatment tools disabled "
                 "(connect Tandem or Nightscout, then Sync now)"
             )
         if not self.has_meals:
-            notes.append("carb entries absent — meal tools disabled (log carbs in Nightscout)")
+            notes.append("carb entries absent - meal tools disabled (log carbs in Nightscout)")
         if not self.has_sleep:
             notes.append("sleep data absent (connect a wearable)")
         if not self.has_activity:

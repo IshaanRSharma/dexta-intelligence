@@ -45,7 +45,7 @@ def field_to_view(
     secret_mask = mask_secret(str(raw)) if spec.secret and env_var is None and raw else ""
     placeholder = spec.placeholder
     if secret_mask:
-        placeholder = f"{secret_mask} — leave blank to keep"
+        placeholder = f"{secret_mask} - leave blank to keep"
     elif not placeholder and spec.secret:
         placeholder = "••••"
 
@@ -91,7 +91,7 @@ def panel_to_view(
     for var, label in spec.env_keys:
         is_set = secret_is_set(var)
         mask = mask_secret(os.environ[var]) if is_set else ""
-        placeholder = f"{mask} — leave blank to keep" if mask else "Paste API key"
+        placeholder = f"{mask} - leave blank to keep" if mask else "Paste API key"
         env_keys.append(
             {
                 "name": var,

@@ -1,11 +1,11 @@
-"""Tidepool JSON export connector — offline import from tidepool.org exports.
+"""Tidepool JSON export connector - offline import from tidepool.org exports.
 
 Tidepool's open data model stores CGM readings as ``cbg`` and pump boluses as
 ``bolus`` records. Users download a JSON export from the Tidepool web app
 (Upload → Export device data). This connector reads that file once per sync,
 normalizes glucose and insulin, and dedupes via ``(source, source_id)``.
 
-Live Tidepool Platform API sync is out of scope here — it requires OAuth client
+Live Tidepool Platform API sync is out of scope here - it requires OAuth client
 registration. JSON export is the zero-friction OSS path.
 """
 
@@ -145,7 +145,7 @@ def _records_from_export(doc: Any) -> list[Any]:
     return []
 
 
-def _parse_record(  # noqa: PLR0911 — one return per Tidepool record type
+def _parse_record(  # noqa: PLR0911 - one return per Tidepool record type
     record: dict[str, Any],
 ) -> tuple[str, datetime, dict[str, Any]] | None:
     dtype = record.get("type")

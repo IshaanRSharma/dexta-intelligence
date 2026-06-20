@@ -1,4 +1,4 @@
-"""Deep Analysis workflow — deterministic agents → skeptic → persist.
+"""Deep Analysis workflow - deterministic agents → skeptic → persist.
 
 Spec ordering: producer agents fan out on the blackboard, the skeptic
 reviews the collected findings, then callers persist. One crashing producer

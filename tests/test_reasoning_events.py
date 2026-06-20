@@ -1,4 +1,4 @@
-"""The reasoning-loop streaming seam — events fire as the agent works.
+"""The reasoning-loop streaming seam - events fire as the agent works.
 
 A live surface (SSE, CLI trace) subscribes via ``on_event``; this pins the
 event order (tool_call → tool_result → answer) and that a failing sink never

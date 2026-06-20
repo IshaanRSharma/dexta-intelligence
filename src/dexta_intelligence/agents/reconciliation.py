@@ -1,4 +1,4 @@
-"""Prediction Reconciliation Agent — deterministic forecast-vs-realized analysis.
+"""Prediction Reconciliation Agent - deterministic forecast-vs-realized analysis.
 
 Compares expected glucose trajectories (logged predBG curves for looping users,
 or oref0-math expectations otherwise) against realized CGM, attributes the error,
@@ -499,7 +499,7 @@ def _episodes_to_findings(
             f"{sign}{representative.signed_error_mg_dl:.0f} mg/dL error at "
             f"{representative.horizon_min} min (contributor={contributor}). "
             f"{recurrence_note} "
-            "Retrospective analysis only — not dosing advice."
+            "Retrospective analysis only - not dosing advice."
         ).strip()
 
         confidence = 0.75 if verdict.verdict == "pass" else 0.55

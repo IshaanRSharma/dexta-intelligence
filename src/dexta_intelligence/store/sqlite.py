@@ -1,4 +1,4 @@
-"""SQLiteStore — the zero-setup on-ramp backend for :class:`StoragePort`.
+"""SQLiteStore - the zero-setup on-ramp backend for :class:`StoragePort`.
 
 stdlib ``sqlite3`` only. Design decisions (the parts the protocol leaves open):
 
@@ -8,14 +8,14 @@ stdlib ``sqlite3`` only. Design decisions (the parts the protocol leaves open):
   correct.
 - **Window queries** are half-open: ``start <= ts < end``, ordered by timestamp
   ascending. Sleep events are windowed and ordered on ``ts_start``.
-- **Dedupe keys** (mirrors the raw-store idempotency philosophy — re-running a
+- **Dedupe keys** (mirrors the raw-store idempotency philosophy - re-running a
   connector or normalizer never double-inserts):
 
   ====================  =======================================
   table                 natural identity (UNIQUE index)
   ====================  =======================================
   raw_events            ``(source, source_id)`` (per the port contract)
-  glucose_events        ``ts`` — one CGM reading per instant
+  glucose_events        ``ts`` - one CGM reading per instant
   insulin_events        ``(ts, kind)``
   meal_events           ``ts``
   activity_events       ``(ts, kind)``
@@ -1323,7 +1323,7 @@ class SQLiteStore:
             "ORDER BY active_from DESC, id DESC LIMIT 1"
         ).fetchone()
         if latest is not None and latest[4] == profile.content_hash:
-            return int(latest[0])  # unchanged — same version still active
+            return int(latest[0])  # unchanged - same version still active
         with self._conn:
             if latest is not None and latest[6] is None:
                 self._conn.execute(

@@ -1,14 +1,14 @@
-"""PubMed backend — zero-auth NCBI E-utilities (esearch + esummary).
+"""PubMed backend - zero-auth NCBI E-utilities (esearch + esummary).
 
 Two calls, no key required: ``esearch`` ranks PMIDs for the query by relevance,
 then ``esummary`` resolves each PMID to a title and publication year. The
-snippet is the title — abstracts (``efetch``) are intentionally skipped to keep
+snippet is the title - abstracts (``efetch``) are intentionally skipped to keep
 the round-trip light; ground a pattern, don't write a review.
 
 NCBI etiquette: requests carry ``tool`` and ``email`` params when an email is
 configured (E-utilities asks identifiers so they can contact heavy users before
 throttling). Everything is wrapped so the backend degrades to ``[]`` on any
-HTTP, timeout, or parse failure — it must never raise into a reasoning loop.
+HTTP, timeout, or parse failure - it must never raise into a reasoning loop.
 """
 
 from __future__ import annotations

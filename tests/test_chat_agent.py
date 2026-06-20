@@ -3,7 +3,7 @@
 A fake tool-calling model emulates native function calling: each scripted
 turn is either a list of tool calls (the model decides to act) or a final
 string answer (the model decides it's done). This exercises the real
-multi-step loop — model -> tool -> model -> answer — without an API key.
+multi-step loop - model -> tool -> model -> answer - without an API key.
 """
 
 from __future__ import annotations
@@ -122,7 +122,7 @@ def test_loop_respects_max_steps() -> None:
         parameters={"type": "object", "properties": {}},
         fn=lambda _a: ({"ok": True}, {}),
     )
-    # Always asks for another tool call — never answers.
+    # Always asks for another tool call - never answers.
     model = _FakeToolModel([[{"name": "spin", "args": {}, "id": "c"}]] * 20)
     result = run_reasoning_loop(model, [tool], system="s", user="u", max_steps=3)  # type: ignore[arg-type]
     assert result.stopped_reason == "max_steps"
@@ -220,7 +220,7 @@ def test_chat_continues_after_tool_fault() -> None:
     """A failing tool call mid-conversation does not abort ChatAgent.
 
     The loop unit covers a raising tool; this asserts the same resilience end
-    to end through ChatAgent — a bad first call is recorded as not-ok, then a
+    to end through ChatAgent - a bad first call is recorded as not-ok, then a
     real probe runs and the model still produces a faithful answer.
     """
     store = _store()

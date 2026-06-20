@@ -41,17 +41,17 @@ uv run python -m eval.runner e4-null   # null-set FDR calibration (slower)
 
 ## How the codebase is organized
 
-- `connectors/` — provider I/O + normalization only. One file per source.
-- `store/` — `StoragePort` and its SQLite/Postgres implementations. Method-for-method parity.
-- `stats/` — all arithmetic: core comparisons + `rigor.assess` (permutation, FDR, power).
-- `agents/` — reasoning + tools + memory. `investigator.py` is the shared loop; domain
+- `connectors/` - provider I/O + normalization only. One file per source.
+- `store/` - `StoragePort` and its SQLite/Postgres implementations. Method-for-method parity.
+- `stats/` - all arithmetic: core comparisons + `rigor.assess` (permutation, FDR, power).
+- `agents/` - reasoning + tools + memory. `investigator.py` is the shared loop; domain
   agents are thin configuration over it.
-- `guard/` — `faithfulness.audit`: prose cannot cite a number absent from evidence.
-- `memory/` — findings (the only store), embeddings (machine index), wiki (human index),
+- `guard/` - `faithfulness.audit`: prose cannot cite a number absent from evidence.
+- `memory/` - findings (the only store), embeddings (machine index), wiki (human index),
   synthesis (LLM connective narrative). See `docs/INTELLIGENCE.md` §1.
-- `workflows/` — orchestration: `sync`, `deep_analysis`, `lenses`, `goals`.
-- `cli/` — the `dexta` command surface, split by area.
-- `eval/` — synthetic-ground-truth benchmarks (E1, E4-null, E5).
+- `workflows/` - orchestration: `sync`, `deep_analysis`, `lenses`, `goals`.
+- `cli/` - the `dexta` command surface, split by area.
+- `eval/` - synthetic-ground-truth benchmarks (E1, E4-null, E5).
 
 The thesis everywhere: **analytics compute evidence, agents produce intelligence, the guard
 produces honesty.** Arithmetic is deterministic forever; what to investigate and what to say
@@ -69,7 +69,7 @@ is the model's job.
 
 ## Comment policy
 
-Comments are minimal and load-bearing. Document *why*, not *what* — the code says what.
+Comments are minimal and load-bearing. Document *why*, not *what* - the code says what.
 A comment earns its place if it captures a non-obvious invariant, a safety rule, a clinical
 threshold, or a perf/portability constraint that the next reader would otherwise re-derive.
 Delete narration. Docstrings carry module/function contracts; inline comments carry the
@@ -83,11 +83,11 @@ at `.github/ISSUE_TEMPLATE/connector.md`.
 1. **Read the contract** in `connectors/base.py` and the template in `connectors/oura.py`.
 2. **Implement `Connector.pull(since)`** returning a `NormalizedBatch`: immutable `RawEvent`
    rows plus normalized typed events (`GlucoseEvent`, `InsulinEvent`, …). Provider I/O and
-   normalization only — the sync workflow owns persistence and watermarks.
+   normalization only - the sync workflow owns persistence and watermarks.
 3. **Idempotency is structural.** Set `(source, source_id)` on every raw event; the store
    skips duplicates, so re-running over an overlapping window is safe. Don't add your own
    dedup.
-4. **Record fixtures** under `tests/fixtures/` — real API response shapes, scrubbed of
+4. **Record fixtures** under `tests/fixtures/` - real API response shapes, scrubbed of
    personal data. Tests replay fixtures; they never hit the network.
 5. **Implement the health check** so `dexta doctor` can report auth/connectivity via
    `HealthReport`.
@@ -100,7 +100,7 @@ connector when a Nightscout bridge already exists.
 ## Recipe: add an agent
 
 An agent is **reasoning (LLM) + tools (deterministic) + memory (store)**. Don't write a new
-loop — subclass `Investigator`.
+loop - subclass `Investigator`.
 
 1. **Read `agents/discovery.py`** (the canonical thin subclass) and `agents/investigator.py`
    (the shared machinery).
@@ -109,7 +109,7 @@ loop — subclass `Investigator`.
    different one), `fallback_plan` (the deterministic sweep for no-model installs),
    `plan_prompt`, `kind_prefix`/`scope`, and an optional `seed_headline` formatter.
 3. **Tools must be read-only.** Reasoning is unguarded over read-only tools; claims are
-   gated by `stats.rigor.assess` + `guard.faithfulness.audit` automatically — you don't
+   gated by `stats.rigor.assess` + `guard.faithfulness.audit` automatically - you don't
    re-implement either. Underpowered questions are banked as open hypotheses for you.
 4. **Register it** via a `register_<name>` helper and wire it into a lens in
    `workflows/lenses.py` if it should run in `dexta analyze`.

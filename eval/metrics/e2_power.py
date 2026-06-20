@@ -1,4 +1,4 @@
-"""E2 statistical power — true-discovery rate of the rigor-gated pattern agent.
+"""E2 statistical power - true-discovery rate of the rigor-gated pattern agent.
 
 The twin of E4's false-discovery rate. E4 plants nothing and asks "does the
 agent stay silent?"; E2 plants a known effect at a controlled size and asks
@@ -9,7 +9,7 @@ target finding ``kind`` is known in advance.
 For each (effect-size, data-span) cell we run several seeds, count how often the
 agent emits the matching finding kind, and report that recall. A useful,
 clinically-valid harness must have *high recall at a large effect and adequate
-span* — otherwise it is merely conservative, not informative.
+span* - otherwise it is merely conservative, not informative.
 
 Effect → expected finding kind:
 

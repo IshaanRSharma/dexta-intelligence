@@ -1,4 +1,4 @@
-"""Insulin agent — the batch curiosity loop over insulin/meal instruments.
+"""Insulin agent - the batch curiosity loop over insulin/meal instruments.
 
 A sibling of the Discovery agent, scoped to questions that need insulin and
 meal context: overnight basal drift, meal-size excursions, and correction-bolus
@@ -126,7 +126,7 @@ def register_insulin(
 ) -> None:
     """Register an Insulin agent on ``registry``.
 
-    With ``model=None`` the agent runs its deterministic fallback sweep — same
+    With ``model=None`` the agent runs its deterministic fallback sweep - same
     tools and rigor, no reasoning. Pass a model (built via the BYOM factory) to
     enable the full plan-probe-judge curiosity loop over insulin/meal patterns.
     """

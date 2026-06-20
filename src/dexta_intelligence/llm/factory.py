@@ -1,4 +1,4 @@
-"""BYOM model factory — the only place a chat model is ever constructed.
+"""BYOM model factory - the only place a chat model is ever constructed.
 
 Every LLM call site in the system asks for a model **by role**, never by
 provider. Vanilla mode runs everything on the single configured model;
@@ -13,11 +13,11 @@ power users override per role in ``dexta.toml``::
     model = "llama3"
 
 Provider support comes from LangChain's ``init_chat_model`` (Anthropic,
-OpenAI, Ollama, Groq, Mistral, …) — we do not write provider clients.
+OpenAI, Ollama, Groq, Mistral, …) - we do not write provider clients.
 ``provider = "openrouter"`` is special-cased onto the OpenAI-compatible
 endpoint, so one ``OPENROUTER_API_KEY`` unlocks every model on OpenRouter
 (``model = "anthropic/claude-sonnet-4"``, ``"openai/gpt-4o"``,
-``"meta-llama/llama-3.3-70b-instruct"``, …) — the lowest-friction BYOM path.
+``"meta-llama/llama-3.3-70b-instruct"``, …) - the lowest-friction BYOM path.
 The ``llm`` extra is optional: deterministic agents import nothing from
 this module, so ``pip install dexta-intelligence`` works with no LLM at all.
 
@@ -49,7 +49,7 @@ class RoleDefaults:
 
 #: Known LLM roles and their sampling defaults. Deterministic agents
 #: (observation, pattern, basal, meal, correction, rollups, analytics)
-#: have NO role here on purpose — they are not allowed to ask for a model.
+#: have NO role here on purpose - they are not allowed to ask for a model.
 ROLE_DEFAULTS: dict[str, RoleDefaults] = {
     "plan": RoleDefaults(temperature=0.0, max_tokens=1024),
     "discovery": RoleDefaults(temperature=0.2, max_tokens=1800),
@@ -121,7 +121,7 @@ def get_model(spec: ModelSpec) -> BaseChatModel:
 
     if spec.provider == "openrouter":
         # OpenRouter speaks the OpenAI API; route through the openai provider
-        # with its endpoint + key. One key, every model — the BYOM default.
+        # with its endpoint + key. One key, every model - the BYOM default.
         key = os.environ.get("OPENROUTER_API_KEY")
         if not key:
             msg = (

@@ -1,8 +1,8 @@
-"""Calendar / date-math primitives — the single source of truth for date interpretation.
+"""Calendar / date-math primitives - the single source of truth for date interpretation.
 
 LLMs compute date properties from strings unreliably (the donor repo recorded
 the model calling 2026-05-02 "Wednesday"; it is a Saturday), so anything that
-interprets a date — LLM-facing tools, prompt formatters — must call these
+interprets a date - LLM-facing tools, prompt formatters - must call these
 helpers instead. Pure functions, no I/O.
 """
 
@@ -17,7 +17,7 @@ __all__ = [
     "weekday_name",
 ]
 
-# Long form ("Saturday") is what goes in LLM context — clearer to the model
+# Long form ("Saturday") is what goes in LLM context - clearer to the model
 # than "Sat" and unambiguous next to 3-letter month abbreviations.
 _LONG_WEEKDAY = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 _SHORT_WEEKDAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -70,7 +70,7 @@ def parse_relative_date(  # noqa: PLR0911 - a phrase table; each branch is one r
       - "last/this/next monday".."sunday"
       - "last week" → 7 days ago, "last month" → 30 days ago
 
-    Returns None for anything unparseable — caller can ask the user to
+    Returns None for anything unparseable - caller can ask the user to
     clarify rather than guess.
     """
     if not expr:
@@ -106,7 +106,7 @@ def parse_relative_date(  # noqa: PLR0911 - a phrase table; each branch is one r
             # "last Tuesday" when today is Wed → 1 day ago, not 6 days from now.
             days_diff -= 7
         elif parts[0] == "next":
-            # Next future occurrence — skip today even if same weekday.
+            # Next future occurrence - skip today even if same weekday.
             days_diff = days_diff if days_diff > 0 else 7
         return today + timedelta(days=days_diff)
 

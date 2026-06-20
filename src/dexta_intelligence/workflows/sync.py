@@ -1,4 +1,4 @@
-"""Sync workflow — ``pull → raw upsert → normalize-insert → daily rollups``.
+"""Sync workflow - ``pull → raw upsert → normalize-insert → daily rollups``.
 
 The workflow owns persistence and watermarks (the
 :class:`~dexta_intelligence.connectors.base.Connector` contract); connectors
@@ -67,16 +67,16 @@ __all__ = ["DEFAULT_LOOKBACK", "OVERLAP_MARGIN", "SyncReport", "sync", "sync_all
 #: First-sync window when a source has no watermark yet.
 DEFAULT_LOOKBACK = timedelta(days=30)
 
-#: Re-pull margin subtracted from the watermark — three CGM slots of safety
+#: Re-pull margin subtracted from the watermark - three CGM slots of safety
 #: against late-arriving or clock-skewed provider records. Idempotent
 #: storage makes the re-pull free.
 OVERLAP_MARGIN = timedelta(minutes=15)
 
-#: Raw ``source_id`` values that are singleton snapshots — upserted with
+#: Raw ``source_id`` values that are singleton snapshots - upserted with
 #: replace-on-conflict so each sync refreshes the payload.
 _SNAPSHOT_RAW_IDS = frozenset({"tandem:profile:active"})
 
-#: Snapshot ids whose payload is a therapy profile we also version (PRD 18).
+#: Snapshot ids whose payload is a therapy profile we also version over time.
 _PROFILE_RAW_IDS = frozenset({"tandem:profile:active"})
 
 
@@ -166,7 +166,7 @@ def sync(
         now: Injectable clock (must be timezone-aware); defaults to UTC now.
 
     Raises:
-        ValueError: if ``now`` is naive — all timestamps are UTC-enforced.
+        ValueError: if ``now`` is naive - all timestamps are UTC-enforced.
     """
     started = time.monotonic()
     if now is not None and now.tzinfo is None:

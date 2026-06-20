@@ -1,4 +1,4 @@
-"""Discovery agent — the batch curiosity loop (plan → probe → judge → claim/wonder).
+"""Discovery agent - the batch curiosity loop (plan → probe → judge → claim/wonder).
 
 A thin domain configuration over :class:`Investigator`: it supplies the
 glucose-pattern plan prompt, the deterministic fallback sweep, the rigor seed,
@@ -54,7 +54,7 @@ QUESTIONS YOU BANKED EARLIER BUT COULD NOT ANSWER (revisit if data now allows)
 
 {tool_schema}
 
-Spread hypotheses across different axes (time-of-day, weekend, sleep, events) —
+Spread hypotheses across different axes (time-of-day, weekend, sleep, events) -
 do not put every hypothesis on one tool. Output STRICT JSON, no prose:
 {{"hypotheses": [
   {{"id": "h1", "claim": "<=22 words, the suspected pattern",
@@ -104,8 +104,8 @@ def register_discovery(
 ) -> None:
     """Register a Discovery agent on ``registry``.
 
-    With ``model=None`` the agent runs its deterministic fallback sweep — same
-    tools and rigor, no reasoning — so a vanilla, LLM-free install still gets
+    With ``model=None`` the agent runs its deterministic fallback sweep - same
+    tools and rigor, no reasoning - so a vanilla, LLM-free install still gets
     discovery. Pass a model (built via the BYOM factory) to enable the full
     plan-probe-judge curiosity loop.
     """

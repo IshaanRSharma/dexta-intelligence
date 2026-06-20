@@ -1,4 +1,4 @@
-"""Settings schema contract — fields must match Config Pydantic models."""
+"""Settings schema contract - fields must match Config Pydantic models."""
 
 from __future__ import annotations
 

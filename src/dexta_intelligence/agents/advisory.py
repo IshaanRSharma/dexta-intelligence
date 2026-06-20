@@ -1,4 +1,4 @@
-"""Clinical Advisory — an AMIE-style discussion brief for the clinician.
+"""Clinical Advisory - an AMIE-style discussion brief for the clinician.
 
 Adopts Google AMIE's disease-management architecture (analyze -> set goals ->
 structured plan, every item grounded, schema-constrained generation) but NOT its
@@ -118,7 +118,7 @@ class ClinicalAdvisoryAgent:
         if not active:
             return DiscussionBrief(
                 question=question,
-                analysis=["No active findings yet — not enough to prepare a discussion."],
+                analysis=["No active findings yet - not enough to prepare a discussion."],
                 limitations=[SAFETY_LINE],
                 generated_at=now,
             )
@@ -194,7 +194,7 @@ class ClinicalAdvisoryAgent:
     # ── optional model refinement (schema-constrained, grounded, gated) ────────
 
     def _refine_with_model(self, brief: DiscussionBrief, active: list[Finding]) -> DiscussionBrief:
-        """Let the model rewrite the analysis + goals prose. Phrasing only — the
+        """Let the model rewrite the analysis + goals prose. Phrasing only - the
         grounded, gated discussion items are never replaced by free text."""
         prompt = _REFINE_PROMPT.format(
             question=brief.question or "general review",
@@ -229,7 +229,7 @@ FINDINGS:
 {findings}
 
 Write a short analysis and 2-3 management GOALS. Do NOT give dosing, insulin,
-basal, or carb-ratio instructions — goals are directions to discuss, not actions.
+basal, or carb-ratio instructions - goals are directions to discuss, not actions.
 
 Output STRICT JSON: {{"analysis": ["..."], "goals": ["..."]}}"""
 

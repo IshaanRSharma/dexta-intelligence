@@ -139,7 +139,7 @@ def cmd_analyze(
         )
     agents = list(active_registry)
     if not agents:
-        out.write("No agents registered — nothing to analyze.\n")
+        out.write("No agents registered - nothing to analyze.\n")
         return 0
 
     store = opener(config, db_path)

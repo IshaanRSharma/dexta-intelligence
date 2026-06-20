@@ -1,8 +1,8 @@
-"""Lenses — named agent routes over a filtered :class:`AgentRegistry`.
+"""Lenses - named agent routes over a filtered :class:`AgentRegistry`.
 
 A lens selects which *producer* agents run plus an optional window. The skeptic
 post-pass is non-routable: it is always appended and can never be excluded
-(routing selects what runs, never whether it is honest — see
+(routing selects what runs, never whether it is honest - see
 ``docs/INTELLIGENCE.md``). User ``[lens.*]`` entries in ``dexta.toml``
 override or extend the built-ins below.
 """

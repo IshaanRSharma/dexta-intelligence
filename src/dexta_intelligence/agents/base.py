@@ -1,9 +1,9 @@
-"""Agent contract and registry — the blackboard architecture.
+"""Agent contract and registry - the blackboard architecture.
 
 Agents never invoke each other. Each one reads the store + memory through
 :class:`AgentContext`, does its work, and returns :class:`Finding` records.
 The registry fans out all registered agents with per-agent exception
-isolation (one crashing agent never takes down an analysis run) — a direct
+isolation (one crashing agent never takes down an analysis run) - a direct
 port of the battle-tested detector registry from the donor codebase.
 
 Two hard rules, enforced structurally:
@@ -100,7 +100,7 @@ class AgentRegistry:
         """Run every registered agent that meets its data requirement.
 
         Skipped agents are reported through ``on_skip`` with their unmet
-        reasons — cold start is explicit, never silent. A raising agent is
+        reasons - cold start is explicit, never silent. A raising agent is
         logged and isolated; the run continues. ``on_agent_start`` /
         ``on_agent_done`` (name, finding count) let a caller narrate the fan-out
         live; a failed agent reports zero findings.

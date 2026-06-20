@@ -3,7 +3,7 @@
 Storage is always UTC, but day/hour grouping must follow the patient's local
 clock so "overnight"/per-day analysis lands at the right wall-clock time. A
 reading at 02:00 UTC belongs to the *previous* local day (and 22:00 local hour)
-for an America/New_York patient — these tests pin that.
+for an America/New_York patient - these tests pin that.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def test_day_bounds_span_a_local_calendar_day_in_utc() -> None:
     # Local midnight 2026-03-14 EDT == 04:00 UTC; the day ends a tick before the next.
     assert start == datetime(2026, 3, 14, 4, 0, tzinfo=UTC)
     assert end < datetime(2026, 3, 15, 4, 0, tzinfo=UTC)
-    # The 02:00Z reading is 22:00 local on the 14th — inside that local day's bounds.
+    # The 02:00Z reading is 22:00 local on the 14th - inside that local day's bounds.
     assert start < _NEAR_MIDNIGHT < end
 
 

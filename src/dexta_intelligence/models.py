@@ -13,7 +13,7 @@ Design rules
    immutable raw store. No event exists without a source.
 2. Models are frozen. Mutation is a store operation, not an attribute write.
 3. All timestamps are timezone-aware UTC. Naive datetimes are rejected at
-   validation time — silent local-time bugs are endemic in CGM data and we
+   validation time - silent local-time bugs are endemic in CGM data and we
    refuse to inherit them.
 """
 
@@ -74,7 +74,7 @@ class _FrozenModel(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 1 — raw store
+# Layer 1 - raw store
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -82,7 +82,7 @@ class RawEvent(_FrozenModel):
     """Immutable, verbatim provider record.
 
     ``(source, source_id)`` is the idempotency key: re-ingesting the same
-    provider record is a no-op. The payload is never interpreted here — only
+    provider record is a no-op. The payload is never interpreted here - only
     stored, so normalization can always be replayed.
     """
 
@@ -95,7 +95,7 @@ class RawEvent(_FrozenModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 2 — clinical timeline
+# Layer 2 - clinical timeline
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -248,7 +248,7 @@ class PredictionEvent(_FrozenModel):
     """
 
     ts: datetime
-    """Algorithm cycle time — the timestamp of ``values_mg_dl[0]``."""
+    """Algorithm cycle time - the timestamp of ``values_mg_dl[0]``."""
     source: str
     """Forecasting algorithm, e.g. ``"openaps"`` or ``"loop"``."""
     curve_kind: Literal["iob", "cob", "uam", "zt", "loop"]
@@ -262,7 +262,7 @@ class PredictionEvent(_FrozenModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 3 — rollups
+# Layer 3 - rollups
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -297,7 +297,7 @@ class Rollup(_FrozenModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 4 — agent memory
+# Layer 4 - agent memory
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -373,7 +373,7 @@ class Hypothesis(_FrozenModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Goals — user-stated objectives pursued by background agents
+# Goals - user-stated objectives pursued by background agents
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -427,7 +427,7 @@ class GoalCheckpoint(_FrozenModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Chat — durable GUI conversation history
+# Chat - durable GUI conversation history
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -448,7 +448,7 @@ class ChatTurn(_FrozenModel):
 
 
 class ChatSession(_FrozenModel):
-    """A summary of one chat conversation — for enumerating past threads.
+    """A summary of one chat conversation - for enumerating past threads.
 
     ``last_ts`` is the most recent turn's timestamp, ``turn_count`` the number of
     messages, ``preview`` the first user message (a label for the conversation).
@@ -546,7 +546,7 @@ class OpenInvestigation(_FrozenModel):
 
 
 class CoverageStats(_FrozenModel):
-    """How much data exists — the single input to capability gating."""
+    """How much data exists - the single input to capability gating."""
 
     first_ts: datetime | None
     last_ts: datetime | None

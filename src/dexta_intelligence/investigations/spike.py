@@ -1,12 +1,12 @@
-"""Spike Explanation workflow — the canonical "why did I spike?" surface.
+"""Spike Explanation workflow - the canonical "why did I spike?" surface.
 
 This module splits **investigation** from **intelligence**:
 
-- **Investigation (deterministic):** the trace is fixed code — orient → locate →
+- **Investigation (deterministic):** the trace is fixed code - orient → locate →
   zoom → carbs → boluses → basal → similar events. Tool choice is never delegated
   to the model so the audit trail stays reproducible.
 - **Intelligence (LLM):** after evidence is gathered, an optional model *synthesizes*
-  the finding headline from the evidence bundle + computed attribution — guard-audited,
+  the finding headline from the evidence bundle + computed attribution - guard-audited,
   with the deterministic headline as fallback. ``confidence`` stays computed, never
   model-assessed. ``limitations`` lists every step that could not run.
 
@@ -65,7 +65,7 @@ _HIGH_DELAY_SEPARATION_MIN = 10.0
 
 @dataclass(frozen=True, slots=True)
 class SpikeEvidence:
-    """Deterministically gathered evidence for one spike — the bundle the
+    """Deterministically gathered evidence for one spike - the bundle the
     orchestrator (or :func:`explain_spike`) reasons over. No LLM in here.
 
     ``headline`` is the computed working hypothesis (allowed-vocabulary
@@ -218,7 +218,7 @@ def _inspect_treatments(
     evidence: list[str],
     limitations: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], float | None]:
-    """Steps 4-6: carbs, boluses+IOB, basal — each skipped (and listed
+    """Steps 4-6: carbs, boluses+IOB, basal - each skipped (and listed
     as a limitation) when its stream is absent."""
     carbs: dict[str, Any] = {}
     boluses: dict[str, Any] = {}
@@ -258,7 +258,7 @@ def _inspect_treatments(
 # ── deterministic attribution ─────────────────────────────────────────────────
 
 
-def _attribute(  # noqa: PLR0911 — one return per allowed contributor pattern
+def _attribute(  # noqa: PLR0911 - one return per allowed contributor pattern
     *,
     caps_insulin: bool,
     carbs: dict[str, Any],
@@ -271,7 +271,7 @@ def _attribute(  # noqa: PLR0911 — one return per allowed contributor pattern
     """Pick the most consistent contributor from inspected treatment context.
 
     Returns ``(headline, contributor_found)``. The vocabulary is the
-    allowed list — patterns and hypotheses, never directives."""
+    allowed list - patterns and hypotheses, never directives."""
     if not caps_insulin:
         desc = f"Glucose rose to {peak:g} mg/dL" if peak is not None else "Glucose rose"
         return (
@@ -284,14 +284,14 @@ def _attribute(  # noqa: PLR0911 — one return per allowed contributor pattern
     n_boluses = boluses.get("n_boluses", 0)
     if boluses.get("note", "").startswith("pump/insulin data in dexta ends"):
         return (
-            "Glucose rose in this window, but pump/insulin data in dexta does not cover it — "
+            "Glucose rose in this window, but pump/insulin data in dexta does not cover it - "
             "upload recent pump history to Tandem Source and Sync now before inferring "
             "bolus/meal causes.",
             False,
         )
     if not basal_stable:
         return (
-            "The window includes temp-basal/suspend activity — the pattern is "
+            "The window includes temp-basal/suspend activity - the pattern is "
             "consistent with algorithm-intervention context rather than a "
             "single meal effect.",
             True,
@@ -310,13 +310,13 @@ def _attribute(  # noqa: PLR0911 — one return per allowed contributor pattern
         )
     if not n_carbs and n_boluses:
         return (
-            "A bolus was logged with no carb entry nearby — the pattern is "
+            "A bolus was logged with no carb entry nearby - the pattern is "
             f"consistent with unlogged meal context{comparator}.",
             True,
         )
     if not n_carbs and not n_boluses and spike_ts.hour in _OVERNIGHT_HOURS:
         return (
-            "Overnight rise with no meal or bolus context — the pattern is "
+            "Overnight rise with no meal or bolus context - the pattern is "
             "consistent with a basal-drift hypothesis.",
             True,
         )
@@ -373,7 +373,7 @@ def _resolve_when(
     rows = spikes.get("spikes") or []
     if not rows:
         return None, (
-            f"no excursion ≥ {threshold:g} mg/dL found on {day.isoformat()} — "
+            f"no excursion ≥ {threshold:g} mg/dL found on {day.isoformat()} - "
             "nothing to explain at that threshold"
         )
     return datetime.fromisoformat(str(rows[0]["ts"])), None
@@ -442,16 +442,16 @@ def _synthesize_headline(
     prompt = (
         "You are explaining one glucose spike to a Type-1 patient.\n"
         "Write 1-2 observation-only sentences as the finding headline.\n\n"
-        "WORKING HYPOTHESIS (from computed rules — refine using evidence, "
+        "WORKING HYPOTHESIS (from computed rules - refine using evidence, "
         "do not invent contradictions):\n"
         f"{deterministic}\n\n"
         "EVIDENCE LINES (every number you cite MUST appear here or in COMPUTED DATA):\n"
         + ("\n".join(f"- {line}" for line in evidence) if evidence else "- (none)")
         + f"\n\nLIMITATIONS: {lim_text}\n\n"
-        "COMPUTED DATA (JSON — numbers here are fair game for the guard):\n"
+        "COMPUTED DATA (JSON - numbers here are fair game for the guard):\n"
         f"{pool_text}\n\n"
         "RULES:\n"
-        "- Discussion support only — no dosing amounts, ratios, ISF changes, or "
+        "- Discussion support only - no dosing amounts, ratios, ISF changes, or "
         '"bolus X minutes earlier" as a directive.\n'
         "- Weave peak, meal/bolus timing, basal stability, and recurrence when present.\n"
         "- If evidence is thin, say so plainly.\n"
@@ -474,19 +474,6 @@ def _synthesize_headline(
         )
         return deterministic
     return text
-
-
-def _polish_headline(
-    model: Any, headline: str, evidence: list[str], pool: dict[str, Any]
-) -> str:
-    """Backward-compatible alias — prefer :func:`_synthesize_headline`."""
-    return _synthesize_headline(
-        model,
-        deterministic=headline,
-        evidence=evidence,
-        limitations=[],
-        pool=pool,
-    )
 
 
 def _text_of(response: Any) -> str:

@@ -1,4 +1,4 @@
-"""Native tool-calling reasoning loop — the model decides which tool to call and when to stop.
+"""Native tool-calling reasoning loop - the model decides which tool to call and when to stop.
 
 Dependency-light: a ``model`` is anything with ``bind_tools(schemas)`` and
 ``invoke(messages)`` whose response exposes ``.content`` and ``.tool_calls``
@@ -28,7 +28,7 @@ __all__ = [
     "run_reasoning_loop",
 ]
 
-#: Default ceiling on reasoning turns — insurance against a model that loops.
+#: Default ceiling on reasoning turns - insurance against a model that loops.
 _DEFAULT_MAX_STEPS = 6
 
 
@@ -52,7 +52,7 @@ class ToolSpec:
 
     ``parameters`` is a JSON Schema object (OpenAI/Anthropic function-calling
     shape). ``fn`` takes the validated argument dict and returns a
-    JSON-serializable result plus the numbers it produced — the tuple
+    JSON-serializable result plus the numbers it produced - the tuple
     ``(public_result, evidence_numbers)`` so the loop can both show the model
     the result and accumulate the guard's evidence pool.
     """
@@ -96,7 +96,7 @@ class ReasoningResult:
 
 
 def run_reasoning_loop(
-    model: Any,  # any LangChain chat model — duck-typed on .bind_tools/.invoke
+    model: Any,  # any LangChain chat model - duck-typed on .bind_tools/.invoke
     tools: Sequence[ToolSpec],
     *,
     system: str,
@@ -233,7 +233,7 @@ def _model_error_message(exc: Exception) -> str:
 
 
 def _emit(on_event: Callable[[ReasoningEvent], None] | None, event: ReasoningEvent) -> None:
-    """Fire a stream event, best-effort — a failing sink never breaks the loop."""
+    """Fire a stream event, best-effort - a failing sink never breaks the loop."""
     if on_event is None:
         return
     try:

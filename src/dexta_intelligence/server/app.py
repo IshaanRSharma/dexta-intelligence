@@ -3,7 +3,7 @@
 ``create_app(config, store_opener)`` wires the routes against the same store
 seam the CLI uses (the ``store_opener`` callable), so tests can inject a seeded
 SQLiteStore and the real server can pass ``open_sqlite_store``. All third-party
-imports are lazy with a clear install hint — the base package never depends on
+imports are lazy with a clear install hint - the base package never depends on
 the GUI stack.
 """
 
@@ -96,7 +96,7 @@ _INSTALL_HINT = (
 
 _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 
-#: Cap on retained chat turns per session (messages, not turns) — bounds context.
+#: Cap on retained chat turns per session (messages, not turns) - bounds context.
 _MAX_SESSION_MESSAGES = 12
 
 _SOURCE_CONFIGURED: dict[str, Callable[[Config], bool]] = {
@@ -160,7 +160,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     templates.env.globals["static_version"] = str(int(max(_static_stamps, default=0)))
     # One clear feature per tab. Chat (instant Q&A) and Investigations (deep,
     # traced) stay distinct. Reconciliation lives under Findings, Evals under
-    # System, and Log is reached via the "+ Log context" buttons — each linked
+    # System, and Log is reached via the "+ Log context" buttons - each linked
     # from its parent rather than crowding the top nav.
     templates.env.globals["nav_items"] = (
         ("/", "Dashboard"),
@@ -266,7 +266,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         buf = io.StringIO()
         try:
             code = cmd_analyze(config=config, db_path=None, out=buf, lens=lens)
-        except ValueError:  # unknown lens — should not happen from the picker
+        except ValueError:  # unknown lens - should not happen from the picker
             return RedirectResponse("/?flash=analyze_fail", status_code=303)
         if code == 0:
             flash = "analyze_ok"
@@ -430,7 +430,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         root = config.wiki.path.expanduser().resolve()
         slug = page[:-3] if page.endswith(".md") else page
         md_path = (root / f"{slug}.md").resolve()
-        # Containment check — proper path containment, not a prefix match, so a
+        # Containment check - proper path containment, not a prefix match, so a
         # sibling dir sharing the root's string prefix (or ``..``) can't escape.
         contained = md_path == root or md_path.is_relative_to(root)
         if not contained or not md_path.is_file():
@@ -901,7 +901,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                     history = [{"role": t.role, "content": t.content} for t in prior]
 
                 def _sink(event: Any) -> None:
-                    # Drop the loop's legacy full-text answer — the endpoint emits
+                    # Drop the loop's legacy full-text answer - the endpoint emits
                     # audited prose after guard/treatment rails.
                     if event.kind == "answer":
                         return
@@ -1503,7 +1503,7 @@ def _status_pill_text(coverage: Any) -> str:
 
 
 #: Coordinator investigation receipts (kind="investigation") are planning memory
-#: — recalled to avoid re-running the same belt — not user-facing findings.
+#: - recalled to avoid re-running the same belt - not user-facing findings.
 _INTERNAL_FINDING_KINDS = frozenset({"investigation"})
 
 
@@ -1552,21 +1552,21 @@ def _dashboard_banners(
     banners: list[dict[str, str]] = []
     flash_msgs: dict[str, tuple[str, str]] = {
         "sync_ok": ("ok", "Sync finished successfully."),
-        "sync_fail": ("bad", "Sync failed — check Settings and try again."),
-        "analyze_ok": ("ok", "Analysis complete — findings refreshed."),
+        "sync_fail": ("bad", "Sync failed - check Settings and try again."),
+        "analyze_ok": ("ok", "Analysis complete - findings refreshed."),
         "analyze_skip": (
             "setup",
             f"Need at least {HARD_FLOOR_DAYS:.0f} days of data before analysis.",
         ),
-        "analyze_fail": ("bad", "Analysis failed — see the CLI log for details."),
+        "analyze_fail": ("bad", "Analysis failed - see the CLI log for details."),
         "investigate_skip": (
             "setup",
             f"Need at least {HARD_FLOOR_DAYS:.0f} days of data before an investigation.",
         ),
         "investigate_empty": ("bad", "Type a question to investigate."),
-        "investigate_fail": ("bad", "Investigation failed — see the CLI log for details."),
+        "investigate_fail": ("bad", "Investigation failed - see the CLI log for details."),
         "wiki_ok": ("ok", "Wiki rebuilt from current findings."),
-        "wiki_fail": ("bad", "Wiki rebuild failed — see the CLI log for details."),
+        "wiki_fail": ("bad", "Wiki rebuild failed - see the CLI log for details."),
     }
     if flash in flash_msgs:
         kind, message = flash_msgs[flash]
@@ -1575,7 +1575,7 @@ def _dashboard_banners(
         n = flash.split(":", 1)[1] if ":" in flash else "0"
         plural = "s" if n != "1" else ""
         banners.append(
-            {"kind": "ok", "message": f"Investigation complete — {n} finding{plural} banked."}
+            {"kind": "ok", "message": f"Investigation complete - {n} finding{plural} banked."}
         )
     elif flash and flash.startswith("upload_ok"):
         n = flash.split(":", 1)[1] if ":" in flash else "0"
@@ -1584,7 +1584,7 @@ def _dashboard_banners(
         banners.append(
             {
                 "kind": "bad",
-                "message": "CSV import failed — expected a Dexcom Clarity or LibreView export.",
+                "message": "CSV import failed - expected a Dexcom Clarity or LibreView export.",
             }
         )
     elif flash == "upload_empty":
@@ -1603,7 +1603,7 @@ def _dashboard_banners(
         banners.append(
             {
                 "kind": "info",
-                "message": "Data loaded locally — connect a source in Settings to keep syncing.",
+                "message": "Data loaded locally - connect a source in Settings to keep syncing.",
                 "href": "/settings",
                 "label": "Settings",
             }
@@ -1664,7 +1664,7 @@ def _status_sidebar(
 
 
 def _storage_view(config: Config) -> dict[str, str]:
-    """Where data actually lives — so 'is my DB local?' has a visible answer."""
+    """Where data actually lives - so 'is my DB local?' has a visible answer."""
     if config.data.backend == "sqlite":
         path = config.data.sqlite_path.expanduser()
         try:

@@ -1,4 +1,4 @@
-"""SQLiteStore tests — the StoragePort contract exercised against ``:memory:``.
+"""SQLiteStore tests - the StoragePort contract exercised against ``:memory:``.
 
 Window semantics under test are half-open (``start <= ts < end``); dedupe keys
 per table are documented in ``store/sqlite.py``.
@@ -103,7 +103,7 @@ class TestLifecycle:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 1 — raw events + watermark
+# Layer 1 - raw events + watermark
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -210,7 +210,7 @@ class TestRawEvents:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 2 — typed event round trips
+# Layer 2 - typed event round trips
 # ─────────────────────────────────────────────────────────────────────────────
 
 WIDE_START = T0 - timedelta(days=2)
@@ -448,7 +448,7 @@ class TestCoverage:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 3 — rollups
+# Layer 3 - rollups
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -511,7 +511,7 @@ class TestRollups:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 4 — findings & hypotheses
+# Layer 4 - findings & hypotheses
 # ─────────────────────────────────────────────────────────────────────────────
 
 

@@ -1,4 +1,4 @@
-"""Durable chat-history tests — the ``chat_turns`` StoragePort surface (SQLite).
+"""Durable chat-history tests - the ``chat_turns`` StoragePort surface (SQLite).
 
 Turns are scoped by ``session_id`` and returned oldest→newest, capped to the
 most-recent ``limit`` rows for the session.

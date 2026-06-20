@@ -1,4 +1,4 @@
-"""Oura connector tests — pure parsing against fixtures, client via MockTransport.
+"""Oura connector tests - pure parsing against fixtures, client via MockTransport.
 
 No live network calls: the connector tests run against an ``httpx.MockTransport``
 that emulates the Oura v2 user-collection API (bearer auth, ``start_date`` /
@@ -50,7 +50,7 @@ DAILY_SLEEP_SCORES = {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pure parsing — sleep
+# Pure parsing - sleep
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -97,7 +97,7 @@ class TestParseSleep:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pure parsing — readiness
+# Pure parsing - readiness
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -132,7 +132,7 @@ class TestParseReadiness:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pure parsing — workouts and daily activity
+# Pure parsing - workouts and daily activity
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -206,7 +206,7 @@ class TestOuraConfig:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Connector — mocked transport emulating the Oura v2 user-collection API
+# Connector - mocked transport emulating the Oura v2 user-collection API
 # ─────────────────────────────────────────────────────────────────────────────
 
 

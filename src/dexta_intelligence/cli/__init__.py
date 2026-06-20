@@ -1,4 +1,4 @@
-"""dexta CLI — init, doctor, sync, analyze, upload, wiki."""
+"""dexta CLI - init, doctor, sync, analyze, upload, wiki."""
 
 from __future__ import annotations
 

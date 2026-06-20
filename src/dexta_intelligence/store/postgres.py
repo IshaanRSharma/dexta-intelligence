@@ -1,4 +1,4 @@
-"""PostgresStore — the reference backend for :class:`StoragePort`.
+"""PostgresStore - the reference backend for :class:`StoragePort`.
 
 psycopg 3 (``psycopg[binary]``). This is the production-grade twin of
 ``SQLiteStore``: identical semantics, native column types. The only design
@@ -9,7 +9,7 @@ so the two backends are observationally indistinguishable through the port.
   (psycopg adapts the tz); reads are normalized to aware UTC, matching sqlite.
 - **JSON payloads** (``payload``/``evidence``/``stats``/``tests``/``tools``/
   ``values_mg_dl``/``stages``) are stored as ``JSONB`` and round-trip as native
-  Python objects — no manual ``json.loads`` on the way out.
+  Python objects - no manual ``json.loads`` on the way out.
 - **Ids** are ``BIGSERIAL``.
 - **Window queries** are half-open (``start <= ts < end``), ordered ascending;
   sleep is windowed and ordered on ``ts_start``.
@@ -543,7 +543,7 @@ class PostgresStore:
         """Resolve ``source_id -> id`` for the given ``(source, source_id)`` keys.
 
         ``ON CONFLICT DO NOTHING ... RETURNING`` skips the conflicting rows, so
-        the ids are read back here — covering both freshly-inserted and
+        the ids are read back here - covering both freshly-inserted and
         pre-existing rows. ``source_id`` is unique within a source.
         """
         result: dict[str, int] = {}

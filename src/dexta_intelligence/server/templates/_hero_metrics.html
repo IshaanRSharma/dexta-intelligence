@@ -6,7 +6,7 @@
     {% if hero.span_days is not none %}
       <div class="hero-num">{{ "%.0f"|format(hero.span_days) }}</div>
     {% else %}
-      <div class="hero-num empty">—</div>
+      <div class="hero-num empty">-</div>
     {% endif %}
     <div class="hero-label">days of data</div>
   </div>
@@ -18,7 +18,7 @@
     {% if hero.coverage_pct is not none %}
       <div class="hero-num">{{ "%.0f"|format(hero.coverage_pct) }}%</div>
     {% else %}
-      <div class="hero-num empty">—</div>
+      <div class="hero-num empty">-</div>
     {% endif %}
     <div class="hero-label">sensor coverage</div>
   </div>
@@ -30,7 +30,7 @@
     {% if hero.tir_pct is not none %}
       <div class="hero-num">{{ "%.0f"|format(hero.tir_pct) }}%</div>
     {% else %}
-      <div class="hero-num empty">—</div>
+      <div class="hero-num empty">-</div>
     {% endif %}
     <div class="hero-label">time in range</div>
   </div>

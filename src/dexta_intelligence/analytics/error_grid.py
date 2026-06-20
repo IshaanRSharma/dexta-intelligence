@@ -1,21 +1,21 @@
-"""Clinical-accuracy error grids and MARD — pure, deterministic, stdlib-only.
+"""Clinical-accuracy error grids and MARD - pure, deterministic, stdlib-only.
 
 Three standard tools for scoring a predicted/measured glucose against a
 reference (mg/dL):
 
-- :func:`clarke_zone` — Clarke Error Grid Analysis (Clarke et al., *Diabetes
+- :func:`clarke_zone` - Clarke Error Grid Analysis (Clarke et al., *Diabetes
   Care* 1987;10(5):622-628). Classifies a (reference, predicted) pair into one
   of five zones A-E by clinical consequence.
-- :func:`parkes_zone` — Parkes (Consensus) Error Grid, type 1 / insulin-using
+- :func:`parkes_zone` - Parkes (Consensus) Error Grid, type 1 / insulin-using
   diabetes (Parkes et al., *Diabetes Care* 2000;23(8):1143-1148; boundary
   coordinates per Pfutzner et al., *J Diabetes Sci Technol* 2013;7(5):1275-1281).
   Same A-E zone scheme, smoother clinically-derived boundaries.
-- :func:`mard` — Mean Absolute Relative Difference (%), the headline CGM
+- :func:`mard` - Mean Absolute Relative Difference (%), the headline CGM
   accuracy summary: mean over pairs of ``|predicted - reference| / reference``.
 
-Zone meaning (both grids): A — clinically accurate; B — benign error (no or
-benign treatment change); C — overcorrection; D — dangerous failure to detect;
-E — erroneous treatment (opposite of correct). A+B is the standard "clinically
+Zone meaning (both grids): A - clinically accurate; B - benign error (no or
+benign treatment change); C - overcorrection; D - dangerous failure to detect;
+E - erroneous treatment (opposite of correct). A+B is the standard "clinically
 acceptable" fraction.
 
 No I/O, no randomness, no clamping of inputs beyond what the definitions
@@ -64,7 +64,7 @@ def clarke_zone(reference: float, predicted: float) -> Zone:
     if (predicted <= 70.0 and reference <= 70.0) or abs(predicted - reference) <= 0.2 * reference:
         return "A"
 
-    # Zone E: opposite treatment — true hyper read as hypo, or true hypo read
+    # Zone E: opposite treatment - true hyper read as hypo, or true hypo read
     # as hyper.
     if (reference >= 180.0 and predicted <= 70.0) or (reference <= 70.0 and predicted >= 180.0):
         return "E"
@@ -75,7 +75,7 @@ def clarke_zone(reference: float, predicted: float) -> Zone:
     ):
         return "C"
 
-    # Zone D: failure to detect a value that needs treatment — reference out of
+    # Zone D: failure to detect a value that needs treatment - reference out of
     # range, prediction inside the target range.
     if (reference > 240.0 and 70.0 <= predicted <= 180.0) or (
         reference < 70.0 and 70.0 <= predicted <= 180.0

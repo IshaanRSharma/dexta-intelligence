@@ -1,4 +1,4 @@
-"""Configuration — one TOML file, environment overrides, working defaults.
+"""Configuration - one TOML file, environment overrides, working defaults.
 
 Vanilla contract: ``dexta init`` writes ``~/.dexta/dexta.toml`` with exactly
 two values the user must supply (Nightscout URL + token); every other key
@@ -144,12 +144,12 @@ class LibreConfig(_Section):
 
 
 class TandemConfig(_Section):
-    """Tandem t:slim X2 via the t:connect cloud (tconnectsync) — **direct pump
+    """Tandem t:slim X2 via the t:connect cloud (tconnectsync) - **direct pump
     access, no Nightscout required**.
 
     Unofficial/reverse-engineered API: opt-in, may break without notice. Prefer
     the ``TANDEM_EMAIL`` / ``TANDEM_PASSWORD`` environment variables over the
-    TOML file — these are real account secrets.
+    TOML file - these are real account secrets.
     """
 
     email: str = ""
@@ -161,7 +161,7 @@ class TandemConfig(_Section):
 
 
 class CareLinkConfig(_Section):
-    """Medtronic pump + CGM via CareLink — **direct pump access, no Nightscout
+    """Medtronic pump + CGM via CareLink - **direct pump access, no Nightscout
     required**.
 
     Unofficial/reverse-engineered API: opt-in, may break without notice; auth is
@@ -178,7 +178,7 @@ class CareLinkConfig(_Section):
 
 
 class DexcomApiConfig(_Section):
-    """Dexcom **official** API (OAuth2 ``/egvs``) — ToS-clean, ~1-3h delayed.
+    """Dexcom **official** API (OAuth2 ``/egvs``) - ToS-clean, ~1-3h delayed.
 
     Complements the reverse-engineered Share path (:class:`DexcomConfig`) for
     users who want the sanctioned integration. Token-based in OSS (no embedded
@@ -196,7 +196,7 @@ class DexcomApiConfig(_Section):
 class LLMConfig(_Section):
     provider: str = "anthropic"
     """Any LangChain provider (``anthropic``, ``openai``, ``ollama``, …) or
-    ``openrouter`` — one OPENROUTER_API_KEY unlocks every hosted model, the
+    ``openrouter`` - one OPENROUTER_API_KEY unlocks every hosted model, the
     lowest-friction BYOM path (model names like ``anthropic/claude-sonnet-4``)."""
     model: str = "claude-sonnet-4-6"
     roles: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -221,7 +221,7 @@ class LensConfig(_Section):
 
     Built-ins live in :mod:`dexta_intelligence.workflows.lenses`; user
     ``[lens.<name>]`` entries override or extend them. The skeptic post-pass is
-    never listed here — it is non-routable and always appended at build time.
+    never listed here - it is non-routable and always appended at build time.
     """
 
     agents: list[str]
@@ -234,7 +234,7 @@ class EvidenceConfig(_Section):
 
     ``backend`` selects the provider (``pubmed`` is zero-auth and the default;
     ``openevidence`` is gated behind ``OPENEVIDENCE_API_KEY``). ``email`` is the
-    NCBI-etiquette contact sent with PubMed requests — recommended, never a
+    NCBI-etiquette contact sent with PubMed requests - recommended, never a
     secret, so it lives in the shareable TOML rather than the environment.
     """
 
@@ -254,8 +254,8 @@ class ServerConfig(_Section):
     auto_sync_minutes: int = 0
     """When > 0, ``dexta serve`` runs a background sync every N minutes so the GUI
     alone keeps the local DB fresh (0 = off). It reuses the configured connectors
-    and storage backend, so any source the user sets up — Nightscout, a pump, or a
-    self-hosted Postgres — is covered without extra wiring. For the full cadence
+    and storage backend, so any source the user sets up - Nightscout, a pump, or a
+    self-hosted Postgres - is covered without extra wiring. For the full cadence
     (sync + monitor + goal ticks) use ``dexta daemon`` instead."""
 
 
@@ -340,7 +340,7 @@ def save_secret(name: str, value: str, *, path: Path | None = None) -> None:
         secrets.pop(name, None)
         os.environ.pop(name, None)
     lines = [
-        "# Dexta Intelligence secrets — mode 0600, never commit or share",
+        "# Dexta Intelligence secrets - mode 0600, never commit or share",
         "# Edit here or paste keys in Settings → LLM / Literature",
         "",
     ]
@@ -364,7 +364,7 @@ def load_config(path: Path | None = None) -> Config:
     """Load config from TOML with environment overrides applied.
 
     Precedence (highest wins): shell environment → ``secrets.env`` → TOML → defaults.
-    A missing file is not an error — defaults make the library usable
+    A missing file is not an error - defaults make the library usable
     programmatically without any setup.
     """
     resolved = (path or DEFAULT_CONFIG_PATH).expanduser()
@@ -486,7 +486,7 @@ def save_config_values(updates: dict[str, dict[str, Any]], path: Path | None = N
 
     Reads the existing file verbatim (no env overrides), merges ``updates``,
     and re-validates the exact serialized bytes through the loader before
-    committing via tempfile + ``os.replace`` (mode 0600) — a failed
+    committing via tempfile + ``os.replace`` (mode 0600) - a failed
     validation never touches the existing file.
     """
     resolved = (path or DEFAULT_CONFIG_PATH).expanduser()

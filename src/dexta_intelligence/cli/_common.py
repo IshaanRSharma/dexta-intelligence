@@ -25,7 +25,7 @@ CsvFormatHint = Literal["auto", "clarity", "libreview", "tidepool"]
 
 #: One-line runtime safety footer for clinical CLI surfaces (see MEDICAL_DISCLAIMER.md).
 MEDICAL_DISCLAIMER = (
-    "— dexta is observation and discussion support, not a medical device; it never gives "
+    "- dexta is observation and discussion support, not a medical device; it never gives "
     "dosing advice. Decisions are for you and your care team."
 )
 
@@ -34,7 +34,7 @@ def model_for_role(config: Config, role: str) -> Any:
     """Build the LLM for ``role`` from config, or ``None`` for the deterministic path.
 
     Returns ``None`` (never raises) when the ``llm`` extra is missing or no
-    provider credential is set, so every command always runs — with LLM
+    provider credential is set, so every command always runs - with LLM
     reasoning when a key is present, with the deterministic fallback otherwise.
     Sampling and per-role overrides resolve through ``llm.factory.resolve_spec``.
     """
@@ -187,7 +187,7 @@ def _maybe_close_store(store: StoragePort, opener: StoreOpener) -> None:
 
 def _format_ts(ts: datetime | None) -> str:
     if ts is None:
-        return "—"
+        return "-"
     return ts.astimezone(UTC).isoformat()
 
 

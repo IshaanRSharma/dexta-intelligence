@@ -1,9 +1,9 @@
-"""Nightscout connector — entries/treatments/devicestatus → timeline events.
+"""Nightscout connector - entries/treatments/devicestatus → timeline events.
 
 Nightscout is the OSS CGM remote-monitoring server used by the looping
 community, and the richest single source we support: glucose (``entries``),
-real pump data (``treatments``: boluses, carbs, temp basals, suspends) and —
-for looping users — the dosing algorithm's own forecast curves
+real pump data (``treatments``: boluses, carbs, temp basals, suspends) and -
+for looping users - the dosing algorithm's own forecast curves
 (``devicestatus``: ``openaps.suggested.predBGs`` / ``loop.predicted``), which
 feed the Prediction Reconciliation agent.
 
@@ -18,12 +18,13 @@ The module is split in two layers so parsing stays fixture-testable:
 Temp-basal handling (documented best-effort): Nightscout logs temp basals as
 a rate (U/h) plus a duration, not delivered units. We record
 ``kind=temp_basal`` with ``duration_min`` and, when an absolute rate is
-present, ``units = rate x duration/60`` — the *scheduled* delivery, which may
+present, ``units = rate x duration/60`` - the *scheduled* delivery, which may
 overstate reality if the temp was cancelled early by a later record.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -61,9 +62,18 @@ _OPENAPS_CURVES: dict[str, Literal["iob", "cob", "uam", "zt"]] = {
     "ZT": "zt",
 }
 
+#: The access token rides in the URL query, so httpx error strings (which embed
+#: the full URL) would otherwise leak it into health-check details and logs.
+_TOKEN_QUERY_RE = re.compile(r"token=[^&\s'\"]+")
+
+
+def _redact_token(text: str) -> str:
+    """Strip the access token out of any URL-bearing string before it is shown."""
+    return _TOKEN_QUERY_RE.sub("token=[redacted]", text)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pure parsing — raw Nightscout JSON dicts in, typed events out
+# Pure parsing - raw Nightscout JSON dicts in, typed events out
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -115,7 +125,7 @@ def parse_entry(raw: dict[str, Any]) -> GlucoseEvent | None:
 
 
 def _bolus_automatic(raw: dict[str, Any]) -> bool | None:
-    """Explicit algorithm markers only — AAPS ``isSMB``, Loop ``automatic``.
+    """Explicit algorithm markers only - AAPS ``isSMB``, Loop ``automatic``.
 
     ``enteredBy`` is deliberately NOT used for boluses: manual boluses issued
     through the Loop app are also uploaded with ``enteredBy: "loop://..."``.
@@ -256,7 +266,7 @@ def parse_devicestatus(raw: dict[str, Any]) -> list[PredictionEvent]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Connector — thin HTTP layer over the pure parsers
+# Connector - thin HTTP layer over the pure parsers
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -311,7 +321,7 @@ class NightscoutConnector:
     def pull(self, since: datetime) -> NormalizedBatch:
         """Fetch everything newer than ``since`` (minus a small dedupe margin).
 
-        Raises ``httpx.HTTPError`` on provider hiccups — the sync workflow
+        Raises ``httpx.HTTPError`` on provider hiccups - the sync workflow
         owns retries. Raw rows are returned for every fetched document;
         normalized events only where parsing succeeds.
         """
@@ -365,9 +375,15 @@ class NightscoutConnector:
     # -- HTTP plumbing ---------------------------------------------------------
 
     def _get_json(self, path: str, params: dict[str, str | int]) -> Any:
+        # The token rides in the query string, so a raised httpx error would
+        # embed it in the URL it prints. Re-raise with the token redacted so it
+        # never reaches a health-check detail, the GUI, or a log.
         merged: dict[str, str | int] = {"token": self._token, **params}
-        response = self._client.get(f"{self._base_url}{path}", params=merged)
-        response.raise_for_status()
+        try:
+            response = self._client.get(f"{self._base_url}{path}", params=merged)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise httpx.HTTPError(_redact_token(str(exc))) from None
         return response.json()
 
     def _raw_event(self, doc: dict[str, Any], ts: datetime) -> RawEvent:

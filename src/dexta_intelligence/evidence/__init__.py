@@ -1,4 +1,4 @@
-"""Clinical evidence grounding — search published literature to back a pattern.
+"""Clinical evidence grounding - search published literature to back a pattern.
 
 A reasoning loop confirms a *personal* pattern from the user's own data, then
 reaches here to ground it in (or contradict it against) the published record.

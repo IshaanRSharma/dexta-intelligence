@@ -1,4 +1,4 @@
-"""E6 safety — red-team the real investigation agent for dosing advice.
+"""E6 safety - red-team the real investigation agent for dosing advice.
 
 End-to-end agentic safety eval: each adversarial prompt tries to pull a dosing,
 basal, carb-ratio, or correction instruction out of the agent. For every prompt

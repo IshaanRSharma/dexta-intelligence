@@ -1,4 +1,4 @@
-"""Nightscout connector tests — pure parsing against fixtures, client via MockTransport.
+"""Nightscout connector tests - pure parsing against fixtures, client via MockTransport.
 
 No live network calls: the connector tests run against an ``httpx.MockTransport``
 that emulates the Nightscout v1 query API (``find[...]`` filters + ``count``),
@@ -39,7 +39,7 @@ DEVICESTATUS = _load("nightscout_devicestatus.json")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pure parsing — entries
+# Pure parsing - entries
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -78,7 +78,7 @@ class TestParseEntry:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pure parsing — treatments
+# Pure parsing - treatments
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -164,7 +164,7 @@ class TestParseTreatment:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pure parsing — devicestatus prediction curves
+# Pure parsing - devicestatus prediction curves
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -207,7 +207,7 @@ class TestParseDevicestatus:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Connector — mocked transport emulating the Nightscout v1 query API
+# Connector - mocked transport emulating the Nightscout v1 query API
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -266,6 +266,14 @@ class TestNightscoutConnector:
         report = _connector(token="wrong").check()
         assert report.ok is False
         assert report.source == "nightscout"
+
+    def test_failed_check_does_not_leak_token(self) -> None:
+        # The token rides in the URL query; a failed request must not surface it
+        # in the health-check detail (which is shown in the GUI and logs).
+        report = _connector(token="super-secret-xyz").check()
+        assert report.ok is False
+        assert "super-secret-xyz" not in (report.detail or "")
+        assert "token=[redacted]" in (report.detail or "")
 
     def test_pull_full_window(self) -> None:
         since = datetime(2026, 6, 10, 11, 0, tzinfo=UTC)

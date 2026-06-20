@@ -1,9 +1,9 @@
-"""The fade gate — no cause claim without treatment-context inspection.
+"""The fade gate - no cause claim without treatment-context inspection.
 
 Enforced deterministically: for a cause question (why did I spike /
 what caused this high), when insulin data exists, the answer may not claim a
 likely contributor unless the tool trace shows the minimum inspection set.
-The gate inspects ``ToolCall`` steps — it never asks a model whether the model
+The gate inspects ``ToolCall`` steps - it never asks a model whether the model
 did its job.
 
 Fade behavior (the caller implements the retry; this module only judges):
@@ -64,7 +64,7 @@ _MEAL_TOOLS = ("get_carb_entries",)
 _DATA_TOOLS_EXEMPT = frozenset({"recall", "coverage", "search_evidence",
                                 "get_current_time", "get_weekday", "parse_relative_date"})
 
-#: Workflow tools that internally perform the full treatment inspection — a
+#: Workflow tools that internally perform the full treatment inspection - a
 #: successful call covers the granular requirements (the workflow provably
 #: inspects carbs/boluses/basal when the data exists).
 _COMPOSITE_COVERS: dict[str, frozenset[str]] = {
@@ -86,7 +86,7 @@ class GateReport:
 
     @property
     def retry_hint(self) -> str:
-        """The injected hint for the single fade retry — names the gap."""
+        """The injected hint for the single fade retry - names the gap."""
         if self.research_only:
             return (
                 "You cited literature without inspecting the data. Call the data "
@@ -117,7 +117,7 @@ def assess_trace(
 
     The required set adapts to capability: streams that do not exist cannot be
     required (their tools are hidden from the belt). When insulin is absent the
-    report is *compliant* but ``insulin_available=False`` — the caller must
+    report is *compliant* but ``insulin_available=False`` - the caller must
     carry :data:`NO_TREATMENT_DISCLAIMER` instead of a cause claim.
     """
     applies = is_cause_question(question)

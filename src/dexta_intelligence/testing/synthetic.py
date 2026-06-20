@@ -71,7 +71,7 @@ __all__ = [
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: Seconds per CGM slot — Dexcom/Libre native cadence is 5 minutes.
+#: Seconds per CGM slot - Dexcom/Libre native cadence is 5 minutes.
 SLOT_SECONDS = 300
 #: Slots per 24h day.
 SLOTS_PER_DAY = 288
@@ -134,7 +134,7 @@ class PlantedEffect(_FrozenModel):
 class ScenarioManifest(_FrozenModel):
     """Ground-truth description of a generated scenario.
 
-    A null scenario carries an empty ``effects`` list — the assertion an eval
+    A null scenario carries an empty ``effects`` list - the assertion an eval
     harness scores against is "find nothing here".
     """
 

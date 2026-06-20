@@ -1,4 +1,4 @@
-"""Investigations — composable, agent-callable lines of inquiry.
+"""Investigations - composable, agent-callable lines of inquiry.
 
 Distinct from ``workflows/`` (deterministic orchestration pipelines: sync,
 deep_analysis, goals). An investigation is what the orchestrator and goal-seeker

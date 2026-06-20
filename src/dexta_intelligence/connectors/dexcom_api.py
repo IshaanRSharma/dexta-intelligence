@@ -1,4 +1,4 @@
-"""Dexcom **official** API connector — OAuth2 ``/egvs``, ToS-clean.
+"""Dexcom **official** API connector - OAuth2 ``/egvs``, ToS-clean.
 
 This is the sanctioned complement to the reverse-engineered Share path
 (:mod:`dexta_intelligence.connectors.dexcom`). Where Share scrapes the
@@ -22,7 +22,7 @@ it via ``DexcomApiConfig.sandbox``.
 The module follows the house connector split:
 
 - **Pure conversion** (:func:`egv_to_event`) takes one EGV record dict and
-  returns a :class:`GlucoseEvent`. No I/O, no clock — fixture-testable. The
+  returns a :class:`GlucoseEvent`. No I/O, no clock - fixture-testable. The
   official API reports trend in *camelCase* (``fortyFiveUp``); conversion
   normalizes it to the capitalized Nightscout/Share vocabulary stored in
   ``GlucoseEvent.trend`` (``FortyFiveUp``).
@@ -88,7 +88,7 @@ _TREND_MAP = {
 
 
 # -----------------------------------------------------------------------------
-# Pure conversion — one EGV record dict in, a typed event out
+# Pure conversion - one EGV record dict in, a typed event out
 # -----------------------------------------------------------------------------
 
 
@@ -97,7 +97,7 @@ def _parse_ts(value: str) -> datetime:
 
     The official API documents ``systemTime`` as UTC; callers must hand it to
     us with an explicit offset (``...Z`` or ``+00:00``). A naive string is
-    rejected — silently assuming a zone is exactly the class of CGM time bug
+    rejected - silently assuming a zone is exactly the class of CGM time bug
     the models refuse to inherit (the same house rule the Share path
     enforces). Normalize ``Z`` to an offset before parsing.
     """
@@ -132,7 +132,7 @@ def egv_to_event(record: dict[str, Any]) -> GlucoseEvent | None:
 
 
 # -----------------------------------------------------------------------------
-# Connector — thin HTTP layer over the pure conversion
+# Connector - thin HTTP layer over the pure conversion
 # -----------------------------------------------------------------------------
 
 
@@ -141,7 +141,7 @@ class DexcomApiConnector:
     against Dexcom's official developer API v3 (OAuth2 bearer tokens).
 
     Batch-only by design: the official feed is ~1-3h delayed, so there is no
-    ``current()`` — for live readings use the Share connector. A 401 triggers
+    ``current()`` - for live readings use the Share connector. A 401 triggers
     exactly one token refresh and retry when refresh credentials (refresh
     token + client id/secret) are configured; otherwise the auth error
     propagates so ``check()`` can report it.

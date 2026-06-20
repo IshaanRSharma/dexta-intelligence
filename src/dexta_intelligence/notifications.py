@@ -2,16 +2,16 @@
 
 A :class:`Notifier` is the outbound seam between deterministic anomaly
 detection (``workflows.monitor``) and the outside world. Sinks are
-dependency-light and **never raise into the monitor loop** — a failing
+dependency-light and **never raise into the monitor loop** - a failing
 delivery is logged and swallowed so one bad sink can't suppress the rest of
 the anomalies or crash the run.
 
 Concrete sinks:
 
-- :class:`LogNotifier` — default; emits a structured log line per anomaly.
-- :class:`WebhookNotifier` — POSTs the anomaly as JSON to a configured URL
+- :class:`LogNotifier` - default; emits a structured log line per anomaly.
+- :class:`WebhookNotifier` - POSTs the anomaly as JSON to a configured URL
   (lazy ``httpx`` import; real-time outbound for chat/ops integrations).
-- :class:`CollectingNotifier` — captures anomalies in memory for tests/GUI.
+- :class:`CollectingNotifier` - captures anomalies in memory for tests/GUI.
 """
 
 from __future__ import annotations

@@ -1,33 +1,33 @@
-"""Monitoring pipeline — deterministic anomaly detectors over a recent window.
+"""Monitoring pipeline - deterministic anomaly detectors over a recent window.
 
 Detection is an instrument, not a reasoning step: each detector reads the
 last N hours of timeline data through the :class:`~dexta_intelligence.store.port.StoragePort`
-and reports structured anomalies straight from the numbers — no LLM, no
+and reports structured anomalies straight from the numbers - no LLM, no
 interpretation, no rigor gate. This is the foundation for monitoring agents
 that notify on anomalies; an optional LLM summary can layer on later.
 
 Detectors (clinical thresholds documented inline)
 -------------------------------------------------
-- ``severe_low`` — any reading < 54 mg/dL (level-2 hypoglycemia). **urgent**.
-- ``severe_high`` — readings > 250 mg/dL (level-2 hyperglycemia) sustained for
+- ``severe_low`` - any reading < 54 mg/dL (level-2 hypoglycemia). **urgent**.
+- ``severe_high`` - readings > 250 mg/dL (level-2 hyperglycemia) sustained for
   at least :data:`SEVERE_HIGH_SUSTAIN_MIN` minutes. **warning**.
-- ``time_in_range_cliff`` — recent-window TIR materially below the trailing
+- ``time_in_range_cliff`` - recent-window TIR materially below the trailing
   baseline TIR (drop ≥ :data:`TIR_CLIFF_DROP_PCT` points). **warning**.
-- ``sensor_gap`` — a contiguous gap between consecutive readings longer than
+- ``sensor_gap`` - a contiguous gap between consecutive readings longer than
   :data:`SENSOR_GAP_MIN` minutes (CGM cadence is 5 min). **info/warning**.
-- ``rapid_rise`` — glucose climbing ≥ :data:`RAPID_RISE_MG_DL` mg/dL within
+- ``rapid_rise`` - glucose climbing ≥ :data:`RAPID_RISE_MG_DL` mg/dL within
   :data:`RAPID_RISE_WINDOW_MIN` minutes, flagging whether carbs were logged
   beforehand (unannounced meal vs. announced). **warning**.
-- ``correction_not_working`` — a correction bolus given while high that fails to
+- ``correction_not_working`` - a correction bolus given while high that fails to
   bring glucose back below target within :data:`CORRECTION_WAIT_MIN` minutes
   (possible failed correction / occlusion / resistance). **warning**.
-- ``low_after_correction`` — a bolus followed by a low within
+- ``low_after_correction`` - a bolus followed by a low within
   :data:`LOW_AFTER_HOURS` hours (possible over-correction / stacking). **warning**.
 
 Each anomaly surfaces as a ``Finding(kind="anomaly")`` (guard-safe: every
 number comes straight from the data) and/or is pushed through a
 :class:`~dexta_intelligence.notifications.Notifier`. The pipeline is pure and
-deterministic and never raises on thin data — it degrades and returns ``[]``.
+deterministic and never raises on thin data - it degrades and returns ``[]``.
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ class Anomaly:
     """One detected anomaly. ``numbers`` carries the triggering measurements.
 
     ``key`` is a stable signature of the *specific* anomaly (e.g. the nadir of a
-    low, the timestamp of a gap) — stable across runs while the same underlying
+    low, the timestamp of a gap) - stable across runs while the same underlying
     event persists, so a polling loop dedupes the same anomaly instead of
     re-recording it every cycle as the scan window slides.
     """
@@ -193,7 +193,7 @@ def _persist_new(ctx: AgentContext, anomalies: list[Anomaly]) -> list[Anomaly]:
     recorded: list[Anomaly] = []
     for anomaly in anomalies:
         if anomaly.key and anomaly.key in active_keys:
-            continue  # same ongoing anomaly — already recorded, don't duplicate
+            continue  # same ongoing anomaly - already recorded, don't duplicate
         try:
             new_id = ctx.store.insert_finding(_to_finding(anomaly))
         except Exception:
@@ -221,7 +221,7 @@ def _anchor(ctx: AgentContext, now: datetime | None) -> datetime | None:
 
 
 def _severe_low(recent: Sequence[GlucoseEvent], window: tuple[datetime, datetime]) -> list[Anomaly]:
-    """Any reading < 54 mg/dL (level-2 hypoglycemia) — always urgent."""
+    """Any reading < 54 mg/dL (level-2 hypoglycemia) - always urgent."""
     lows = [g for g in recent if g.mg_dl < VERY_LOW_MG_DL]
     if not lows:
         return []
@@ -248,17 +248,16 @@ def _severe_low(recent: Sequence[GlucoseEvent], window: tuple[datetime, datetime
 def _severe_high(
     recent: Sequence[GlucoseEvent], window: tuple[datetime, datetime]
 ) -> list[Anomaly]:
-    """Sustained run > 250 mg/dL for ≥ SEVERE_HIGH_SUSTAIN_MIN minutes — warning."""
+    """Sustained run > 250 mg/dL for ≥ SEVERE_HIGH_SUSTAIN_MIN minutes - warning."""
     run_start: datetime | None = None
     run_end: datetime | None = None
     peak = 0
-    n_high = 0
     longest_min = 0.0
     peak_overall = 0
     total_high = 0
 
     def close() -> None:
-        nonlocal run_start, run_end, peak, n_high, longest_min, peak_overall
+        nonlocal run_start, run_end, peak, longest_min, peak_overall
         if run_start is not None and run_end is not None:
             duration = (run_end - run_start).total_seconds() / 60.0
             if duration >= SEVERE_HIGH_SUSTAIN_MIN:
@@ -266,7 +265,6 @@ def _severe_high(
                 peak_overall = max(peak_overall, peak)
         run_start = run_end = None
         peak = 0
-        n_high = 0
 
     for g in recent:
         if g.mg_dl > VERY_HIGH_MG_DL:
@@ -275,7 +273,6 @@ def _severe_high(
                 run_start = g.ts
             run_end = g.ts
             peak = max(peak, g.mg_dl)
-            n_high += 1
         else:
             close()
     close()
@@ -312,7 +309,7 @@ def _time_in_range_cliff(
     baseline: Sequence[GlucoseEvent],
     window: tuple[datetime, datetime],
 ) -> list[Anomaly]:
-    """Recent TIR materially below the trailing baseline TIR — warning."""
+    """Recent TIR materially below the trailing baseline TIR - warning."""
     if len(recent) < TIR_CLIFF_MIN_READINGS or len(baseline) < TIR_CLIFF_MIN_READINGS:
         return []
     recent_tir = _tir([g.mg_dl for g in recent])
@@ -341,7 +338,7 @@ def _time_in_range_cliff(
 
 
 def _sensor_gap(recent: Sequence[GlucoseEvent], window: tuple[datetime, datetime]) -> list[Anomaly]:
-    """Largest contiguous reading gap > SENSOR_GAP_MIN minutes — info/warning."""
+    """Largest contiguous reading gap > SENSOR_GAP_MIN minutes - info/warning."""
     max_gap_min = 0.0
     gap_at: datetime | None = None
     n_gaps = 0
@@ -383,7 +380,7 @@ def _rapid_rise(
     meals: Sequence[MealEvent],
     window: tuple[datetime, datetime],
 ) -> list[Anomaly]:
-    """Steepest glucose climb >= RAPID_RISE_MG_DL within RAPID_RISE_WINDOW_MIN — warning.
+    """Steepest glucose climb >= RAPID_RISE_MG_DL within RAPID_RISE_WINDOW_MIN - warning.
 
     Flags how fast glucose is going up, not just how high it gets, and records
     whether carbs were logged just before the climb so an announced meal spike is
@@ -454,7 +451,7 @@ def _correction_not_working(
     insulin: Sequence[InsulinEvent],
     window: tuple[datetime, datetime],
 ) -> list[Anomaly]:
-    """A correction bolus given while high that leaves glucose above target — warning.
+    """A correction bolus given while high that leaves glucose above target - warning.
 
     A correction bolus is a BOLUS with units > 0 whose nearest preceding reading
     is above target. If every reading for CORRECTION_WAIT_MIN after it stays above
@@ -505,7 +502,7 @@ def _low_after_correction(
     insulin: Sequence[InsulinEvent],
     window: tuple[datetime, datetime],
 ) -> list[Anomaly]:
-    """A bolus followed by a sub-target low within LOW_AFTER_HOURS — warning.
+    """A bolus followed by a sub-target low within LOW_AFTER_HOURS - warning.
 
     A low arriving within the action window of a bolus suggests over-correction
     or insulin stacking rather than an unrelated low.

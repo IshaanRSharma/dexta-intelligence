@@ -1,4 +1,4 @@
-"""Synthetic patient for `dexta demo` — the zero-config try-it on-ramp.
+"""Synthetic patient for `dexta demo` - the zero-config try-it on-ramp.
 
 Builds an in-memory :class:`SQLiteStore` loaded with ~90 days of 5-minute CGM
 plus a planted recurring late-bolus dinner spike, enough that
@@ -10,7 +10,7 @@ show: sleep and activity context, logged forecast curves (so prediction
 reconciliation has real material), two therapy-profile versions (so versioned
 profiles matter), and a few user-reported manual notes aligned to the spike.
 
-Fully deterministic (seeded RNG, fixed dates — no ``random.random`` / ``now``).
+Fully deterministic (seeded RNG, fixed dates - no ``random.random`` / ``now``).
 This mirrors the ``late_bolus`` golden dataset; tests/ cannot be imported by
 shipped code, so the planting logic lives here independently.
 """
@@ -189,7 +189,7 @@ def _demo_activity(rng: random.Random) -> list[ActivityEvent]:
     return out
 
 
-#: Evenings (days before the hero spike) given a prolonged high — a recurring
+#: Evenings (days before the hero spike) given a prolonged high - a recurring
 #: forecast miss for prediction reconciliation. Kept below the 246 hero peak and
 #: off DEMO_SPIKE_DATE so the canonical explain_spike contract is unaffected.
 _MISS_DAY_OFFSETS = (3, 9, 16, 23, 37, 51)
@@ -217,8 +217,8 @@ def _demo_predictions(glucose: list[GlucoseEvent]) -> list[PredictionEvent]:
     """Logged forecast curves anchored at 21:00 on the miss days.
 
     Two oref curves per cycle: COB (carbs-as-announced) predicts a return toward
-    range — a big miss, because the actual CGM stays high (see
-    :func:`_with_prolonged_highs`); UAM (unannounced meal) tracks the high — a
+    range - a big miss, because the actual CGM stays high (see
+    :func:`_with_prolonged_highs`); UAM (unannounced meal) tracks the high - a
     small miss. UAM fitting far better than COB is the signature reconciliation
     attributes to carb underestimation (the planted ground truth)."""
     by_ts = {g.ts: g.mg_dl for g in glucose}
@@ -248,7 +248,7 @@ def _demo_predictions(glucose: list[GlucoseEvent]) -> list[PredictionEvent]:
 
 #: Realistic t:slim X2 time-of-day schedules: (start, basal U/hr, ISF mg/dL/U,
 #: carb ratio g/U, target). Spring is less insulin-sensitive (lower ISF, tighter
-#: carb ratio, higher basal) — the planted sensitivity shift mid-window.
+#: carb ratio, higher basal) - the planted sensitivity shift mid-window.
 _WINTER_SCHEDULE: tuple[tuple[str, float, int, int, int], ...] = (
     ("00:00", 0.70, 50, 12, 110),
     ("06:00", 0.95, 45, 10, 110),
@@ -440,7 +440,7 @@ def build_demo_store() -> SQLiteStore:
     Beyond the hero CGM/insulin/meal timeline it adds a full Tandem t:slim X2 /
     Control-IQ treatment record (multi-segment profile, temp basals, corrections,
     suspends, three meals a day), sleep, activity, logged forecast curves, two
-    therapy-profile versions, and manual notes — so every surface has data."""
+    therapy-profile versions, and manual notes - so every surface has data."""
     store = SQLiteStore(":memory:")
     store.migrate()
     glucose, insulin, meals = _patient()

@@ -1,4 +1,4 @@
-"""Eval runner CLI — produces the reportable benchmark table."""
+"""Eval runner CLI - produces the reportable benchmark table."""
 
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ def _cmd_e4(args: argparse.Namespace) -> int:
     _emit(
         e4_row(result),
         args.format,
-        f"\n**{status}** — empirical FDR {result.empirical_fdr:.1%} "
+        f"\n**{status}** - empirical FDR {result.empirical_fdr:.1%} "
         f"(target ≤ {result.alpha:.0%})",
     )
     return 0 if result.passed else 1
@@ -98,7 +98,7 @@ def _cmd_e1(args: argparse.Namespace) -> int:
     _emit(
         e1_row(result),
         args.format,
-        f"\n**{status}** — fabricated catch {result.catch_rate_fabricated:.0%}, "
+        f"\n**{status}** - fabricated catch {result.catch_rate_fabricated:.0%}, "
         f"false-rejection {result.false_rejection_rate:.1%} "
         f"(targets {result.catch_target:.0%} / < {result.false_reject_target:.0%})",
     )
@@ -111,7 +111,7 @@ def _cmd_e5(args: argparse.Namespace) -> int:
     _emit(
         e5_row(result),
         args.format,
-        f"\n**{status}** — min Jaccard {result.min_jaccard:.2f}, "
+        f"\n**{status}** - min Jaccard {result.min_jaccard:.2f}, "
         f"{result.total_new_kinds} corruption-induced new kinds "
         f"(targets ≥ {result.jaccard_target:.1f} / 0)",
     )
@@ -124,7 +124,7 @@ def _cmd_e2(args: argparse.Namespace) -> int:
     _emit(
         e2_row(result),
         args.format,
-        f"\n**{status}** — best recall {result.best_recall:.0%} "
+        f"\n**{status}** - best recall {result.best_recall:.0%} "
         f"(target >= {result.recall_target:.0%})",
     )
     return 0 if result.passed else 1
@@ -135,7 +135,7 @@ def _cmd_e3(args: argparse.Namespace) -> int:
     _emit(
         e3_row(result),
         args.format,
-        f"\n**REPORT** — MARD {result.mard_pct:.1f}%, "
+        f"\n**REPORT** - MARD {result.mard_pct:.1f}%, "
         f"Clarke A+B {result.clarke_ab_pct:.1f}%, "
         f"Parkes A+B {result.parkes_ab_pct:.1f}% "
         f"over {result.n_pairs} forecast pairs",
@@ -149,7 +149,7 @@ def _cmd_consensus(args: argparse.Namespace) -> int:
     _emit(
         e_consensus_row(result),
         args.format,
-        f"\n**{status}** — {result.n_disagreements} disagreements "
+        f"\n**{status}** - {result.n_disagreements} disagreements "
         f"in {result.n_checks} metric checks",
     )
     return 0 if result.passed else 1

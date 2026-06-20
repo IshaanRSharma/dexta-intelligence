@@ -1,4 +1,4 @@
-"""``dexta serve`` — run the local web GUI."""
+"""``dexta serve`` - run the local web GUI."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def cmd_serve(
     """Build the GUI app and serve it with uvicorn.
 
     Binds localhost by default; pass ``--host 0.0.0.0`` to deliberately expose
-    the GUI to your LAN (there is no auth — only do this on a trusted network).
+    the GUI to your LAN (there is no auth - only do this on a trusted network).
     """
     try:
         import uvicorn  # noqa: PLC0415
@@ -53,7 +53,7 @@ def cmd_serve(
             return opener(cfg, db_path)
 
     # Capture the launched config path once so the settings panel reads/writes
-    # the file the running server actually loaded — not a per-request re-resolve.
+    # the file the running server actually loaded - not a per-request re-resolve.
     settings_path = resolve_config_path(config_path)
     app = create_app(config, store_opener=base_opener, config_path=settings_path, host=host)
 
@@ -67,7 +67,7 @@ def cmd_serve(
     if host not in ("127.0.0.1", "localhost", "::1"):
         out.write(
             f"WARNING: binding {host} exposes the auth-less PHI GUI to your "
-            "network — only do this on a trusted LAN.\n"
+            "network - only do this on a trusted LAN.\n"
         )
     out.write(f"dexta serve · http://{host}:{port}  (Ctrl-C to stop)\n")
     uvicorn.run(app, host=host, port=port, log_level="warning")

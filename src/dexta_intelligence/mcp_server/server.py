@@ -44,7 +44,7 @@ TOOL_NAMES: tuple[str, ...] = (
     "get_agp_report",
 )
 
-#: Insulin extension — registered only when the store holds insulin data.
+#: Insulin extension - registered only when the store holds insulin data.
 INSULIN_TOOL_NAMES: tuple[str, ...] = (
     "get_boluses",
     "get_carb_entries",
@@ -95,7 +95,7 @@ def build_realtime_connector(config: Config) -> RealtimeConnector | None:
 
 
 def _capabilities(store: StoragePort) -> CapabilitySet:
-    """Stream presence from store coverage — decides what the server exposes."""
+    """Stream presence from store coverage - decides what the server exposes."""
     coverage = store.coverage()
     return CapabilitySet(
         has_insulin=coverage.n_insulin > 0,
@@ -134,7 +134,7 @@ def _register_insulin_tools(mcp: FastMCP, store: StoragePort) -> None:
 
     @mcp.tool(name="get_iob", run_in_thread=False)
     def get_iob(timestamp: str) -> dict[str, Any]:
-        """Tier B insulin-on-board at an ISO datetime — analysis context, never dosing."""
+        """Tier B insulin-on-board at an ISO datetime - analysis context, never dosing."""
         try:
             return contract.get_iob(store, _parse_dt(timestamp))
         except ValueError as exc:
@@ -268,7 +268,7 @@ def build_server(
 
     @mcp.tool(name="get_agp_report", run_in_thread=False)
     def get_agp_report(start: str, end: str) -> dict[str, Any]:
-        """AGP percentile profile — 5-minute-of-day bins across days."""
+        """AGP percentile profile - 5-minute-of-day bins across days."""
         return contract.get_agp_report(store, _parse_dt(start), _parse_dt(end))
 
     if _capabilities(store).has_insulin:

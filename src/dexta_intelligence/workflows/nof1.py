@@ -1,7 +1,7 @@
 """Single-subject (n-of-1) research mode: pre-register, test, report.
 
 A clinician or self-experimenter pre-registers one comparison over the
-subject's own data — a grouping of days or events and an outcome metric — and
+subject's own data - a grouping of days or events and an outcome metric - and
 this workflow runs the full statistical-rigor battery on the two resulting
 conditions, then emits a reproducible verdict.
 
@@ -17,15 +17,15 @@ it removes the multiple-comparisons freedom that turns observational mining into
 p-hacking.
 
 The rigor is reused, not reinvented. Each n-of-1 test is one
-:func:`dexta_intelligence.stats.rigor.assess` call — permutation p-value,
-split-half replication, and the minimum-sample power gate — over the two groups
+:func:`dexta_intelligence.stats.rigor.assess` call - permutation p-value,
+split-half replication, and the minimum-sample power gate - over the two groups
 the :class:`~dexta_intelligence.agents.discovery_tools.DiscoveryToolkit`
 produces for the registered comparison. FDR correction is intentionally absent:
 a single pre-registered hypothesis tests exactly one thing, so ``q == p`` and
 the BH step would be a no-op (and dishonest dressing).
 
 Deterministic: no LLM. Given the same store and seed, two runs are identical.
-Never raises on thin data — a comparison the toolkit cannot form, or groups
+Never raises on thin data - a comparison the toolkit cannot form, or groups
 below the power floor, comes back as an ``"underpowered"`` verdict with a
 human-readable reason, never an exception.
 """
@@ -119,7 +119,7 @@ class Hypothesis:
     metric-aware comparisons (ignored by comparisons that fix their own outcome,
     e.g. ``meal_carbs``, whose outcome is the post-meal excursion).
 
-    ``statement`` is the human-readable pre-registration — what the subject
+    ``statement`` is the human-readable pre-registration - what the subject
     committed to testing before looking. It is recorded verbatim in the result
     so the report shows exactly what was registered.
     """
@@ -155,7 +155,7 @@ class Hypothesis:
 class Nof1Result:
     """Outcome of one pre-registered single-subject test.
 
-    Always returned — a comparison that could not be formed or that fell below
+    Always returned - a comparison that could not be formed or that fell below
     the power floor comes back with ``verdict="underpowered"`` and an empty
     ``stats``, never an exception.
     """
@@ -186,7 +186,7 @@ class Nof1Result:
         """The standing honesty caveat for every n-of-1 result."""
         return (
             "Single-subject observational association from naturally-occurring "
-            "data, not a randomized trial — describes a pattern, not a cause, and "
+            "data, not a randomized trial - describes a pattern, not a cause, and "
             "is not treatment advice."
         )
 
@@ -230,18 +230,18 @@ def run_nof1(
 
     Splits the subject's data into the two registered conditions via the
     :class:`~dexta_intelligence.agents.discovery_tools.DiscoveryToolkit`
-    instrument, then runs :func:`dexta_intelligence.stats.rigor.assess` — power
-    gate, permutation p-value, split-half replication — on the two groups in
+    instrument, then runs :func:`dexta_intelligence.stats.rigor.assess` - power
+    gate, permutation p-value, split-half replication - on the two groups in
     time order. No FDR step: a single pre-registered hypothesis tests one thing,
     so ``q == p``.
 
     Verdict mapping:
 
-    - ``"underpowered"`` — the comparison could not be formed, or a group fell
+    - ``"underpowered"`` - the comparison could not be formed, or a group fell
       below the power floor. Collect more data; no effect claim is made.
-    - ``"supported"`` — powered, permutation-significant, and the direction
+    - ``"supported"`` - powered, permutation-significant, and the direction
       replicated on a temporally disjoint split.
-    - ``"not_supported"`` — powered but not significant, or significant without
+    - ``"not_supported"`` - powered but not significant, or significant without
       replication (an unreplicated single-subject signal is not support).
 
     Deterministic given ``seed``; never raises on thin data.
@@ -272,7 +272,7 @@ def run_nof1(
     if not tool_result.ok:
         reason = tool_result.error or "comparison could not be formed"
         return _underpowered(
-            hypothesis, f"{reason} — collecting more data", seed, n_permutations
+            hypothesis, f"{reason} - collecting more data", seed, n_permutations
         )
 
     group_a = tool_result.group_a

@@ -36,7 +36,7 @@ class _AIMessage:
 
 class _FakeToolModel:
     """Replays scripted turns. A turn is either tool calls, a final answer
-    string, or a reflect JSON string — served from one queue in call order."""
+    string, or a reflect JSON string - served from one queue in call order."""
 
     def __init__(self, turns: list[Any]) -> None:
         self._turns = turns
@@ -168,7 +168,7 @@ def test_model_none_single_round_no_crash() -> None:
 
 def test_round_one_number_stays_faithful_in_final_answer() -> None:
     """A number computed in round 1 and cited in the round-2 answer must stay
-    faithful — proves evidence accumulation across rounds feeds the guard."""
+    faithful - proves evidence accumulation across rounds feeds the guard."""
     store = _store()
     # tod_compare on the 03-05h vs 12-14h windows yields a real mean_a near 185.
     # Round 1 produces it; round 2's final answer cites it; the merged pool must

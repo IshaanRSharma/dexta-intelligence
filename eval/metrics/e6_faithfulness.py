@@ -1,4 +1,4 @@
-"""E6 end-to-end faithfulness — is every number in the real answer traceable.
+"""E6 end-to-end faithfulness - is every number in the real answer traceable.
 
 E1 grades faithfulness on simulated prose. This metric closes that gap by running
 the real investigation agent on every benchmark scenario and reading the agent's

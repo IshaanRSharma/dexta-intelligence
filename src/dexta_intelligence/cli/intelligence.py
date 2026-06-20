@@ -60,7 +60,7 @@ def cmd_ask(
         coverage = store.coverage()
         gates = ColdStartReport.from_coverage(coverage)
         if gates.below_hard_floor:
-            out.write(f"Only {coverage.span_days:.1f} days of data — too little to reason over.\n")
+            out.write(f"Only {coverage.span_days:.1f} days of data - too little to reason over.\n")
             return 1
         end_date = coverage.last_ts.date() if coverage.last_ts is not None else None
         window = _analysis_window(config, end_date)
@@ -105,7 +105,7 @@ def cmd_monitor(
 ) -> int:
     """Scan recent data for anomalies (severe lows/highs, TIR cliffs, sensor gaps).
 
-    Deterministic — no model. Writes ``kind="anomaly"`` findings and logs each via
+    Deterministic - no model. Writes ``kind="anomaly"`` findings and logs each via
     the default notifier; the dashboard and ``dexta brief`` surface them."""
     from dexta_intelligence.notifications import LogNotifier  # noqa: PLC0415
     from dexta_intelligence.workflows.monitor import run_monitor  # noqa: PLC0415
@@ -149,7 +149,7 @@ def cmd_explain(
         coverage = store.coverage()
         gates = ColdStartReport.from_coverage(coverage)
         if gates.below_hard_floor:
-            out.write(f"Only {coverage.span_days:.1f} days of data — too little to reason over.\n")
+            out.write(f"Only {coverage.span_days:.1f} days of data - too little to reason over.\n")
             return 1
         # The whole record: similar-event recurrence wants all history.
         window = (
@@ -189,7 +189,7 @@ def cmd_explain(
 
 
 def cmd_demo(*, out: TextIO, model: Any = None) -> int:
-    """Run dexta end-to-end on a synthetic patient — no data or API key needed.
+    """Run dexta end-to-end on a synthetic patient - no data or API key needed.
 
     Builds an in-memory store with a planted recurring late-bolus dinner spike,
     then explains the canonical spike exactly like ``dexta explain`` does
@@ -197,7 +197,7 @@ def cmd_demo(*, out: TextIO, model: Any = None) -> int:
     from dexta_intelligence.demo import DEMO_SPIKE_DATE, build_demo_store  # noqa: PLC0415
     from dexta_intelligence.investigations.spike import explain_spike  # noqa: PLC0415
 
-    out.write("Running dexta on a synthetic patient — no data or API key needed.\n\n")
+    out.write("Running dexta on a synthetic patient - no data or API key needed.\n\n")
     store = build_demo_store()
     try:
         coverage = store.coverage()

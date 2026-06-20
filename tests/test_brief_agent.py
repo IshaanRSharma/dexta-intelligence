@@ -38,7 +38,7 @@ class _FakeModel:
 
 
 class _BoomModel:
-    """Model that raises — exercises the total-failure fallback path."""
+    """Model that raises - exercises the total-failure fallback path."""
 
     def invoke(self, messages: Any) -> _Response:
         msg = "model exploded"
@@ -143,7 +143,7 @@ def test_fabricated_number_section_falls_back() -> None:
             "sections": [
                 {
                     "title": "Fabricated",
-                    # 999 is nowhere in the evidence pool — guard must reject it.
+                    # 999 is nowhere in the evidence pool - guard must reject it.
                     "body": "An unexplained spike of 999 mg/dL appeared overnight.",
                     "finding_idx": 0,
                 }
@@ -167,7 +167,7 @@ def test_dosing_advice_section_rejected() -> None:
             "sections": [
                 {
                     "title": "Advice",
-                    # Treatment advice — hard regex must refuse it even though
+                    # Treatment advice - hard regex must refuse it even though
                     # every number traces to the evidence pool.
                     "body": "Given the 28 mg/dL drift, increase overnight basal by 0.71 units.",
                     "finding_idx": 0,
