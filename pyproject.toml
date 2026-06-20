@@ -67,7 +67,7 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/ishaansharma/dexta-intelligence"
+Repository = "https://github.com/IshaanRSharma/dexta-intelligence"
 
 [tool.hatch.version]
 path = "src/dexta_intelligence/__init__.py"

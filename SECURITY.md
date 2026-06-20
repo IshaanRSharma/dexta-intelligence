@@ -13,7 +13,7 @@ PyPI release yet; fixes land on `main`.
 **Do not open a public issue for a security or privacy vulnerability.**
 
 Report privately through GitHub's
-[private vulnerability reporting](https://github.com/ishaansharma/dexta-intelligence/security/advisories/new)
+[private vulnerability reporting](https://github.com/IshaanRSharma/dexta-intelligence/security/advisories/new)
 ("Security" tab → "Report a vulnerability"). If that is unavailable, open a minimal public
 issue that says only "security report - please enable private contact" without details, and a
 maintainer will follow up.

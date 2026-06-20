@@ -14,7 +14,7 @@ agents.
 This project uses [uv](https://docs.astral.sh/uv/) and targets Python 3.11 and 3.12.
 
 ```bash
-git clone https://github.com/ishaansharma/dexta-intelligence
+git clone https://github.com/IshaanRSharma/dexta-intelligence
 cd dexta-intelligence
 uv sync --all-extras            # install the package + every optional extra + dev tools
 ```
