@@ -7,25 +7,31 @@ mypy clean (101 files); ruff clean except a pre-existing `reason.py:98`
 complexity. Mirror these to GitHub Issues with the `gh issue create` commands at
 the bottom once `gh` is available.
 
-## #1 `/reports` makes synchronous PubMed calls on page load
+## #1 `/reports` makes synchronous PubMed calls on page load (RESOLVED 2026-06-20)
 
 - Opened: 2026-06-20
+- Resolved: 2026-06-20 in commit `878591a`
 - Severity: medium (performance / availability), non-blocking
 - Area: `src/dexta_intelligence/server/app.py:711` ->
   `src/dexta_intelligence/agents/advisory.py:163` ->
   `src/dexta_intelligence/evidence/pubmed.py:95`
 
-**What:** The `/reports` GET and the report export build a clinical advisory
-with `model=None` but `evidence=PubMedBackend`. `build` calls `_cite` once per
+**What:** The `/reports` GET and the report export built a clinical advisory
+with `model=None` but `evidence=PubMedBackend`. `build` called `_cite` once per
 active finding, each doing synchronous esearch + esummary HTTP round-trips at a
 15s read timeout. The default config is `evidence.enabled=True` and
-`evidence.backend=pubmed`, so this fires on a default install, not only when
-opted in. The call runs in the threadpool and swallows failures, so it cannot
-crash or leak, but a slow or unreachable NCBI stalls the page for many seconds
-and can tie up worker threads under concurrent loads.
+`evidence.backend=pubmed`, so this fired on a default install, not only when
+opted in. The call ran in the threadpool and swallowed failures, so it could not
+crash or leak, but a slow or unreachable NCBI stalled the page and could tie up
+worker threads.
 
-**Fix options:** cache literature lookups, lower the timeout, or defer the
-fetch behind an explicit user action so it never runs on a plain page load.
+**Fix (shipped):** the `/reports` GET is now deterministic and never touches the
+network; literature citations are deferred to a `GET /reports/citations` HTMX
+fragment swapped in after first paint (only when evidence is enabled). Backed by
+a process-wide TTL cache (`evidence/cache.py`, `[evidence].cache_ttl_minutes`,
+default 1 day) and a tighter interactive timeout (4s/2s) via
+`PubMedBackend(interactive=True)`. Export keeps citations inline. Tests in
+`tests/test_advisory.py` + `tests/test_evidence.py`.
 
 ## #2 SSE error payloads can disclose an absolute DB path
 
