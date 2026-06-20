@@ -447,6 +447,7 @@ SETTINGS_PANELS: tuple[PanelSchema, ...] = (
         note="API keys save to ~/.dexta/secrets.env (never in this file).",
         env_keys=(
             ("ANTHROPIC_API_KEY", "Anthropic models"),
+            ("GOOGLE_API_KEY", "Google Gemini models"),
             ("OPENROUTER_API_KEY", "OpenRouter (any hosted model)"),
         ),
         fields=(
@@ -457,17 +458,19 @@ SETTINGS_PANELS: tuple[PanelSchema, ...] = (
                 options=(
                     ("anthropic", "Anthropic"),
                     ("openai", "OpenAI"),
+                    ("google_genai", "Google Gemini"),
                     ("openrouter", "OpenRouter (BYOM)"),
                     ("ollama", "Ollama (local)"),
+                    ("llamacpp", "Local model file (GGUF)"),
                 ),
-                hint="LangChain provider id. API keys stay in the environment below.",
+                hint="LangChain provider id. Local options (ollama, llamacpp) need no key.",
             ),
             FieldSchema(
                 "model",
                 "Model",
                 placeholder="claude-sonnet-4-6",
-                hint="Model slug for the provider (e.g. ``anthropic/claude-sonnet-4-6`` on "
-                "OpenRouter).",
+                hint="Model slug for the provider, or a local .gguf file path when provider "
+                "is llamacpp (e.g. ``anthropic/claude-sonnet-4-6`` on OpenRouter).",
             ),
         ),
     ),

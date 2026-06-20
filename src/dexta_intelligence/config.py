@@ -195,9 +195,10 @@ class DexcomApiConfig(_Section):
 
 class LLMConfig(_Section):
     provider: str = "anthropic"
-    """Any LangChain provider (``anthropic``, ``openai``, ``ollama``, …) or
-    ``openrouter`` - one OPENROUTER_API_KEY unlocks every hosted model, the
-    lowest-friction BYOM path (model names like ``anthropic/claude-sonnet-4``)."""
+    """Any LangChain provider (``anthropic``, ``openai``, ``google_genai`` for
+    Google DeepMind Gemini, ``ollama``, …) or ``openrouter`` - one
+    OPENROUTER_API_KEY unlocks every hosted model, the lowest-friction BYOM path
+    (model names like ``anthropic/claude-sonnet-4``)."""
     model: str = "claude-sonnet-4-6"
     roles: dict[str, dict[str, Any]] = Field(default_factory=dict)
     """Per-role overrides, e.g. ``roles.skeptic = {provider="ollama", model="llama3"}``."""

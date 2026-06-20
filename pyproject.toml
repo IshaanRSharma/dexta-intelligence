@@ -38,7 +38,10 @@ llm = [
   "langchain-core>=0.3",
   "langchain-anthropic>=0.3",
   "langchain-openai>=0.3",
+  "langchain-google-genai>=2.0",
+  "langchain-ollama>=0.2",
 ]
+local = ["langchain-community>=0.3", "llama-cpp-python>=0.3"]
 nightscout = ["httpx>=0.27"]
 dexcom = ["pydexcom>=0.4"]
 libre = ["pylibrelinkup>=0.10"]
@@ -116,6 +119,12 @@ warn_unreachable = true
 # Optional [llm] extra — lazily imported in llm/factory.py, not installed in
 # the base dev environment.
 module = ["langchain.*", "langchain_core.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Optional [local] extra (llama.cpp) — lazily imported in llm/factory.py for
+# local model files, not installed in the base dev environment.
+module = ["langchain_community.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

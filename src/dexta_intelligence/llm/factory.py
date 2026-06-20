@@ -13,7 +13,21 @@ power users override per role in ``dexta.toml``::
     model = "llama3"
 
 Provider support comes from LangChain's ``init_chat_model`` (Anthropic,
-OpenAI, Ollama, Groq, Mistral, …) - we do not write provider clients.
+OpenAI, Google DeepMind Gemini, Ollama, Groq, Mistral, …) - we do not write
+provider clients. ``provider = "gemini"`` / ``"google"`` is normalized to
+LangChain's ``google_genai`` (Gemini via the AI Studio API, ``GOOGLE_API_KEY``).
+
+Local-first paths need no API key and run offline:
+
+    [llm]
+    provider = "ollama"            # a local Ollama daemon; model = "llama3"
+    # or
+    provider = "llamacpp"          # a local weights file; model = the .gguf path
+    model = "~/models/llama-3.1-8b-instruct.Q4_K_M.gguf"
+
+``ollama`` honors ``OLLAMA_HOST`` for a non-default/remote daemon; ``llamacpp``
+(aliases ``gguf`` / ``local_path``) loads ``model`` as a filesystem path through
+llama.cpp (the optional ``local`` extra).
 ``provider = "openrouter"`` is special-cased onto the OpenAI-compatible
 endpoint, so one ``OPENROUTER_API_KEY`` unlocks every model on OpenRouter
 (``model = "anthropic/claude-sonnet-4"``, ``"openai/gpt-4o"``,
@@ -93,6 +107,18 @@ def resolve_spec(
     )
 
 
+#: Cloud providers gated on a single API key: provider id -> (env var, help url).
+_CLOUD_KEYS: dict[str, tuple[str, str]] = {
+    "anthropic": ("ANTHROPIC_API_KEY", "https://console.anthropic.com/settings/keys"),
+    "openai": ("OPENAI_API_KEY", "https://platform.openai.com/api-keys"),
+}
+#: Aliases that all resolve to LangChain's google_genai (Gemini, AI Studio API).
+_GEMINI_ALIASES = ("google_genai", "gemini", "google")
+#: Aliases for a local Ollama daemon, and for a local model file via llama.cpp.
+_OLLAMA_ALIASES = ("ollama", "local")
+_LLAMACPP_ALIASES = ("llamacpp", "llama_cpp", "gguf", "local_path")
+
+
 def get_model(spec: ModelSpec) -> BaseChatModel:
     """Construct the chat model for a resolved spec.
 
@@ -120,15 +146,9 @@ def get_model(spec: ModelSpec) -> BaseChatModel:
         kwargs["max_tokens"] = spec.max_tokens
 
     if spec.provider == "openrouter":
-        # OpenRouter speaks the OpenAI API; route through the openai provider
-        # with its endpoint + key. One key, every model - the BYOM default.
-        key = os.environ.get("OPENROUTER_API_KEY")
-        if not key:
-            msg = (
-                "provider 'openrouter' requires the OPENROUTER_API_KEY "
-                "environment variable (get one at https://openrouter.ai/keys)"
-            )
-            raise RuntimeError(msg)
+        # OpenRouter speaks the OpenAI API; one key, every hosted model - the
+        # lowest-friction BYOM default.
+        key = _require_key("openrouter", "OPENROUTER_API_KEY", "https://openrouter.ai/keys")
         return init_chat_model(
             spec.model,
             model_provider="openai",
@@ -136,35 +156,87 @@ def get_model(spec: ModelSpec) -> BaseChatModel:
             api_key=key,
             **kwargs,
         )
-
-    if spec.provider == "anthropic":
-        key = os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            msg = (
-                "provider 'anthropic' requires the ANTHROPIC_API_KEY "
-                "environment variable (https://console.anthropic.com/settings/keys)"
-            )
-            raise RuntimeError(msg)
-        return init_chat_model(
-            spec.model,
-            model_provider=spec.provider,
-            api_key=key,
-            **kwargs,
-        )
-
-    if spec.provider == "openai":
-        key = os.environ.get("OPENAI_API_KEY")
-        if not key:
-            msg = (
-                "provider 'openai' requires the OPENAI_API_KEY "
-                "environment variable (https://platform.openai.com/api-keys)"
-            )
-            raise RuntimeError(msg)
-        return init_chat_model(
-            spec.model,
-            model_provider=spec.provider,
-            api_key=key,
-            **kwargs,
-        )
-
+    if spec.provider in _OLLAMA_ALIASES:
+        return _ollama_model(init_chat_model, spec, kwargs)
+    if spec.provider in _LLAMACPP_ALIASES:
+        return _local_model_file(spec)
+    cloud = _cloud_keyed_model(init_chat_model, spec, kwargs)
+    if cloud is not None:
+        return cloud
     return init_chat_model(spec.model, model_provider=spec.provider, **kwargs)
+
+
+def _require_key(provider: str, env_var: str, url: str) -> str:
+    """Return the env-var value or raise a clear, actionable RuntimeError."""
+    key = os.environ.get(env_var)
+    if not key:
+        msg = f"provider {provider!r} requires the {env_var} environment variable ({url})"
+        raise RuntimeError(msg)
+    return key
+
+
+def _cloud_keyed_model(
+    init_chat_model: Callable[..., BaseChatModel],
+    spec: ModelSpec,
+    kwargs: dict[str, Any],
+) -> BaseChatModel | None:
+    """A cloud provider gated on an API key, or ``None`` if not one of them."""
+    if spec.provider in _CLOUD_KEYS:
+        env_var, url = _CLOUD_KEYS[spec.provider]
+        key = _require_key(spec.provider, env_var, url)
+        return init_chat_model(spec.model, model_provider=spec.provider, api_key=key, **kwargs)
+    if spec.provider in _GEMINI_ALIASES:
+        # Google DeepMind Gemini via the AI Studio API (langchain-google-genai).
+        # The model reads GOOGLE_API_KEY itself; we gate here for a clear error.
+        _require_key("google_genai", "GOOGLE_API_KEY", "https://aistudio.google.com/apikey")
+        return init_chat_model(spec.model, model_provider="google_genai", **kwargs)
+    return None
+
+
+def _ollama_model(
+    init_chat_model: Callable[..., BaseChatModel],
+    spec: ModelSpec,
+    kwargs: dict[str, Any],
+) -> BaseChatModel:
+    """Local Ollama daemon - no API key, runs on your machine (fully offline).
+    ``OLLAMA_HOST`` points at a non-default/remote daemon; a bare host:port is
+    normalized to an http URL."""
+    host = os.environ.get("OLLAMA_HOST")
+    if host:
+        if not host.startswith(("http://", "https://")):
+            host = f"http://{host}"
+        kwargs.setdefault("base_url", host)
+    return init_chat_model(spec.model, model_provider="ollama", **kwargs)
+
+
+def _local_model_file(spec: ModelSpec) -> BaseChatModel:
+    """Run a model from a local weights file (a GGUF) via llama.cpp.
+
+    ``spec.model`` is a filesystem path, not a hosted model name: fully offline,
+    no service, no key. Requires the optional ``local`` extra (llama-cpp-python).
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    path = Path(spec.model).expanduser()
+    if not path.is_file():
+        msg = (
+            f"provider 'llamacpp' expects a path to a local model file; "
+            f"{path} is not a file (set [llm].model to a .gguf path)"
+        )
+        raise RuntimeError(msg)
+    try:
+        from langchain_community.chat_models import ChatLlamaCpp  # noqa: PLC0415
+
+        cpp_kwargs: dict[str, Any] = {"model_path": str(path)}
+        if spec.temperature is not None:
+            cpp_kwargs["temperature"] = spec.temperature
+        if spec.max_tokens is not None:
+            cpp_kwargs["max_tokens"] = spec.max_tokens
+        model = ChatLlamaCpp(**cpp_kwargs)
+    except ImportError as exc:
+        msg = (
+            "local model files need the optional 'local' extra: "
+            "pip install 'dexta-intelligence[local]'"
+        )
+        raise RuntimeError(msg) from exc
+    return cast("BaseChatModel", model)
