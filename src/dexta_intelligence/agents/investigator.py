@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.base import DataRequirement
-from dexta_intelligence.agents.discovery_tools import (
+from dexta_intelligence.agents.tools.toolkit import (
     TOOL_SCHEMA_FOR_LLM,
     DiscoveryToolkit,
     ToolResult,

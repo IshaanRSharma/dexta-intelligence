@@ -13,7 +13,7 @@ from dexta_intelligence.agents._calendar import (
     parse_relative_date,
     weekday_name,
 )
-from dexta_intelligence.agents.time_tools import CALENDAR_TOOL_NAMES, time_tool_specs
+from dexta_intelligence.agents.tools.time_tools import CALENDAR_TOOL_NAMES, time_tool_specs
 from dexta_intelligence.guard.faithfulness import audit
 
 # The donor repo's recorded LLM failure: the model called this date "Wednesday".

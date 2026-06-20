@@ -18,8 +18,8 @@ from dexta_intelligence.agents.investigator import Investigator
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
-    from dexta_intelligence.agents.discovery_tools import ToolResult
     from dexta_intelligence.agents.investigator import _Plan
+    from dexta_intelligence.agents.tools.toolkit import ToolResult
 
 __all__ = ["AGENT_NAME", "DiscoveryAgent", "discovery_agent", "register_discovery"]
 

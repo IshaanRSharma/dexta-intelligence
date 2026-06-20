@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from dexta_intelligence.agents.base import AgentContext
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.reason import ToolCall
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.trace import render_trace
 from dexta_intelligence.coldstart import ColdStartReport
 from dexta_intelligence.models import GlucoseEvent, ManualEvent

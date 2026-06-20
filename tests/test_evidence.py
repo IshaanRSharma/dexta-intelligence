@@ -227,7 +227,7 @@ class _StubBackend:
 
 
 def test_tool_specs_includes_search_evidence() -> None:
-    import dexta_intelligence.agents.discovery_tools as dt  # noqa: PLC0415
+    import dexta_intelligence.agents.tools.toolkit as dt  # noqa: PLC0415
 
     spec = next(
         s for s in _all_specs(dt) if s.name == "search_evidence"
@@ -267,7 +267,7 @@ def _all_specs(dt: Any) -> list[Any]:
 def test_search_evidence_fn_returns_hits_and_pmid_numbers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import dexta_intelligence.agents.discovery_tools as dt  # noqa: PLC0415
+    import dexta_intelligence.agents.tools.toolkit as dt  # noqa: PLC0415
 
     stub = _StubBackend(
         [
@@ -300,7 +300,7 @@ def test_search_evidence_fn_returns_hits_and_pmid_numbers(
 
 
 def test_search_evidence_fn_empty_query(monkeypatch: pytest.MonkeyPatch) -> None:
-    import dexta_intelligence.agents.discovery_tools as dt  # noqa: PLC0415
+    import dexta_intelligence.agents.tools.toolkit as dt  # noqa: PLC0415
 
     monkeypatch.setattr(dt, "evidence_backend", lambda: _StubBackend([]))
     public, numbers = dt._search_evidence({"query": "  "})
@@ -309,7 +309,7 @@ def test_search_evidence_fn_empty_query(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_search_evidence_fn_backend_failure_noted(monkeypatch: pytest.MonkeyPatch) -> None:
-    import dexta_intelligence.agents.discovery_tools as dt  # noqa: PLC0415
+    import dexta_intelligence.agents.tools.toolkit as dt  # noqa: PLC0415
 
     def boom() -> Any:
         raise RuntimeError("no backend")
@@ -321,7 +321,7 @@ def test_search_evidence_fn_backend_failure_noted(monkeypatch: pytest.MonkeyPatc
 
 
 def test_search_evidence_fn_clamps_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    import dexta_intelligence.agents.discovery_tools as dt  # noqa: PLC0415
+    import dexta_intelligence.agents.tools.toolkit as dt  # noqa: PLC0415
 
     stub = _StubBackend([])
     monkeypatch.setattr(dt, "evidence_backend", lambda: stub)

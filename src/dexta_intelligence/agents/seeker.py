@@ -28,9 +28,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.chat import _SYSTEM, ChatAnswer, _finish
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.orchestrator import INVESTIGATION_DOCTRINE, workflow_tool_specs
 from dexta_intelligence.agents.reason import ReasoningResult, ToolCall, run_reasoning_loop
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel

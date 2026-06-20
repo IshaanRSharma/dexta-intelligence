@@ -10,7 +10,7 @@ import statistics
 from datetime import UTC, date, datetime, timedelta
 
 from dexta_intelligence.agents.base import AgentContext
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit, tool_specs
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.coldstart import ColdStartReport
 from dexta_intelligence.models import GlucoseEvent
 from dexta_intelligence.store import SQLiteStore

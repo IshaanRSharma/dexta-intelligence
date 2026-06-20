@@ -22,8 +22,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit
 from dexta_intelligence.agents.reason import ToolCall
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit
 from dexta_intelligence.agents.trace import render_trace
 from dexta_intelligence.guard.faithfulness import audit
 

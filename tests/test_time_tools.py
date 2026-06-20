@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from dexta_intelligence.agents.base import AgentContext
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit
 from dexta_intelligence.coldstart import ColdStartReport
 from dexta_intelligence.models import GlucoseEvent
 from dexta_intelligence.store import SQLiteStore

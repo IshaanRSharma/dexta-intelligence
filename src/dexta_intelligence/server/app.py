@@ -700,7 +700,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
 
     def _build_discussion_brief(store: StoragePort) -> Any:
         from dexta_intelligence.agents.advisory import ClinicalAdvisoryAgent  # noqa: PLC0415
-        from dexta_intelligence.agents.discovery_tools import evidence_backend  # noqa: PLC0415
+        from dexta_intelligence.agents.tools.toolkit import evidence_backend  # noqa: PLC0415
 
         coverage = store.coverage()
         active = store.get_findings(status=FindingStatus.ACTIVE, limit=50)

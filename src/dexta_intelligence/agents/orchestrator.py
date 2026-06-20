@@ -24,8 +24,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.chat import _finish
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.reason import ReasoningEvent, ToolSpec, run_reasoning_loop
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.trace import render_trace
 
 if TYPE_CHECKING:

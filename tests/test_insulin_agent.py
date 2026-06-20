@@ -16,8 +16,8 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.base import AgentContext
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit
 from dexta_intelligence.agents.insulin import InsulinAgent
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit
 from dexta_intelligence.coldstart import ColdStartReport
 from dexta_intelligence.models import (
     GlucoseEvent,

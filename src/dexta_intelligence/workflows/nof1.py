@@ -19,7 +19,7 @@ p-hacking.
 The rigor is reused, not reinvented. Each n-of-1 test is one
 :func:`dexta_intelligence.stats.rigor.assess` call - permutation p-value,
 split-half replication, and the minimum-sample power gate - over the two groups
-the :class:`~dexta_intelligence.agents.discovery_tools.DiscoveryToolkit`
+the :class:`~dexta_intelligence.agents.tools.toolkit.DiscoveryToolkit`
 produces for the registered comparison. FDR correction is intentionally absent:
 a single pre-registered hypothesis tests exactly one thing, so ``q == p`` and
 the BH step would be a no-op (and dishonest dressing).
@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit
 from dexta_intelligence.models import Finding, FindingStats
 from dexta_intelligence.stats.core import cohen_d
 from dexta_intelligence.stats.rigor import assess
@@ -229,7 +229,7 @@ def run_nof1(
     """Run the full rigor battery on one pre-registered single-subject comparison.
 
     Splits the subject's data into the two registered conditions via the
-    :class:`~dexta_intelligence.agents.discovery_tools.DiscoveryToolkit`
+    :class:`~dexta_intelligence.agents.tools.toolkit.DiscoveryToolkit`
     instrument, then runs :func:`dexta_intelligence.stats.rigor.assess` - power
     gate, permutation p-value, split-half replication - on the two groups in
     time order. No FDR step: a single pre-registered hypothesis tests one thing,

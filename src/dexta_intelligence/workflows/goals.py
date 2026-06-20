@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit
 from dexta_intelligence.analytics.rollups import daily_rollup
 from dexta_intelligence.models import (
     FindingStatus,
@@ -387,7 +387,7 @@ def _daily_rollups(glucose: Sequence[GlucoseEvent]) -> list[Any]:
 
 
 def _tool_schema() -> str:
-    from dexta_intelligence.agents.discovery_tools import TOOL_SCHEMA_FOR_LLM  # noqa: PLC0415
+    from dexta_intelligence.agents.tools.toolkit import TOOL_SCHEMA_FOR_LLM  # noqa: PLC0415
 
     return TOOL_SCHEMA_FOR_LLM
 

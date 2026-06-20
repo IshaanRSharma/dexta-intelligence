@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from dexta_intelligence.agents.base import AgentContext
-from dexta_intelligence.agents.discovery_tools import _MAX_RECALL_ITEMS, _recall
+from dexta_intelligence.agents.tools.toolkit import _MAX_RECALL_ITEMS, _recall
 from dexta_intelligence.coldstart import ColdStartReport
 from dexta_intelligence.memory import synthesis
 from dexta_intelligence.models import (

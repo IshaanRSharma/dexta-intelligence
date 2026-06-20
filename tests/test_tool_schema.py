@@ -11,7 +11,7 @@ import re
 from datetime import UTC, date, datetime, timedelta
 
 from dexta_intelligence.agents.base import AgentContext
-from dexta_intelligence.agents.discovery_tools import (
+from dexta_intelligence.agents.tools.toolkit import (
     TOOL_SCHEMA_FOR_LLM,
     DiscoveryToolkit,
 )

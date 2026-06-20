@@ -13,8 +13,8 @@ import pytest
 from tests.golden import make_store
 
 from dexta_intelligence.agents.base import AgentContext
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit, tool_specs
-from dexta_intelligence.agents.time_tools import CALENDAR_TOOL_NAMES
+from dexta_intelligence.agents.tools.time_tools import CALENDAR_TOOL_NAMES
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.coldstart import ColdStartReport
 from dexta_intelligence.connectors.tandem import PROFILE_SOURCE_ID, format_insulin_profile
 from dexta_intelligence.models import RawEvent

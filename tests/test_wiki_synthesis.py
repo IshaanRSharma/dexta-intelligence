@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.base import AgentContext
-from dexta_intelligence.agents.discovery_tools import _recall
+from dexta_intelligence.agents.tools.toolkit import _recall
 from dexta_intelligence.coldstart import ColdStartReport
 from dexta_intelligence.memory.synthesis import (
     SynthesisResult,

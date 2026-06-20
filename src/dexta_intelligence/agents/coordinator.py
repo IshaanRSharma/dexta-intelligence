@@ -35,8 +35,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.base import AgentRegistry
-from dexta_intelligence.agents.discovery_tools import _recall
 from dexta_intelligence.agents.skeptic import skeptic_agent
+from dexta_intelligence.agents.tools.toolkit import _recall
 from dexta_intelligence.config import Config
 from dexta_intelligence.models import Finding, FindingStatus, InvestigationRun, RunFinding
 from dexta_intelligence.workflows.lenses import PRODUCERS

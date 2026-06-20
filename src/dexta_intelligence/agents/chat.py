@@ -12,8 +12,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.reason import ReasoningResult, run_reasoning_loop
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.trace import TraceLine, render_trace
 from dexta_intelligence.guard.faithfulness import audit
 from dexta_intelligence.guard.treatment_gate import (
