@@ -3,7 +3,7 @@
 A fake tool-calling model emulates native function calling: each scripted
 turn is either a list of tool calls (the model decides to act) or a final
 string answer (the model decides it's done). This exercises the real
-multi-step loop - model -> tool -> model -> answer - without an API key.
+multi-step loop (model -> tool -> model -> answer) without an API key.
 """
 
 from __future__ import annotations
@@ -96,8 +96,8 @@ def test_loop_executes_tool_then_answers() -> None:
     )
     model = _FakeToolModel(
         [
-            [{"name": "echo", "args": {"x": 1}, "id": "c1"}],  # model decides to act
-            "The value is 42.",  # model decides it's done
+            [{"name": "echo", "args": {"x": 1}, "id": "c1"}],
+            "The value is 42.",
         ]
     )
     result = run_reasoning_loop(model, [tool], system="s", user="u")  # type: ignore[arg-type]
@@ -122,7 +122,7 @@ def test_loop_respects_max_steps() -> None:
         parameters={"type": "object", "properties": {}},
         fn=lambda _a: ({"ok": True}, {}),
     )
-    # Always asks for another tool call - never answers.
+    # Always asks for another tool call, never answers.
     model = _FakeToolModel([[{"name": "spin", "args": {}, "id": "c"}]] * 20)
     result = run_reasoning_loop(model, [tool], system="s", user="u", max_steps=3)  # type: ignore[arg-type]
     assert result.stopped_reason == "max_steps"
@@ -137,7 +137,7 @@ def test_chat_reasons_over_tool_and_answers_faithfully() -> None:
     model = _FakeToolModel(
         [
             [{"name": "tod_compare", "args": {"hours_a": [3, 5], "hours_b": [12, 14]}, "id": "c1"}],
-            "Your 03-05h window runs much higher than 12-14h.",  # no fabricated numbers
+            "Your 03-05h window runs much higher than 12-14h.",
         ]
     )
     answer = ChatAgent(model=model).ask(_ctx(store), "are my mornings high?")  # type: ignore[arg-type]
@@ -154,7 +154,7 @@ def test_chat_flags_fabricated_number() -> None:
     model = _FakeToolModel(
         [
             [{"name": "tod_compare", "args": {"hours_a": [3, 5], "hours_b": [12, 14]}, "id": "c1"}],
-            "Your glucose is exactly 999 mg/dL every morning.",  # untraceable
+            "Your glucose is exactly 999 mg/dL every morning.",
         ]
     )
     answer = ChatAgent(model=model).ask(_ctx(store), "how high are my mornings?")  # type: ignore[arg-type]
@@ -220,7 +220,7 @@ def test_chat_continues_after_tool_fault() -> None:
     """A failing tool call mid-conversation does not abort ChatAgent.
 
     The loop unit covers a raising tool; this asserts the same resilience end
-    to end through ChatAgent - a bad first call is recorded as not-ok, then a
+    to end through ChatAgent: a bad first call is recorded as not-ok, then a
     real probe runs and the model still produces a faithful answer.
     """
     store = _store()
@@ -233,7 +233,7 @@ def test_chat_continues_after_tool_fault() -> None:
     )
     answer = ChatAgent(model=model).ask(_ctx(store), "are my mornings high?")  # type: ignore[arg-type]
 
-    assert model.invocations == 3  # fault did not short-circuit the loop
+    assert model.invocations == 3  # the fault did not short-circuit the loop
     assert answer.tools_used == ("tod_compare", "tod_compare")
     assert answer.faithful
     assert "higher" in answer.text

@@ -2,7 +2,7 @@
 
 Tidepool's open data model stores CGM readings as ``cbg`` and pump boluses as
 ``bolus`` records. Users download a JSON export from the Tidepool web app
-(Upload → Export device data). This connector reads that file once per sync,
+(Upload then Export device data). This connector reads that file once per sync,
 normalizes glucose and insulin, and dedupes via ``(source, source_id)``.
 
 Live Tidepool Platform API sync is out of scope here - it requires OAuth client

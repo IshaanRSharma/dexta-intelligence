@@ -1,4 +1,4 @@
-"""Golden datasets with planted ground truth (WAVE5 §6)."""
+"""Golden datasets with planted ground truth."""
 
 from tests.golden.generator import (
     BUILDERS,

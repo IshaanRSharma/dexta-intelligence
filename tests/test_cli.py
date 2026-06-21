@@ -610,12 +610,11 @@ class TestGoals:
 
     def test_tick_with_active_goal_and_glucose(self, tmp_path: Path) -> None:
         store = _tmp_store(tmp_path)
-        # Seed with 30 days of glucose to clear hard floor
+        # 30 days of glucose to clear the hard floor.
         start = FIXED_NOW - timedelta(days=30)
         store.insert_glucose(
             [GlucoseEvent(ts=start + timedelta(hours=i), mg_dl=120) for i in range(24 * 30)]
         )
-        # Add a goal
         goal = compose_goal("reduce my overnight lows", now=FIXED_NOW)
         store.insert_goal(goal)
         out = _capture()
@@ -634,7 +633,6 @@ class TestGoals:
 
         assert code == 0
         assert "#1" in text
-        # Check that a checkpoint was written
         checkpoints = store.get_goal_checkpoints(1)
         assert len(checkpoints) > 0
         store.close()

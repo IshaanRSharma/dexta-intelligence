@@ -1,4 +1,4 @@
-"""Prediction-reconciliation page (PRD section 26): view-model + route.
+"""Prediction-reconciliation page: view-model + route.
 
 Uses the demo's planted forecast miss (carb underestimate) copied into a
 file-backed store so the FastAPI opener can reopen it per request.

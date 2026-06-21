@@ -1,8 +1,8 @@
 """recall() as the structured shared-context channel between agents.
 
-Covers Part A (skeptic_notes/status/confidence surfaced; open_questions and
-connections present) and Part B (findings/connections/open_questions capped,
-backward-compatible keys preserved).
+Covers what is surfaced (skeptic_notes/status/confidence, open_questions,
+connections) and the caps on findings/connections/open_questions, with
+backward-compatible keys preserved.
 """
 
 from __future__ import annotations

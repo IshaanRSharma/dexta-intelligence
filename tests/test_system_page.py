@@ -1,4 +1,4 @@
-"""System observability page (PRD section 16): the pure view-model + the route."""
+"""System observability page: the pure view-model + the route."""
 
 from __future__ import annotations
 

@@ -165,7 +165,7 @@ def test_wiki_missing_page_empty_state(tmp_path: Path) -> None:
     store = _store(tmp_path)
     config = Config.model_validate({"wiki": {"path": str(tmp_path / "nope")}})
     body = _client(store, config).get("/wiki/topics/ghost").text
-    assert "dexta wiki" in body  # install hint mentions the command
+    assert "dexta wiki" in body
     store.close()
 
 
@@ -193,7 +193,7 @@ def test_goals_page_shows_svg_arc(tmp_path: Path) -> None:
     body = _client(store).get("/goals").text
     assert "Reduce overnight lows" in body
     assert "<svg" in body and "<polyline" in body
-    assert "tick 2" in body  # latest note
+    assert "tick 2" in body  # only the latest note is surfaced
     store.close()
 
 
@@ -288,7 +288,6 @@ class _FakeAgent:
 def test_api_ask_with_fake_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = _store(tmp_path)
     _seed_glucose(store)
-    # Inject a fake model + fake ChatAgent so no real LLM is needed.
     monkeypatch.setattr(
         "dexta_intelligence.server.app.discovery_model", lambda _cfg: object()
     )
@@ -397,7 +396,7 @@ def test_markdown_escapes_and_renders() -> None:
     assert "<h2>Heading</h2>" in html
     assert "<strong>bold</strong>" in html
     assert "<code>code</code>" in html
-    assert "<script>" not in html  # escaped
+    assert "<script>" not in html
 
 
 def test_emit_toml_is_loadable(tmp_path: Path) -> None:
@@ -527,7 +526,7 @@ def test_markdown_sanitizes_javascript_link() -> None:
     html = markdown_to_html("[click me](javascript:alert(1))")
     assert "javascript:alert" not in html
     assert 'href="#"' in html
-    assert "click me" in html  # text preserved
+    assert "click me" in html  # link text preserved, only the scheme is stripped
 
 
 def test_markdown_keeps_safe_link_schemes() -> None:
@@ -701,7 +700,7 @@ def test_investigations_page_lists_runs(tmp_path: Path) -> None:
     assert "what drives overnight lows?" in body
     assert "Overnight lows cluster after evening exercise" in body
     assert "observation" in body
-    assert "Round 1: ran observation, pattern" in body  # the trace is shown
+    assert "Round 1: ran observation, pattern" in body
     store.close()
 
 
@@ -746,13 +745,13 @@ def test_findings_page_renders_tabs_and_cards(tmp_path: Path) -> None:
             status=FindingStatus.ACTIVE,
         )
     )
-    _seed_run(store)  # populates the investigation log tab
+    _seed_run(store)
     body = _client(store).get("/findings").text
     assert "Active findings" in body
     assert "Overnight lows after evening exercise" in body
     assert "Open hypotheses" in body
     assert "Investigation log" in body
-    assert "evidence" in body  # evidence-strength chip
+    assert "evidence" in body
     store.close()
 
 
@@ -777,10 +776,10 @@ def test_goals_page_shows_progress_and_checkpoints(tmp_path: Path) -> None:
         )
     body = _client(store).get("/goals").text
     assert "increase time in range" in body
-    assert "baseline" in body  # progress labels
+    assert "baseline" in body
     assert "target" in body
-    assert "58.0" in body  # current value surfaced
-    assert "checkpoint(s)" in body  # history affordance
+    assert "58.0" in body  # the current (latest) value, not the baseline
+    assert "checkpoint(s)" in body
     store.close()
 
 
@@ -850,9 +849,9 @@ def test_connectors_page_lists_all_sources(tmp_path: Path) -> None:
     body = _client(store).get("/connectors").text
     assert "Connectors" in body
     assert "Continuous sync" in body
-    assert "Nightscout" in body  # a connector-backed source row
-    assert "read-only" in body  # the read-only badge
-    assert "not configured" in body  # nothing configured in a fresh store
+    assert "Nightscout" in body
+    assert "read-only" in body
+    assert "not configured" in body
     store.close()
 
 

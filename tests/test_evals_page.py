@@ -1,4 +1,4 @@
-"""Evaluation / model-card page (PRD section 16): view-model + route."""
+"""Evaluation / model-card page: view-model + route."""
 
 from __future__ import annotations
 

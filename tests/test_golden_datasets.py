@@ -1,8 +1,8 @@
-"""Sanity pins for the golden datasets (WAVE5 §6).
+"""Sanity pins for the golden datasets.
 
-Each test asserts the *planted* ground truth - the canonical numbers the
+Each test asserts the *planted* ground truth, the canonical numbers the
 spike-explanation workflow must recover (peak 246, bolus 22 min late,
-14 of 18 dinner spikes) - so eval failures upstream can never be blamed
+14 of 18 dinner spikes), so eval failures upstream can never be blamed
 on the substrate.
 """
 

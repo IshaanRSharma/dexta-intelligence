@@ -126,7 +126,6 @@ def test_run_trace_streams_plan_and_per_producer_events(store: SQLiteStore) -> N
 
     plan = next(e for e in events if e["kind"] == "plan")
     assert plan["payload"]["steps"] == list(PRODUCERS)
-    # Every producer that started also reported done with a finding count.
     started = {e["payload"]["producer"] for e in events if e["kind"] == "running"}
     done = {e["payload"]["producer"] for e in events if e["kind"] == "producer_done"}
     assert started == done
@@ -135,7 +134,6 @@ def test_run_trace_streams_plan_and_per_producer_events(store: SQLiteStore) -> N
         for e in events
         if e["kind"] == "producer_done"
     )
-    # Coverage is emitted up front and recorded on the trace.
     assert kinds[0] == "coverage"
     assert "glucose_coverage_pct" in events[0]["payload"]
     assert rec.coverage_summary is not None
@@ -166,7 +164,6 @@ def test_poor_coverage_marks_run_limited(store: SQLiteStore) -> None:
     from dexta_intelligence.models import Finding  # noqa: PLC0415
 
     _seed_glucose(store)
-    # Full-coverage fixture is not limited.
     assert _coverage_summary(_full_coverage_ctx(store))["limited"] is False
 
     one = [Finding(agent="observation", kind="pattern", scope="x", headline="h")]

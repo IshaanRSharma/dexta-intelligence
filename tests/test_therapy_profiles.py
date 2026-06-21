@@ -1,4 +1,4 @@
-"""Versioned therapy profiles (PRD section 18).
+"""Versioned therapy profiles.
 
 Devices report only the current profile, so dexta records a new version when the
 content changes. Covers the store versioning, the sync-time capture, and the

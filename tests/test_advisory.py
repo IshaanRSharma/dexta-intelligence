@@ -85,7 +85,7 @@ def test_build_produces_grounded_discussion_items() -> None:
     assert brief.question == "prep for endo visit"
     assert brief.discuss_now
     item = brief.discuss_now[0]
-    assert item.evidence_refs  # every item is grounded in the patient's findings
+    assert item.evidence_refs  # every item is grounded in a patient finding
     assert "Overnight lows" in item.evidence_refs[0]
     assert brief.goals and brief.questions_for_clinician
     assert SAFETY_LINE in brief.limitations

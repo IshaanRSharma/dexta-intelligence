@@ -330,8 +330,7 @@ def test_search_evidence_fn_clamps_limit(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_markdown_linkifies_pmids() -> None:
-    """A cited PMID renders as a clickable PubMed link, so a literature-grounded
-    claim is one click from its source."""
+    """A cited PMID renders as a clickable PubMed link."""
     from dexta_intelligence.server.render import markdown_to_html  # noqa: PLC0415
 
     html = markdown_to_html("Prebolusing cuts the post-meal rise (PMID 25188375).")

@@ -1,6 +1,6 @@
-"""Dexcom connector tests - pure conversion on stub readings, connector on a stub client.
+"""Dexcom connector tests: pure conversion on stub readings, connector on a stub client.
 
-No network and no real pydexcom session: ``_StubReading`` satisfies the
+No network and no real pydexcom session. ``_StubReading`` satisfies the
 ``DexcomReadingLike`` duck type and ``_StubShareClient`` stands in for the
 pydexcom ``Dexcom`` object, recording the request window so the ~24h Share
 history cap is testable.

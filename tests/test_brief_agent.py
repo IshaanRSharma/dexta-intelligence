@@ -38,7 +38,7 @@ class _FakeModel:
 
 
 class _BoomModel:
-    """Model that raises - exercises the total-failure fallback path."""
+    """Model that raises: exercises the total-failure fallback path."""
 
     def invoke(self, messages: Any) -> _Response:
         msg = "model exploded"
@@ -100,9 +100,7 @@ def test_deterministic_brief_from_seeded_findings() -> None:
     assert len(brief.sections) == 2
     assert brief.sections[0].title == "Pattern Tod Drift"
     assert "28" in brief.sections[0].body
-    # Stats line present.
     assert "n=46" in brief.sections[0].body
-    # Summary is the safe counts line.
     assert "2 active finding(s)" in brief.headline_summary
 
 
@@ -153,7 +151,6 @@ def test_fabricated_number_section_falls_back() -> None:
     brief = build_brief(findings, _coverage(), model=model, today=TODAY)
 
     assert len(brief.sections) == 1
-    # Fabricated body dropped; deterministic render used instead.
     assert "999" not in brief.sections[0].body
     assert "28" in brief.sections[0].body
     assert brief.sections[0].title == "Pattern Tod Drift"
@@ -180,7 +177,6 @@ def test_dosing_advice_section_rejected() -> None:
     assert len(brief.sections) == 1
     body = brief.sections[0].body
     assert "increase overnight basal" not in body
-    # Deterministic fallback render used instead.
     assert "28" in body
     assert brief.sections[0].title == "Pattern Tod Drift"
 

@@ -1,4 +1,4 @@
-"""Nightscout connector - entries/treatments/devicestatus → timeline events.
+"""Nightscout connector - entries/treatments/devicestatus to timeline events.
 
 Nightscout is the OSS CGM remote-monitoring server used by the looping
 community, and the richest single source we support: glucose (``entries``),
@@ -78,7 +78,7 @@ def _redact_token(text: str) -> str:
 
 
 def _parse_iso(value: str) -> datetime:
-    """Nightscout ISO timestamp → aware UTC. Naive strings are assumed UTC."""
+    """Nightscout ISO timestamp to aware UTC. Naive strings are assumed UTC."""
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
@@ -109,7 +109,7 @@ def _as_float(value: Any) -> float | None:
 
 
 def parse_entry(raw: dict[str, Any]) -> GlucoseEvent | None:
-    """One ``entries`` record → :class:`GlucoseEvent`.
+    """One ``entries`` record to :class:`GlucoseEvent`.
 
     Returns ``None`` for non-sgv records (``mbg`` fingersticks, ``cal``
     calibrations) and for records missing a glucose value or timestamp.
@@ -146,7 +146,7 @@ def _basal_automatic(raw: dict[str, Any]) -> bool | None:
 
 
 def parse_treatment(raw: dict[str, Any]) -> list[InsulinEvent | MealEvent]:
-    """One ``treatments`` record → zero or more insulin/meal events.
+    """One ``treatments`` record to zero or more insulin/meal events.
 
     A single Nightscout treatment can carry both insulin and carbs (e.g.
     ``Meal Bolus``), so the return is a list. Records that are neither
@@ -222,7 +222,7 @@ def _curve_values(values: Any) -> list[float] | None:
 
 
 def parse_devicestatus(raw: dict[str, Any]) -> list[PredictionEvent]:
-    """One ``devicestatus`` record → algorithm forecast curves, if any.
+    """One ``devicestatus`` record to algorithm forecast curves, if any.
 
     - oref0/AAPS: ``openaps.suggested.predBGs`` with IOB/COB/UAM/ZT keys,
       each a list of mg/dL at 5-minute spacing from the cycle time

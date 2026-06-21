@@ -1,9 +1,8 @@
 """Calendar / date-math primitives - the single source of truth for date interpretation.
 
-LLMs compute date properties from strings unreliably (the donor repo recorded
-the model calling 2026-05-02 "Wednesday"; it is a Saturday), so anything that
-interprets a date - LLM-facing tools, prompt formatters - must call these
-helpers instead. Pure functions, no I/O.
+LLMs compute date properties from strings unreliably (e.g. calling 2026-05-02
+"Wednesday" when it is a Saturday), so anything that interprets a date - LLM-facing
+tools, prompt formatters - must call these helpers instead. Pure functions, no I/O.
 """
 
 from __future__ import annotations

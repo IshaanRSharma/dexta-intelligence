@@ -37,7 +37,7 @@ from dexta_intelligence.workflows.deep_analysis import run_deep_analysis
 
 __all__ = ["E5PerturbationResult", "run_e5"]
 
-#: Spec §14 robustness targets.
+#: Robustness target.
 _JACCARD_TARGET = 0.8
 
 #: Corruption parameters.

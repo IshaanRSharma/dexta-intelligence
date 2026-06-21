@@ -1,4 +1,4 @@
-"""Tests for the Wave 4 time-traversal tools on DiscoveryToolkit.
+"""Tests for the time-traversal tools on DiscoveryToolkit.
 
 These prove the reasoning agent can re-scope the active window itself: set_window
 clamps and re-scopes (a tod_compare after narrowing to March only sees March

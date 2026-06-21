@@ -240,7 +240,7 @@ def test_history_endpoint_returns_session_turns(
 
     assert [t["role"] for t in data["turns"]] == ["user", "assistant"]
     assert data["turns"][0]["content"] == "why did I spike Tuesday"
-    assert data["turns"][1]["html"]  # assistant turn carries rendered html
+    assert data["turns"][1]["html"]
     store.close()
 
 

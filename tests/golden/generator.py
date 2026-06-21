@@ -1,4 +1,4 @@
-"""Golden datasets - planted ground truth for Wave 5 spike explanation (WAVE5 §6).
+"""Golden datasets - planted ground truth for spike explanation.
 
 Five deterministic builders, each planting a known contributor (or none) into a
 synthetic timeline. The manifest records the planted numbers so tests and evals

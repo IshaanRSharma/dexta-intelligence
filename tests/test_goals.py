@@ -334,7 +334,6 @@ def test_migrate_upgrades_schema_version() -> None:
         store._conn.execute("UPDATE schema_version SET version = 1")
         store._conn.commit()
 
-        # Migrate again
         store.migrate()
         new_version = store._conn.execute(
             "SELECT version FROM schema_version"

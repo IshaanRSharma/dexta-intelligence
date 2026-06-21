@@ -151,7 +151,7 @@ def test_post_source_writes_toml_with_0600(tmp_path: Path) -> None:
     assert resp.status_code == 200
     assert "Saved." in resp.text
     assert toml_path.stat().st_mode & 0o777 == 0o600
-    assert not list(tmp_path.glob(".dexta.toml.*"))  # no temp files left behind
+    assert not list(tmp_path.glob(".dexta.toml.*"))  # atomic write leaves no temp files
     reloaded = load_config(toml_path)
     assert reloaded.nightscout.url == "https://ns.example.com"
     assert reloaded.nightscout.token == "supersecrettoken"

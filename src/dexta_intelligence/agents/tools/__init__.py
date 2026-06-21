@@ -5,7 +5,7 @@ and the cross-cutting logic functions (``_recall``, ``_search_evidence``,
 ``evidence_backend``) live in ``toolkit``. This package owns only the
 declarative belt: each module turns toolkit methods into ``ToolSpec`` builders,
 grouped by domain. :func:`build_belt` stitches them together and applies the
-capability filter, replicating the historical ``tool_specs`` exactly.
+capability filter.
 """
 
 from __future__ import annotations
@@ -49,7 +49,6 @@ def build_belt(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
     ]
     caps = toolkit.capabilities()
     specs = [spec for spec in specs if caps.allows(_TOOL_NEEDS.get(spec.name))]
-    # Manual context is independent of glucose coverage - always available.
     specs.extend(manual_specs(toolkit))
     specs.extend(time_tool_specs())
     return specs

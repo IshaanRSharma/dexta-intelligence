@@ -1,9 +1,9 @@
-"""View-model logic for the System observability page (PRD section 16).
+"""View-model logic for the System observability page.
 
-Pure data shaping for OSS credibility: pipeline health, agent runs, the
-instrument log aggregated across runs, honest rigor signals (skeptic
-rejections, coverage-limited runs), and the configured model. Reads the store
-and config; returns plain dicts the template renders. No HTML, no side effects.
+Pure data shaping: pipeline health, agent runs, the instrument log aggregated
+across runs, rigor signals (skeptic rejections, coverage-limited runs), and the
+configured model. Reads the store and config; returns plain dicts the template
+renders. No HTML, no side effects.
 """
 
 from __future__ import annotations

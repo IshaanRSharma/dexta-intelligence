@@ -3,8 +3,7 @@
 Agents never invoke each other. Each one reads the store + memory through
 :class:`AgentContext`, does its work, and returns :class:`Finding` records.
 The registry fans out all registered agents with per-agent exception
-isolation (one crashing agent never takes down an analysis run) - a direct
-port of the battle-tested detector registry from the donor codebase.
+isolation: one crashing agent never takes down an analysis run.
 
 Two hard rules, enforced structurally:
 

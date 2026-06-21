@@ -4,10 +4,9 @@ Pure data shaping: this module reads findings, hypotheses, and investigation
 runs from the store and returns plain dicts the template renders. It produces
 DATA, not HTML (apart from finding bodies, which are pre-rendered Markdown).
 
-The small helpers here (relative-time formatting, stats-line assembly,
-internal-kind filtering) intentionally mirror the conventions in
-``server.app`` but are reimplemented locally: importing private names from
-``app`` would create a circular dependency.
+The small helpers here are reimplemented locally rather than imported from
+``server.app``: importing private names from ``app`` would create a circular
+dependency.
 """
 
 from __future__ import annotations

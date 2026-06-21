@@ -1,9 +1,9 @@
-"""Tests for the monitoring pipeline - deterministic anomaly detectors.
+"""Tests for the monitoring pipeline's deterministic anomaly detectors.
 
 Plants severe lows / highs / TIR cliffs / sensor gaps in an in-memory store
 and asserts the right anomalies fire with the correct numbers; clean data
-produces nothing; persist writes anomaly Findings; a CollectingNotifier
-receives every anomaly; thin data degrades to ``[]`` without raising.
+produces nothing; persistence and notification wiring behave; thin data
+degrades to ``[]`` without raising.
 """
 
 from __future__ import annotations
@@ -190,7 +190,6 @@ def test_worsened_anomaly_supersedes_and_renotifies() -> None:
 def test_thin_data_does_not_crash() -> None:
     store = SQLiteStore(":memory:")
     store.migrate()
-    # No data at all.
     assert run_monitor(_ctx(store), persist=True, now=_END) == []
 
     # A single reading: anchors a window but too thin for cliff; no crash.

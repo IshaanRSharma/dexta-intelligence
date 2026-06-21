@@ -1,8 +1,8 @@
 """Tests for the inferential-statistics tools on the DiscoveryToolkit.
 
-Covers the new ``correlate`` tool (planted correlation, sign/strength/p, and
-the too-few-days guard) and the significance fields ``_two_group`` now adds to
-every group comparison (p_welch, cliffs_delta).
+Covers the ``correlate`` tool (planted correlation, sign/strength/p, and the
+too-few-days guard) and the significance fields ``_two_group`` adds to every
+group comparison (p_welch, cliffs_delta).
 """
 
 from __future__ import annotations

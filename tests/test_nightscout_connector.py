@@ -1,8 +1,8 @@
-"""Nightscout connector tests - pure parsing against fixtures, client via MockTransport.
+"""Nightscout connector tests: pure parsing against fixtures, client via MockTransport.
 
-No live network calls: the connector tests run against an ``httpx.MockTransport``
-that emulates the Nightscout v1 query API (``find[...]`` filters + ``count``),
-which also lets us exercise real pagination behaviour.
+The connector tests run against an ``httpx.MockTransport`` emulating the
+Nightscout v1 query API (``find[...]`` filters + ``count``), exercising real
+pagination behaviour.
 """
 
 from __future__ import annotations

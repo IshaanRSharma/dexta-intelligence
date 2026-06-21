@@ -175,7 +175,7 @@ def load_latest(store: StoragePort) -> SynthesisResult | None:
     return SynthesisResult(topic_paragraphs=paragraphs, connections=connections)
 
 
-# ── LLM call (house pattern, mirrors workflows/goals._llm_compose) ───────────────
+# ── LLM call ─────────────────────────────────────────────────────────────────
 
 
 def _invoke(active: list[Finding], model: Any) -> dict[str, Any] | None:

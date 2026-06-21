@@ -1,9 +1,9 @@
 """Tests for the live investigation SSE endpoint (/api/investigate/stream).
 
 Two modes: question (default) runs the OrchestratorAgent and streams per-tool
-tool_call/tool_result events plus an audited answer (the PRD tool shelf + trace);
-deep runs the CoordinatorAgent statistical sweep. Both persist an
-InvestigationRun. Below-floor and error paths degrade to a terminal error.
+tool_call/tool_result events plus an audited answer; deep runs the
+CoordinatorAgent statistical sweep. Both persist an InvestigationRun.
+Below-floor and error paths degrade to a terminal error.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ def _read_sse(text: str) -> list[dict[str, Any]]:
     return events
 
 
-# ── question mode: the orchestrator drill (PRD tool shelf + trace) ──────────────
+# ── question mode: the orchestrator drill (tool shelf + trace) ──────────────────
 
 
 class _ScriptedOrchestrator:
@@ -142,7 +142,7 @@ def test_question_mode_persists_a_run_with_real_tool_calls(
     assert [c["name"] for c in run.tool_calls] == ["find_spikes", "get_boluses"]
     assert all(c["ok"] is True for c in run.tool_calls)
     assert run.answer == "The worst high followed a late bolus."
-    assert run.trace  # rendered PRD trace lines persisted
+    assert run.trace  # rendered trace lines persisted
     store.close()
 
 
@@ -154,7 +154,7 @@ def test_persisted_question_run_renders_answer_and_tools(
     client = _client(store)
     client.get("/api/investigate/stream?q=worst high")
     body = client.get("/investigations").text
-    assert "late bolus" in body  # the answer prose
+    assert "late bolus" in body
     assert "find_spikes" in body  # the real tool, not a producer name
     assert "Tools called" in body
     store.close()

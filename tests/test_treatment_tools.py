@@ -1,8 +1,7 @@
 """Treatment-inspection tools + capability filtering over golden datasets.
 
-Pins WAVE5 §1 canonical numbers end to end: the March 14 dinner bolus is 22
-minutes late, the spike peaks at 246, and 14 of 18 similar dinners spike
-(metrics M3/M6 substrate).
+Pins the canonical numbers end to end: the March 14 dinner bolus is 22 minutes
+late, the spike peaks at 246, and 14 of 18 similar dinners spike.
 """
 
 from __future__ import annotations
@@ -119,7 +118,7 @@ def test_missing_carb_dataset_flags_empty_entries() -> None:
     assert "missing-carb" in result["note"]
 
 
-# ── capability filtering (M6) ─────────────────────────────────────────────────
+# ── capability filtering ──────────────────────────────────────────────────────
 
 
 def test_no_insulin_dataset_hides_treatment_tools() -> None:

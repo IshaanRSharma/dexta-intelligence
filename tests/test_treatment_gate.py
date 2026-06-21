@@ -1,4 +1,4 @@
-"""The fade gate (M1/M2/M11) and the seeker's hard limits (M12).
+"""The fade gate and the seeker's hard limits.
 
 Gate mechanics run through the real ChatAgent with a scripted tool-calling
 model over the golden late_bolus dataset - the same path production takes.
@@ -146,7 +146,7 @@ def test_gate_sentences_stay_in_sync_with_the_workflow() -> None:
     assert NO_TREATMENT_DISCLAIMER == workflow.NO_TREATMENT_DISCLAIMER
 
 
-# ── fade behavior through the real chat agent (M2) ────────────────────────────
+# ── fade behavior through the real chat agent ─────────────────────────────────
 
 
 def test_persistent_non_compliance_fades_to_safe_sentence() -> None:
@@ -204,7 +204,7 @@ def test_non_cause_question_passes_untouched() -> None:
     assert model.invocations == 1
 
 
-# ── seeker hard limits (M12) ──────────────────────────────────────────────────
+# ── seeker hard limits ────────────────────────────────────────────────────────
 
 _UNSATISFIED = (
     '{"satisfied": false, "missing": "zoom the spike", '

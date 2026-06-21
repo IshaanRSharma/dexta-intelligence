@@ -1,11 +1,9 @@
 """Clinical Brief Agent - the physician-visit brief.
 
-A port of the donor codebase's clinical brief (which ran against real
-endocrinologist review): the model ranks the active findings and explains
-them in prose, every number is audited against the deterministic evidence
-pool, and any unfaithful or unsafe section falls back to a deterministic
-render. The brief is observation only - it summarizes what the data shows,
-never what to do about it.
+The model ranks the active findings and explains them in prose, every number is
+audited against the deterministic evidence pool, and any unfaithful or unsafe
+section falls back to a deterministic render. The brief is observation only - it
+summarizes what the data shows, never what to do about it.
 
 Two safety layers, both enforced in pure code (no model is trusted to
 self-police):

@@ -1,9 +1,9 @@
-"""Dexcom official API connector tests - pure conversion + mocked transport.
+"""Dexcom official API connector tests: pure conversion + mocked transport.
 
-No live network: the connector tests run against an ``httpx.MockTransport``
-emulating the Dexcom developer API v3 (bearer auth, ``startDate``/``endDate``
-egvs filtering, and the OAuth refresh-token grant), exercising real auth,
-date-window filtering, and token-refresh behaviour without a real account.
+The connector tests run against an ``httpx.MockTransport`` emulating the Dexcom
+developer API v3 (bearer auth, ``startDate``/``endDate`` egvs filtering, and the
+OAuth refresh-token grant), exercising real auth, date-window filtering, and
+token-refresh behaviour.
 """
 
 from __future__ import annotations

@@ -329,9 +329,7 @@ class FindingStats(_FrozenModel):
 class Finding(_FrozenModel):
     """A single durable unit of agent knowledge.
 
-    The unification of what the donor codebase kept in four shapes
-    (``pod_insights`` rows, ``Insight``, ``CoachFinding``, clinical-brief
-    dicts). ``evidence`` holds every number the prose is allowed to cite.
+    ``evidence`` holds every number the prose is allowed to cite.
     """
 
     agent: str

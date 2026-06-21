@@ -1,4 +1,4 @@
-"""Emit the headline eval table (spec §14)."""
+"""Emit the headline eval table."""
 
 from __future__ import annotations
 

@@ -113,7 +113,7 @@ class TestRawEvents:
         id_map = store.upsert_raw_events(batch)
         assert set(id_map) == {"0", "1", "2"}
         assert all(isinstance(v, int) for v in id_map.values())
-        assert len(set(id_map.values())) == 3  # distinct ids
+        assert len(set(id_map.values())) == 3
 
     def test_upsert_returns_stable_ids_for_existing_rows(self, store: SQLiteStore) -> None:
         batch = [_raw("nightscout", str(i), T0 + timedelta(minutes=5 * i)) for i in range(3)]

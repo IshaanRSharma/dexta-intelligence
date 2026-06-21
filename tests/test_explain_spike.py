@@ -1,7 +1,7 @@
-"""explain_spike workflow contract over golden datasets (metrics M3/M5/M10).
+"""explain_spike workflow contract over golden datasets.
 
-The canonical WAVE5 §1 question - "Why did I spike on March 14?" - must
-produce the canonical trace and evidence numbers from the late_bolus plant.
+The canonical question, "Why did I spike on March 14?", must produce the
+canonical trace and evidence numbers from the late_bolus plant.
 """
 
 from __future__ import annotations

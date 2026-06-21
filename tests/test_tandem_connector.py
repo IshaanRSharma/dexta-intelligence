@@ -1,10 +1,8 @@
-"""Tandem connector tests - pure conversion on stub records, connector on a stub client.
+"""Tandem connector tests: pure conversion on stub records, connector on a stub client.
 
-No network and no real tconnectsync session: ``_StubBolus`` satisfies the
-``BolusLike`` duck type (all-string fields, like the real ``Bolus`` dataclass),
-basals are plain dicts shaped like the ControlIQ parser's output, and
-``_StubTConnectClient`` stands in for tconnectsync's ``TConnectApi`` - serving a
-canned therapy_timeline so ``pull`` / ``check`` are testable end to end.
+No network and no real tconnectsync session. ``_StubBolus`` satisfies the
+``BolusLike`` duck type, basals are dicts shaped like the ControlIQ parser's
+output, and ``_StubTConnectClient`` stands in for tconnectsync's ``TConnectApi``.
 """
 
 from __future__ import annotations
@@ -384,7 +382,7 @@ class TestTandemConnector:
         assert connector.source == "tandem"
 
     def test_is_not_realtime(self) -> None:
-        # t:connect is not live-fresh; batch-only by design.
+        # t:connect is batch-only, no live current() surface.
         assert not isinstance(_connector(_client()), RealtimeConnector)
 
     # -- check -----------------------------------------------------------------

@@ -1,9 +1,8 @@
-"""CareLink connector tests - pure conversion on payload fixtures, connector on a stub client.
+"""CareLink connector tests: pure conversion on payload fixtures, connector on a stub client.
 
-No network and no real carelink_client session: ``parse_recent_data`` runs on
-plain dict fixtures shaped like CareLink's recent-data payload, and
-``_StubCareLinkClient`` stands in for the carelink_client ``CareLinkClient``,
-serving one canned payload so ``pull`` / ``check`` are testable.
+No network and no real carelink_client session. ``parse_recent_data`` runs on
+dict fixtures shaped like CareLink's recent-data payload, and
+``_StubCareLinkClient`` stands in for the carelink_client ``CareLinkClient``.
 """
 
 from __future__ import annotations

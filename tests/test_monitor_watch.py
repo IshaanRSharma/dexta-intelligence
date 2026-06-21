@@ -1,11 +1,9 @@
 """Tests for the treatment-aware anomaly detectors in the monitoring pipeline.
 
 Each of ``rapid_rise``, ``correction_not_working`` and ``low_after_correction``
-is exercised directly with crafted glucose/insulin/meal sequences: one positive
-case that must fire (asserting name, key and numbers) and one negative case on
-clean data that must return ``[]``. A final end-to-end test seeds a real store
-with glucose + insulin that trigger ``correction_not_working`` and proves the
-``run_monitor`` wiring surfaces it.
+is exercised directly with crafted glucose/insulin/meal sequences: a positive
+case that must fire and a clean negative case that must return ``[]``. A final
+end-to-end test proves ``run_monitor`` surfaces ``correction_not_working``.
 """
 
 from __future__ import annotations

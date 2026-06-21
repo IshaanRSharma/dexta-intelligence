@@ -49,12 +49,11 @@ A naive timestamp (no offset, no ``Z``) is **rejected loudly** with
 class of pump/CGM time bug the models refuse to inherit, and a naive value here
 means tconnectsync had no timezone to apply.
 
-.. note:: The conversion below is written against tconnectsync's **documented
-   record shapes** (the ``Bolus`` dataclass and the ControlIQ basal dicts). It
-   has not been exercised against a live t:connect account in this environment;
-   field names, ``delivery_type`` values, and the timezone behaviour of the
-   parsed timestamps **must be validated against real credentials before
-   release**.
+.. note:: The conversion below is written against tconnectsync's documented
+   record shapes (the ``Bolus`` dataclass and the ControlIQ basal dicts) and has
+   not been exercised against a live t:connect account. Field names,
+   ``delivery_type`` values, and the timezone behaviour of the parsed timestamps
+   should be validated against real credentials.
 """
 
 from __future__ import annotations

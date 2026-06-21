@@ -1,4 +1,4 @@
-"""Manual context logging (PRD section 19) end to end.
+"""Manual context logging end to end.
 
 Covers the store roundtrip, the three read-only belt tools
 (get_manual_events / search_manual_events / get_context_around_event), their

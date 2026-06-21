@@ -1,4 +1,4 @@
-"""Tests for the Skeptic Agent (spec §8)."""
+"""Tests for the Skeptic Agent."""
 
 from __future__ import annotations
 
@@ -120,7 +120,7 @@ def test_rejects_quantitative_without_p_value(store: SQLiteStore) -> None:
 
 
 def test_confound_flag_lowers_confidence(store: SQLiteStore) -> None:
-    # Two distinct groups with real separation - should pass rigor on both seeds
+    # Two distinct groups with real separation: should pass rigor on both seeds.
     high_a = [200.0] * 12
     low_b = [120.0] * 12
     f1 = _quantitative_finding(

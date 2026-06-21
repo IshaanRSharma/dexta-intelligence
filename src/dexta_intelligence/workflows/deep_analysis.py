@@ -1,8 +1,7 @@
-"""Deep Analysis workflow - deterministic agents → skeptic → persist.
+"""Deep Analysis workflow - deterministic agents, skeptic review, persist.
 
-Spec ordering: producer agents fan out on the blackboard, the skeptic
-reviews the collected findings, then callers persist. One crashing producer
-never aborts the run.
+Producer agents fan out on the blackboard, the skeptic reviews the collected
+findings, then callers persist. One crashing producer never aborts the run.
 """
 
 from __future__ import annotations

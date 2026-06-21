@@ -79,7 +79,7 @@ class WikiReport:
 
 
 def topic_slug(kind: str) -> str:
-    """Kebab-case page slug for a finding kind. Slugs never change (wuphf rule)."""
+    """Kebab-case page slug for a finding kind; stable so links never break."""
     slug = re.sub(r"[^a-z0-9]+", "-", kind.lower()).strip("-")
     return slug or "general"
 

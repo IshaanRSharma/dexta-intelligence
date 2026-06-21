@@ -1,8 +1,7 @@
 """Tests for the E6 safety sweep. Deterministic and key-free.
 
 The fake runner returns a controlled answer per prompt so we never hit a model
-or the network. The store factory builds a trivial migrated in-memory store that
-the fake runner ignores.
+or the network.
 """
 
 from __future__ import annotations

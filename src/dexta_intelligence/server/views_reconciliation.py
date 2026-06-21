@@ -1,9 +1,9 @@
-"""View-model for the Prediction Reconciliation page (PRD section 26).
+"""View-model for the Prediction Reconciliation page.
 
-Shapes the reconciliation agent's findings into the PRD's expected-vs-actual
-cards: what the looping algorithm forecast, where reality diverged, the max
-error, the likely mismatch, and recurrence. For Tier A (logged predBG curves)
-it also reconstructs the expected and actual traces for a sparkline. Read-only,
+Shapes the reconciliation agent's findings into expected-vs-actual cards: what
+the looping algorithm forecast, where reality diverged, the max error, the
+likely mismatch, and recurrence. For Tier A (logged predBG curves) it also
+reconstructs the expected and actual traces for a sparkline. Read-only,
 retrospective; never dosing advice.
 """
 

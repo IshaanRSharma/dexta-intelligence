@@ -17,21 +17,12 @@ reflect genuinely *new* rows.
 
 Provenance
 ----------
-:meth:`StoragePort.upsert_raw_events` returns a ``source_id -> raw id`` map for
-the upserted batch. Connectors do not carry the raw↔typed link on typed events,
-so it is reconstructed here by timestamp: a typed event's ``ts`` (``ts_start``
-for sleep) is matched against the raw ``source_ts`` of its originating record.
-The match is applied only where a ``source_ts`` maps to exactly one raw row;
-ambiguous timestamps (multiple raws at the same instant) and typed events whose
-timestamp has no matching raw are left with ``raw_event_id=None`` rather than
-guessed. Glucose, where each CGM reading is one raw entry at a distinct instant,
-links cleanly; treatment-derived streams (insulin/meals) link when their
-timestamp uniquely identifies the source treatment.
-
-Predictions note
-----------------
-:class:`~dexta_intelligence.connectors.base.NormalizedBatch` may carry
-``predictions``; they are persisted via :meth:`StoragePort.insert_predictions`.
+Connectors do not carry the raw-to-typed link on typed events, so it is
+reconstructed here by timestamp: a typed event's ``ts`` (``ts_start`` for sleep)
+is matched against the raw ``source_ts`` of its originating record. The match is
+applied only where a ``source_ts`` maps to exactly one raw row; ambiguous
+timestamps and typed events with no matching raw are left with
+``raw_event_id=None`` rather than guessed.
 """
 
 from __future__ import annotations

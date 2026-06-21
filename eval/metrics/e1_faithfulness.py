@@ -23,7 +23,7 @@ from dexta_intelligence.guard.faithfulness import audit, extract_numbers
 
 __all__ = ["E1FaithfulnessResult", "run_e1"]
 
-#: Targets the eval is scored against (spec §14, E1).
+#: Targets the eval is scored against.
 _CATCH_TARGET = 1.0
 _FALSE_REJECT_TARGET = 0.05
 

@@ -1,27 +1,21 @@
 """Numeric-faithfulness guard - no model may introduce numbers the data lacks.
 
-The core safety property of the platform: **every number in LLM-authored
-prose must trace to the deterministic evidence pool**, within a small
-relative tolerance. Untraceable output is rejected and the caller falls back
-to deterministic text. The model is the intelligence layer - it discovers,
-ranks, and explains - but every number it cites must trace to the evidence pool.
+The core safety property: every number in LLM-authored prose must trace to the
+deterministic evidence pool, within a small relative tolerance. Untraceable
+output is rejected and the caller falls back to deterministic text. The model
+discovers, ranks, and explains, but every number it cites must trace to the pool.
 
-This is a hardened port of the guard that shipped in the donor codebase's
-clinical brief (where it ran in production against real endocrinologist
-review). Improvements over the donor:
+Design notes:
 
-- Reports **all** violations with surrounding context, not a boolean - so
-  false rejections are debuggable and measurable (eval E1's
-  false-rejection-rate metric depends on this).
-- The allowed-constants set is explicit, documented, and per-call
-  extensible instead of a module-level mystery set.
+- Reports all violations with surrounding context, not a boolean, so false
+  rejections are debuggable and measurable.
+- The allowed-constants set is explicit, documented, and per-call extensible.
 - Percent-of-pool matching and the absolute floor are tunable per surface.
 
-Honest limits (state these, never oversell): this is set-membership
-checking, not semantic verification. A number can match the pool while
-being cited in the wrong context (eval E2's consistency invariants exist
-for exactly that class), and prose with *no* numbers passes trivially.
-It is a guardrail against fabricated figures, not a proof of correctness.
+Honest limits: this is set-membership checking, not semantic verification. A
+number can match the pool while being cited in the wrong context, and prose
+with no numbers passes trivially. It is a guardrail against fabricated figures,
+not a proof of correctness.
 """
 
 from __future__ import annotations

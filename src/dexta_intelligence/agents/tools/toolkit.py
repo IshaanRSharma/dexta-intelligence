@@ -183,7 +183,7 @@ class DiscoveryToolkit:
         #: Full ctx.window bounds - the active sub-window can never exceed these.
         self._full_start = start
         self._full_end = end
-        #: Active sub-window (defaults to the full window: today's behavior).
+        #: Active sub-window (defaults to the full window).
         self._active_start = start
         self._active_end = end
         glucose = sorted(ctx.store.get_glucose(start, end), key=lambda g: g.ts)
@@ -202,11 +202,11 @@ class DiscoveryToolkit:
             ctx.store.get_insulin(start, end), key=lambda i: i.ts
         )
         self._bolus_ts = [i.ts for i in self._insulin if i.kind is InsulinKind.BOLUS]
-        #: Nights touched by temp-basal / suspend events (excluded from drift when insulin exists).
         self._has_insulin = bool(self._insulin)
         self._last_insulin_ts = self._insulin[-1].ts if self._insulin else None
         self._last_meal_ts = self._meals[-1].ts if self._meals else None
         self._last_glucose_ts = self._glucose_ts[-1] if self._glucose_ts else None
+        #: Nights touched by temp-basal / suspend (excluded from drift when insulin exists).
         self._basal_intervention_dates: set[date] = {
             self._ld(i.ts)
             for i in self._insulin
@@ -1546,11 +1546,8 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
     doubted / what confound was flagged) when present - plus the open
     hypotheses (what is suspected) and synthesis ``connections`` (what is
     contested across agents). The caller reads these to pick better tools.
-
-    Shape is additive/backward-compatible: keys ``findings`` /
-    ``open_questions`` / ``connections`` and the per-finding numbers tuple are
-    preserved; new fields only extend each entry. Findings, connections and
-    open questions are each capped at :data:`_MAX_RECALL_ITEMS` with a note.
+    Findings, connections and open questions are each capped at
+    :data:`_MAX_RECALL_ITEMS` with a note.
     """
     from dexta_intelligence.memory import embeddings  # noqa: PLC0415
     from dexta_intelligence.memory.synthesis import load_latest  # noqa: PLC0415
@@ -1579,7 +1576,7 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
             "confidence": f.confidence,
             "status": f.status.value,
         }
-        if f.skeptic_notes:  # the cross-agent "why this was doubted" signal
+        if f.skeptic_notes:
             item["skeptic_notes"] = f.skeptic_notes
         items.append(item)
         numbers[f"finding_{len(items)}"] = {

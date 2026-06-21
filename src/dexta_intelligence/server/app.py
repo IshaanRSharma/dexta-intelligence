@@ -164,10 +164,8 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     templates = Jinja2Templates(directory=str(templates_dir))
     _static_stamps = [f.stat().st_mtime for f in static_dir.iterdir() if f.is_file()]
     templates.env.globals["static_version"] = str(int(max(_static_stamps, default=0)))
-    # One clear feature per tab. Chat (instant Q&A) and Investigations (deep,
-    # traced) stay distinct. Reconciliation lives under Findings, Evals under
-    # System, and Log is reached via the "+ Log context" buttons - each linked
-    # from its parent rather than crowding the top nav.
+    # One feature per tab. Reconciliation, Evals, and Log are reached from their
+    # parent pages rather than crowding the top nav.
     templates.env.globals["nav_items"] = (
         ("/", "Dashboard"),
         ("/chat", "Chat"),
@@ -368,8 +366,8 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         tags: str = Form(""),
         intensity: str = Form(""),
     ) -> Any:
-        """Persist one user-submitted manual event. This is the ONLY path that
-        creates manual events: the LLM never does (PRD section 19)."""
+        """Persist one user-submitted manual event. This is the only path that
+        creates manual events: the LLM never does."""
         etype = event_type.strip()
         if etype not in _MANUAL_TYPE_LABELS:
             return RedirectResponse("/log?flash=log_badtype", status_code=303)

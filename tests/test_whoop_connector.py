@@ -1,9 +1,8 @@
-"""Whoop connector tests - pure parsing against fixtures, client via MockTransport.
+"""Whoop connector tests: pure parsing against fixtures, client via MockTransport.
 
-No live network calls: the connector tests run against an ``httpx.MockTransport``
-that emulates the Whoop v2 developer API (bearer auth, ``start`` filtering,
-``nextToken`` pagination, and the OAuth refresh-token grant), which lets us
-exercise real pagination and token-refresh behaviour.
+The connector tests run against an ``httpx.MockTransport`` emulating the Whoop v2
+developer API (bearer auth, ``start`` filtering, ``nextToken`` pagination, and the
+OAuth refresh-token grant), exercising real pagination and token-refresh behaviour.
 """
 
 from __future__ import annotations

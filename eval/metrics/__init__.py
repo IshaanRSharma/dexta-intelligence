@@ -1,1 +1,1 @@
-"""Eval metrics - reportable benchmarks (spec §14)."""
+"""Eval metrics: reportable benchmarks."""

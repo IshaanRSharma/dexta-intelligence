@@ -93,11 +93,9 @@ def test_under_answer_then_replan_runs_two_rounds() -> None:
     store = _store()
     model = _FakeToolModel(
         [
-            # round 1: a tool, then an answer that ignores the spike
             [{"name": "list_segments", "args": {}, "id": "c1"}],
             "I compared the months but did not look inside any spike.",
             _reflect(False, missing="zoom the April spike", next_hint="zoom_event on the spike"),
-            # round 2: zoom the spike, then answer
             [{"name": "zoom_event", "args": {"timestamp": "2026-05-15T13:00:00"}, "id": "c2"}],
             "Zooming the spike, your midday window peaks then settles.",
             _reflect(True),
@@ -108,7 +106,6 @@ def test_under_answer_then_replan_runs_two_rounds() -> None:
     answer = agent.pursue(_ctx(store), "what happened around my April spike?")
 
     assert answer.faithful
-    # union of tool calls across both rounds
     assert answer.tools_used == ("list_segments", "zoom_event")
     # 2 plan turns + 2 answer turns + 2 reflect turns == 6 invocations (2 rounds)
     assert model.invocations == 6
@@ -149,8 +146,8 @@ def test_goal_pursuit_can_compose_investigations() -> None:
 
     answer = agent.pursue(_ctx(store), "reduce my dinner spikes")
 
-    assert "investigate_spike" in model.seen_tools  # the belt exposes investigations
-    assert "investigate_spike" in answer.tools_used  # and the goal agent used one
+    assert "investigate_spike" in model.seen_tools
+    assert "investigate_spike" in answer.tools_used
 
 
 def test_model_none_single_round_no_crash() -> None:
@@ -168,18 +165,16 @@ def test_model_none_single_round_no_crash() -> None:
 
 def test_round_one_number_stays_faithful_in_final_answer() -> None:
     """A number computed in round 1 and cited in the round-2 answer must stay
-    faithful - proves evidence accumulation across rounds feeds the guard."""
+    faithful: proves evidence accumulation across rounds feeds the guard."""
     store = _store()
     # tod_compare on the 03-05h vs 12-14h windows yields a real mean_a near 185.
-    # Round 1 produces it; round 2's final answer cites it; the merged pool must
-    # carry the round-1 number so the guard does not false-reject.
+    # The merged pool must carry the round-1 number so the guard does not false-reject.
     model = _FakeToolModel(
         [
             [{"name": "tod_compare", "args": {"hours_a": [3, 5], "hours_b": [12, 14]}, "id": "c1"}],
             "Mornings look elevated; I should confirm the daily trend.",
             _reflect(False, missing="check the daily trend", next_hint="daily_series mean_glucose"),
             [{"name": "daily_series", "args": {"metric": "mean_glucose"}, "id": "c2"}],
-            # cite the round-1 morning mean (~185) plus a round-2 daily mean value.
             "Your mornings average about 185 mg/dL, and the daily trend confirms it.",
             _reflect(True),
         ]
