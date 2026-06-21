@@ -705,11 +705,8 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         coverage = store.coverage()
         active = store.get_findings(status=FindingStatus.ACTIVE, limit=50)
         active = [f for f in active if f.kind not in _INTERNAL_FINDING_KINDS]
-        # The page GET is deterministic and never touches the network
-        # (with_citations=False). Literature citations are a separate, deferred
-        # lookup (the /reports/citations fragment and the export), built on a
-        # tighter interactive timeout and a TTL cache so a slow NCBI can never
-        # stall a page load.
+        # with_citations=False keeps the page GET network-free; the literature
+        # lookup is deferred to /reports/citations and the export.
         backend = (
             evidence_backend(interactive=True)
             if with_citations and config.evidence.enabled
@@ -735,8 +732,6 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
 
     @app.get("/reports/citations", response_class=HTMLResponse)
     def reports_citations(request: Request) -> Any:
-        # Deferred enrichment: re-render only the discussion sections, now with
-        # literature citations. HTMX swaps this into the deterministic page.
         store = store_opener(config, None)
         try:
             brief = _build_discussion_brief(store, with_citations=True)

@@ -24,9 +24,7 @@
 </section>
 {% endif %}
 
-{# Citation-bearing sections render instantly without literature, then HTMX
-   swaps in the cited version once PubMed responds (deferred off the page GET so
-   a slow NCBI never blocks first paint). #}
+{# Renders citation-free instantly; HTMX swaps in the cited version. #}
 <div id="cited-sections"{% if cite_enabled %} hx-get="/reports/citations" hx-trigger="load" hx-swap="outerHTML"{% endif %}>
   {% include "_reports_sections.html" %}
 </div>

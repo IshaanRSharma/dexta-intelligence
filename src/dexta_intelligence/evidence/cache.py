@@ -1,15 +1,9 @@
 """Process-wide TTL cache for evidence lookups.
 
-Published literature for a stable query (e.g. "overnight hypoglycemia") does not
-change minute to minute, so a confirmed pattern's citations can be reused across
-page loads and overlapping findings. :class:`CachingEvidenceBackend` wraps any
-:class:`~dexta_intelligence.evidence.base.EvidenceBackend` and shares one
-process-global store, so a fresh wrapper built per request still hits the cache.
-
-Only non-empty results are cached: the inner backend returns ``[]`` for both
-"no results" and "lookup failed" (the never-raise contract), so caching empties
-would pin a transient failure. The wrapper preserves that contract - it only
-ever delegates and reads the inner result.
+:class:`CachingEvidenceBackend` wraps any EvidenceBackend over one process-global
+store, so a wrapper rebuilt per request still hits the cache. Only non-empty
+results are cached: the inner backend returns ``[]`` on failure too, so caching
+empties would pin a transient failure.
 """
 
 from __future__ import annotations
@@ -62,7 +56,7 @@ class CachingEvidenceBackend:
             if cached is not None and now - cached[0] < self._ttl:
                 return list(cached[1])
         result = self._inner.search(q, limit=limit)
-        if result:  # never cache an empty result (could be a transient failure)
+        if result:
             with _LOCK:
                 _CACHE[key] = (now, list(result))
         return result

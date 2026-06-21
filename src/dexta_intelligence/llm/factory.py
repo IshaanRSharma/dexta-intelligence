@@ -107,14 +107,12 @@ def resolve_spec(
     )
 
 
-#: Cloud providers gated on a single API key: provider id -> (env var, help url).
+#: provider id -> (API-key env var, help url) for single-key cloud providers.
 _CLOUD_KEYS: dict[str, tuple[str, str]] = {
     "anthropic": ("ANTHROPIC_API_KEY", "https://console.anthropic.com/settings/keys"),
     "openai": ("OPENAI_API_KEY", "https://platform.openai.com/api-keys"),
 }
-#: Aliases that all resolve to LangChain's google_genai (Gemini, AI Studio API).
 _GEMINI_ALIASES = ("google_genai", "gemini", "google")
-#: Aliases for a local Ollama daemon, and for a local model file via llama.cpp.
 _OLLAMA_ALIASES = ("ollama", "local")
 _LLAMACPP_ALIASES = ("llamacpp", "llama_cpp", "gguf", "local_path")
 
@@ -146,8 +144,7 @@ def get_model(spec: ModelSpec) -> BaseChatModel:
         kwargs["max_tokens"] = spec.max_tokens
 
     if spec.provider == "openrouter":
-        # OpenRouter speaks the OpenAI API; one key, every hosted model - the
-        # lowest-friction BYOM default.
+        # OpenRouter speaks the OpenAI API, routed through that provider.
         key = _require_key("openrouter", "OPENROUTER_API_KEY", "https://openrouter.ai/keys")
         return init_chat_model(
             spec.model,
@@ -186,8 +183,6 @@ def _cloud_keyed_model(
         key = _require_key(spec.provider, env_var, url)
         return init_chat_model(spec.model, model_provider=spec.provider, api_key=key, **kwargs)
     if spec.provider in _GEMINI_ALIASES:
-        # Google DeepMind Gemini via the AI Studio API (langchain-google-genai).
-        # The model reads GOOGLE_API_KEY itself; we gate here for a clear error.
         _require_key("google_genai", "GOOGLE_API_KEY", "https://aistudio.google.com/apikey")
         return init_chat_model(spec.model, model_provider="google_genai", **kwargs)
     return None
@@ -198,9 +193,7 @@ def _ollama_model(
     spec: ModelSpec,
     kwargs: dict[str, Any],
 ) -> BaseChatModel:
-    """Local Ollama daemon - no API key, runs on your machine (fully offline).
-    ``OLLAMA_HOST`` points at a non-default/remote daemon; a bare host:port is
-    normalized to an http URL."""
+    """Local Ollama daemon (no key). ``OLLAMA_HOST`` overrides the endpoint."""
     host = os.environ.get("OLLAMA_HOST")
     if host:
         if not host.startswith(("http://", "https://")):
@@ -210,11 +203,7 @@ def _ollama_model(
 
 
 def _local_model_file(spec: ModelSpec) -> BaseChatModel:
-    """Run a model from a local weights file (a GGUF) via llama.cpp.
-
-    ``spec.model`` is a filesystem path, not a hosted model name: fully offline,
-    no service, no key. Requires the optional ``local`` extra (llama-cpp-python).
-    """
+    """Load a local weights file (``spec.model`` is a GGUF path) via llama.cpp."""
     from pathlib import Path  # noqa: PLC0415
 
     path = Path(spec.model).expanduser()

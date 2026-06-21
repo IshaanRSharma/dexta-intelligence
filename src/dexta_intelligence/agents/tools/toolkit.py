@@ -1472,11 +1472,8 @@ def evidence_backend(*, interactive: bool = False) -> Any:
     ``httpx`` / the evidence package unless a reasoning loop actually grounds a
     pattern. Falls back to the zero-auth PubMed backend if the config names an
     unknown backend, so a bad ``[evidence].backend`` value never breaks search.
-
-    ``interactive`` tightens the network timeout for page-load lookups so a slow
-    NCBI cannot stall a request. When ``[evidence].cache_ttl_minutes`` is set
-    (the default), the backend is wrapped in a process-wide TTL cache so repeated
-    lookups across loads and overlapping findings are served without a round-trip.
+    ``interactive`` tightens the timeout; a non-zero ``cache_ttl_minutes`` wraps
+    the backend in a TTL cache.
     """
     from dexta_intelligence.config import load_config  # noqa: PLC0415
     from dexta_intelligence.evidence.pubmed import PubMedBackend  # noqa: PLC0415

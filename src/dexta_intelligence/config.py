@@ -243,9 +243,7 @@ class EvidenceConfig(_Section):
     email: str = ""
     enabled: bool = True
     cache_ttl_minutes: int = 1440
-    """How long a literature lookup is cached (default 1 day). Published evidence
-    for a stable query does not change minute to minute, so citations are reused
-    across page loads and overlapping findings. ``0`` disables caching."""
+    """How long a literature lookup is cached (default 1 day; ``0`` disables)."""
 
 
 class WikiConfig(_Section):

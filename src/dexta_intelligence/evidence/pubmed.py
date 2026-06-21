@@ -38,8 +38,7 @@ _TOOL_NAME = "dexta-intelligence"
 #: An NCBI key raises the rate limit from 3 to 10 requests/second (optional).
 _API_KEY_ENV = "NCBI_API_KEY"
 _TIMEOUT = httpx.Timeout(15.0, connect=5.0)
-#: Tighter budget for interactive (page-load) lookups: a slow NCBI must not
-#: stall a request. Used when the backend is built with ``interactive=True``.
+#: Tighter timeout for interactive (page-load) lookups (interactive=True).
 _INTERACTIVE_TIMEOUT = httpx.Timeout(4.0, connect=2.0)
 #: One short backoff on a 429 (unkeyed NCBI throttles at 3 req/s).
 _RATE_LIMIT_BACKOFF_S = 0.4
