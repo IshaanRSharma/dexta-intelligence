@@ -862,7 +862,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         )
 
     @app.get("/api/ask/stream")
-    async def api_ask_stream(  # noqa: PLR0915 - queue + worker + drain in one handler
+    async def api_ask_stream(
         request: Request, q: str, sid: str | None = None
     ) -> Any:
         """Stream an orchestrator run to the browser as Server-Sent Events.
@@ -966,31 +966,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                 _close(store, store_opener)
                 events.put(done)
 
-        async def _drain() -> Any:
-            import asyncio  # noqa: PLC0415
-
-            worker = threading.Thread(target=_run, daemon=True)
-            worker.start()
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    item = await asyncio.to_thread(events.get, True, 0.25)
-                except queue.Empty:
-                    continue
-                if item is done:
-                    break
-                yield _sse(item)
-
-        return StreamingResponse(
-            _drain(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
+        return _sse_stream(request, events, done, _run)
 
     @app.get("/api/investigate/stream")
     async def api_investigate_stream(  # noqa: PLR0915 - queue + two workers + drain
@@ -1162,32 +1138,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                 events.put(done)
 
         worker_fn = _run_deep if mode == "deep" else _run_question
-
-        async def _drain() -> Any:
-            import asyncio  # noqa: PLC0415
-
-            worker = threading.Thread(target=worker_fn, daemon=True)
-            worker.start()
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    item = await asyncio.to_thread(events.get, True, 0.25)
-                except queue.Empty:
-                    continue
-                if item is done:
-                    break
-                yield _sse(item)
-
-        return StreamingResponse(
-            _drain(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
+        return _sse_stream(request, events, done, worker_fn)
 
     @app.get("/api/history")
     def api_history(sid: str | None = None) -> Any:
@@ -1520,6 +1471,44 @@ def _lens_names(config: Config) -> list[str]:
 def _sse(event: dict[str, Any]) -> str:
     """Serialize one ``{kind, payload}`` event as a Server-Sent Events frame."""
     return f"data: {json.dumps(event, default=str)}\n\n"
+
+
+def _sse_stream(
+    request: Request,
+    events: queue.Queue[Any],
+    sentinel: object,
+    worker: Callable[[], None],
+) -> Any:
+    """Run ``worker`` in a daemon thread and drain its queued events as an SSE
+    response. The worker pushes ``{kind, payload}`` dicts onto ``events`` and
+    finally pushes ``sentinel`` to end the stream; a client disconnect stops it.
+    """
+
+    async def _drain() -> Any:
+        import asyncio  # noqa: PLC0415
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                item = await asyncio.to_thread(events.get, True, 0.25)
+            except queue.Empty:
+                continue
+            if item is sentinel:
+                break
+            yield _sse(item)
+
+    return StreamingResponse(
+        _drain(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def _status_pill_text(coverage: Any) -> str:
