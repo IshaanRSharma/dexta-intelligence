@@ -80,6 +80,22 @@ def test_single_high_reading_does_not_fire() -> None:
     assert not [a for a in anomalies if a.name == "severe_high"]
 
 
+def test_sensor_gap_breaks_sustained_high() -> None:
+    # Two short high runs (~15 min each, under the 30-min sustain), separated by a
+    # ~70-min sensor gap. The gap must break the run, not bridge it into a false
+    # "sustained" high.
+    glucose = _flat_window(110)
+    for i in range(50, 54):
+        glucose[i] = GlucoseEvent(ts=glucose[i].ts, mg_dl=300)
+    for i in range(67, 71):
+        glucose[i] = GlucoseEvent(ts=glucose[i].ts, mg_dl=300)
+    glucose = [g for j, g in enumerate(glucose) if not (54 <= j <= 66)]
+    anomalies = run_monitor(_ctx(_store(glucose)), persist=False, now=_END)
+    assert not [a for a in anomalies if a.name == "severe_high"], (
+        "a sensor gap must break the sustained-high run, not bridge it"
+    )
+
+
 def test_sensor_gap_fires() -> None:
     # Two flat half-days with a 3h hole between them.
     first = _flat_window(110, hours=6, end=_END - timedelta(hours=9))

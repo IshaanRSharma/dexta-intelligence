@@ -7,21 +7,15 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
 
 ## Open / deferred (2026-06-21)
 
-### #7 Store-layer dedup needs a verifiable Postgres path
+### #7 Store-layer dedup (CI unblocker landed; dedup pending)
 
-`store/sqlite.py` (~1410) and `store/postgres.py` (~1436) duplicate several
-helpers (`_opt_json`, `_count`, `_raw_ids`, the `_row_to_*` mappers). Hoisting
-the pure ones into `store/_common.py` is the biggest remaining dedup, but the
-Postgres backend is not verifiable locally (44 of 46 store tests skip without a
-live DB) and the helpers carry real JSONB-vs-TEXT differences. Do this only with
-a live Postgres (or CI matrix) confirming parity; do not refactor it blind.
-
-### #8 `_text_of` is one name for two different helpers
-
-Across `agents/reason.py` + `investigations/spike.py` (content-parts extractor)
-vs `agents/brief.py` / `seeker.py` / `router.py`, `workflows/goals.py`,
-`memory/synthesis.py` (markdown code-fence stripper). They cannot be merged
-(different behavior); rename the two variants so the name stops being misleading.
+`store/sqlite.py` and `store/postgres.py` duplicate several helpers. A CI
+"Postgres parity" job now runs `tests/test_postgres_store.py` against a live
+`postgres:16` service (the suite skips only when `TEST_DATABASE_URL` is unset),
+so the backend is now tested in CI. Remaining: once that job is green, hoist the
+provably-identical pure helpers into `store/_common.py`, keeping the JSONB-vs-TEXT
+differences per backend, and confirm both suites stay green. Do not refactor
+blind.
 
 ### #9 Near-duplicate helpers worth consolidating (with care)
 
@@ -29,12 +23,17 @@ vs `agents/brief.py` / `seeker.py` / `router.py`, `workflows/goals.py`,
 `_parse_json` (3 copies). Consolidating means reconciling small behavioral
 differences and asserted UI text, so it is not a free dedup.
 
-### #10 Minor items
+## Resolved (2026-06-21, second pass)
 
-- MCP server has no `console_scripts` entry point (run only via module).
-- `pattern.py:647` review-flagged "dead confidence branch" (unverified; inspect).
-- `workflows/monitor.py` `_severe_high` does not account for sensor gaps in its
-  duration check.
+- **#8** `_text_of` name collision: renamed by behavior to `_content_text`
+  (extractor in `reason.py` / `spike.py`) and `_strip_code_fence` (fence stripper
+  in `brief`/`seeker`/`router`/`goals`/`synthesis`).
+- **#10a** MCP `console_scripts`: added `dexta-mcp` entry point.
+- **#10b** `pattern.py:647` "dead branch": verified live (both ternary branches
+  reachable, `confidence` is used). False flag, closed.
+- **#10c** `monitor._severe_high` now breaks a sustained-high run on a sensor gap
+  (`SENSOR_GAP_MIN`), so a gap can no longer be counted as sustained
+  (regression test `test_sensor_gap_breaks_sustained_high`).
 
 ## Resolved
 

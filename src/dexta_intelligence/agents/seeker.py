@@ -153,7 +153,7 @@ class GoalSeekingAgent:
         ]
         try:
             response = self.model.invoke(messages)
-            data = json.loads(_text_of(response))
+            data = json.loads(_strip_code_fence(response))
         except Exception:
             logger.warning("seeker: reflection failed; treating as satisfied", exc_info=True)
             return Reflection(satisfied=True, missing="", next_hint="")
@@ -258,7 +258,7 @@ def _merge_round(
     steps.extend(result.steps)
 
 
-def _text_of(response: Any) -> str:
+def _strip_code_fence(response: Any) -> str:
     content = getattr(response, "content", response)
     if not isinstance(content, str):
         return str(content)

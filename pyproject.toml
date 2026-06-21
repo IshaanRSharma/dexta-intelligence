@@ -61,6 +61,7 @@ all = [
 
 [project.scripts]
 dexta = "dexta_intelligence.cli:main"
+dexta-mcp = "dexta_intelligence.mcp_server.server:main"
 
 [dependency-groups]
 dev = [

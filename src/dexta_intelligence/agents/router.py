@@ -235,7 +235,7 @@ class RouterAgent:
                     {"role": "user", "content": _ROUTE_PROMPT.format(question=question)},
                 ]
             )
-            data = json.loads(_text_of(response))
+            data = json.loads(_strip_code_fence(response))
             family = str(data["family"])
         except Exception:
             logger.warning("router: classification failed; keyword fallback", exc_info=True)
@@ -277,7 +277,7 @@ class RouterAgent:
         )
 
 
-def _text_of(response: Any) -> str:
+def _strip_code_fence(response: Any) -> str:
     content = getattr(response, "content", response)
     if not isinstance(content, str):
         return str(content)

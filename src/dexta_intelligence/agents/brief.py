@@ -261,7 +261,7 @@ def _invoke(top: list[Finding], model: Any) -> dict[str, Any] | None:
     ]
     try:
         response = model.invoke(messages)
-        data = json.loads(_text_of(response))
+        data = json.loads(_strip_code_fence(response))
     except Exception:
         logger.warning("clinical brief LLM failed; rendering deterministically", exc_info=True)
         return None
@@ -398,7 +398,7 @@ def _model_id(model: Any) -> str:
     return type(model).__name__
 
 
-def _text_of(response: Any) -> str:
+def _strip_code_fence(response: Any) -> str:
     content = getattr(response, "content", response)
     if not isinstance(content, str):
         return str(content)

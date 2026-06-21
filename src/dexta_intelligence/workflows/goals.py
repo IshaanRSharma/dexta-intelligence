@@ -234,7 +234,7 @@ def _llm_compose(statement: str, model: BaseChatModel) -> _Plan | None:
     ]
     try:
         response = model.invoke(messages)
-        data = json.loads(_text_of(response))
+        data = json.loads(_strip_code_fence(response))
     except Exception:
         logger.warning("goal composition LLM failed; using keyword fallback", exc_info=True)
         return None
@@ -392,7 +392,7 @@ def _tool_schema() -> str:
     return TOOL_SCHEMA_FOR_LLM
 
 
-def _text_of(response: Any) -> str:
+def _strip_code_fence(response: Any) -> str:
     content = getattr(response, "content", response)
     if not isinstance(content, str):
         return str(content)

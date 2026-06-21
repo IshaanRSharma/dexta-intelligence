@@ -41,3 +41,39 @@ jobs:
 
       - name: Pytest
         run: uv run pytest -q
+
+  postgres:
+    name: Postgres parity
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dexta
+          POSTGRES_PASSWORD: dexta
+          POSTGRES_DB: dexta
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dexta -d dexta"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Sync (postgres extra + dev)
+        run: uv sync --extra postgres --python 3.12
+
+      - name: Postgres parity tests
+        env:
+          TEST_DATABASE_URL: postgresql://dexta:dexta@localhost:5432/dexta
+        run: uv run pytest tests/test_postgres_store.py -q

@@ -145,7 +145,7 @@ def run_reasoning_loop(
 
         tool_calls = list(getattr(response, "tool_calls", None) or [])
         if not tool_calls:
-            answer = _text_of(response)
+            answer = _content_text(response)
             if not answer_started and answer:
                 _emit(on_event, ReasoningEvent("answer_start", {}))
                 _emit(on_event, ReasoningEvent("answer_delta", {"delta": answer}))
@@ -323,7 +323,7 @@ def _merge_chunks(chunks: list[Any]) -> Any:
     return type("_Merged", (), {"content": content, "tool_calls": tool_calls})()
 
 
-def _text_of(response: Any) -> str:
+def _content_text(response: Any) -> str:
     content = getattr(response, "content", response)
     if isinstance(content, str):
         return content.strip()

@@ -188,7 +188,7 @@ def _invoke(active: list[Finding], model: Any) -> dict[str, Any] | None:
     ]
     try:
         response = model.invoke(messages)
-        data = json.loads(_text_of(response))
+        data = json.loads(_strip_code_fence(response))
     except Exception:
         logger.warning("wiki synthesis LLM failed; rendering without synthesis", exc_info=True)
         return None
@@ -265,7 +265,7 @@ def _evidence_pool(findings: list[Finding]) -> list[Any]:
     return pool
 
 
-def _text_of(response: Any) -> str:
+def _strip_code_fence(response: Any) -> str:
     content = getattr(response, "content", response)
     if not isinstance(content, str):
         return str(content)
