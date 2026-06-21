@@ -27,8 +27,9 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from dexta_intelligence.agents.chat import _SYSTEM, ChatAnswer, _finish
-from dexta_intelligence.agents.orchestrator import INVESTIGATION_DOCTRINE, workflow_tool_specs
+from dexta_intelligence.agents import prompts
+from dexta_intelligence.agents.chat import ChatAnswer, _finish
+from dexta_intelligence.agents.orchestrator import workflow_tool_specs
 from dexta_intelligence.agents.reason import ReasoningResult, ToolCall, run_reasoning_loop
 from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 
@@ -41,21 +42,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["GoalSeekingAgent", "Reflection"]
 
-_REFLECT_PROMPT = """The patient's goal was:
-  "{goal}"
-
-You just produced this answer:
-  "{answer}"
-
-Tools you called this round: {tools}
-
-Did this fully answer the goal? Judge strictly: if the goal asked about a
-specific spike/window/period you never zoomed or narrowed into, you are NOT
-satisfied. Output STRICT JSON, no prose:
-{{"satisfied": true|false,
-  "missing": "<what is still unanswered>",
-  "next_tool_hint": "<the EXACT name of one available tool to call next, e.g. zoom_event>",
-  "reason": "<one sentence on why the answer falls short>"}}"""
+_REFLECT_PROMPT = prompts.load("seeker_reflect")
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,15 +203,7 @@ def _must_stop(
 
 #: Goal pursuit = composing investigations across rounds toward a conclusion
 #: about the goal, layered on the shared chat rails + investigation doctrine.
-_GOAL_SYSTEM = (
-    _SYSTEM
-    + "\n\n"
-    + INVESTIGATION_DOCTRINE
-    + "\n\nYou are pursuing a STANDING GOAL across rounds. Each round, compose or extend an "
-    "investigation that moves toward a conclusion about the goal - not just a metric reading. "
-    "After each round you reflect on whether the goal is answered; if not, pursue the specific "
-    "angle still missing."
-)
+_GOAL_SYSTEM = prompts.with_safety(prompts.load("seeker_goal_system"))
 
 
 def _round_system(trace_summary: str, hint: str) -> str:

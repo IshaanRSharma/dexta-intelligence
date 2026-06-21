@@ -30,6 +30,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from dexta_intelligence.agents import prompts
 from dexta_intelligence.guard.faithfulness import audit
 from dexta_intelligence.memory.findings import count_recurrence
 from dexta_intelligence.models import FindingStatus
@@ -227,24 +228,9 @@ def _evidence_numbers_line(finding: Finding) -> str:
 # ── model composition (house LLM-call pattern) ───────────────────────────────
 
 
-_SYSTEM = (
-    "You are the clinical brief layer for a Type-1 diabetes review. You rank "
-    "already-established findings and explain each for an endocrinologist. "
-    "Observation only - NEVER dosing, basal, bolus, titration, or any treatment "
-    "advice. Cite ONLY numbers that appear in the findings given to you; invent "
-    "no figures. Respond with ONE JSON object only, no prose."
-)
+_SYSTEM = prompts.load("brief_system")
 
-_USER_TEMPLATE = """Active findings, ranked, each with an index (each: index, kind, \
-headline, evidence, stats):
-
-{findings}
-
-Write the brief. Output STRICT JSON, no prose:
-{{"summary": "<one or two sentence headline over the findings>",
-  "sections": [{{"title": "<short section title>",
-                "body": "<2-4 sentence explanation citing only this finding's numbers>",
-                "finding_idx": <index of the finding this section explains>}}]}}"""
+_USER_TEMPLATE = prompts.load("brief_user")
 
 
 def _compose_with_model(

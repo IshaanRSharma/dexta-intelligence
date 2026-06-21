@@ -21,6 +21,7 @@ import random
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents.base import DataRequirement
 from dexta_intelligence.agents.tools.toolkit import (
     TOOL_SCHEMA_FOR_LLM,
@@ -50,30 +51,9 @@ __all__ = ["Investigator"]
 #: Hard cap on tool calls per run - cheap insurance against runaway loops.
 _DEFAULT_BUDGET = 8
 
-_REFLECT_PROMPT = """Your hypothesis: {claim}
-You called {tool}({args}) and it returned:
-{result}
+_REFLECT_PROMPT = prompts.load("investigator_reflect")
 
-The statistic is computed; you only JUDGE. Decide:
-- "claim": the effect looks real and worth formally testing (interpretation
-  moderate/large, groups adequately sized).
-- "wonder": suggestive but underpowered or ambiguous - bank it as an open
-  question for a future run rather than claiming it now.
-- "drop": no meaningful effect.
-
-Output STRICT JSON: {{"verdict": "claim"|"wonder"|"drop", "reason": "<one sentence>"}}"""
-
-_WRITE_PROMPT = """Write a one-line, observation-only headline for this verified finding.
-CLAIM: {claim}
-TOOL RESULT: {result}
-
-RULES (zero tolerance):
-- Every number in your headline MUST appear in the tool result above.
-- Observation only: no insulin units, carb counts, dosing, or medication advice.
-- No hype words, no exclamation points, no "consult your doctor".
-- <=20 words, end with a period.
-
-Output STRICT JSON: {{"headline": "<the sentence>"}}"""
+_WRITE_PROMPT = prompts.load("investigator_write")
 
 
 @dataclass

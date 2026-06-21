@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents.brief import _ADVICE_RE, _rank
 
 if TYPE_CHECKING:
@@ -228,15 +229,7 @@ class ClinicalAdvisoryAgent:
         )
 
 
-_REFINE_PROMPT = """Summarize these diabetes findings for a clinician visit about: {question}
-
-FINDINGS:
-{findings}
-
-Write a short analysis and 2-3 management GOALS. Do NOT give dosing, insulin,
-basal, or carb-ratio instructions - goals are directions to discuss, not actions.
-
-Output STRICT JSON: {{"analysis": ["..."], "goals": ["..."]}}"""
+_REFINE_PROMPT = prompts.load("advisory_refine")
 
 
 def _str_list(value: Any) -> list[str]:
