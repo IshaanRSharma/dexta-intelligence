@@ -57,6 +57,7 @@ from dexta_intelligence.models import (
     SleepEvent,
     TherapyProfile,
 )
+from dexta_intelligence.store._common import _opt_json, _prediction_horizon_min
 
 if TYPE_CHECKING:
     from dexta_intelligence.models import DeviceEvent
@@ -310,11 +311,6 @@ CREATE INDEX IF NOT EXISTS idx_therapy_profiles_active ON therapy_profiles (acti
 """
 
 
-def _prediction_horizon_min(values: list[float]) -> int:
-    """Minutes from cycle time to the last predicted point (5-minute spacing)."""
-    if not values:
-        return 0
-    return max(0, (len(values) - 1) * 5)
 
 
 def _to_utc(value: datetime) -> datetime:
@@ -335,9 +331,6 @@ _RUN_COLUMNS = (
 )
 
 
-def _opt_json(value: str | None, default: Any) -> Any:
-    """Decode a nullable JSON text column, falling back for legacy NULL rows."""
-    return default if value is None else json.loads(value)
 
 
 def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:

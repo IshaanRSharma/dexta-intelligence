@@ -21,6 +21,7 @@ import logging
 from datetime import UTC, timedelta
 from typing import TYPE_CHECKING, Any
 
+from dexta_intelligence.server._format import _relative_time
 from dexta_intelligence.server.render import sparkline_svg
 
 if TYPE_CHECKING:
@@ -35,20 +36,6 @@ __all__ = ["goal_card_view"]
 
 _CHECKPOINT_CAP = 10
 _RUN_CAP = 5
-
-
-def _relative_time(ts: datetime, now: datetime) -> str:
-    """Render a past timestamp relative to ``now`` (treat naive ts as UTC)."""
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=UTC)
-    secs = int((now - ts.astimezone(UTC)).total_seconds())
-    if secs < 60:
-        return "just now"
-    if secs < 3600:
-        return f"{secs // 60}m ago"
-    if secs < 86400:
-        return f"{secs // 3600}h ago"
-    return f"{secs // 86400}d ago"
 
 
 def _until(ts: datetime, now: datetime) -> str:

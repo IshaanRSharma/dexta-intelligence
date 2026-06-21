@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.models import FindingStatus
+from dexta_intelligence.server._format import _relative_time
 
 if TYPE_CHECKING:
     from dexta_intelligence.config import Config
@@ -21,21 +22,6 @@ __all__ = ["system_page_view"]
 
 #: A window wide enough to count all-time rows for the pipeline summary.
 _ALL_TIME_START = datetime(1970, 1, 1, tzinfo=UTC)
-
-
-def _relative_time(ts: datetime | None, now: datetime) -> str:
-    if ts is None:
-        return "never"
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=UTC)
-    secs = int((now - ts.astimezone(UTC)).total_seconds())
-    if secs < 60:
-        return "just now"
-    if secs < 3600:
-        return f"{secs // 60}m ago"
-    if secs < 86400:
-        return f"{secs // 3600}h ago"
-    return f"{secs // 86400}d ago"
 
 
 def _safe(call: Any, default: Any) -> Any:

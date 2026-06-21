@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents import prompts
+from dexta_intelligence.agents._json import parse_json
 from dexta_intelligence.agents.base import DataRequirement
 from dexta_intelligence.agents.tools.toolkit import (
     TOOL_SCHEMA_FOR_LLM,
@@ -285,25 +286,7 @@ class Investigator:
         return self._parse_json(response.content)
 
     def _parse_json(self, content: Any) -> dict[str, Any] | None:
-        if isinstance(content, str):
-            text = content
-        elif isinstance(content, list):
-            text = "".join(
-                part.get("text", "")
-                for part in content
-                if isinstance(part, dict) and part.get("type") == "text"
-            )
-        else:
-            return None
-        text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        try:
-            parsed = json.loads(text)
-        except (json.JSONDecodeError, ValueError):
-            logger.warning("%s: non-JSON LLM response: %s", self.name, text[:200])
-            return None
-        return parsed if isinstance(parsed, dict) else None
-
-
+        return parse_json(content, context=self.name)
 # ── digests + window helper (shared) ──────────────────────────────────────────
 
 

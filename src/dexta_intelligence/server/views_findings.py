@@ -3,22 +3,20 @@
 Pure data shaping: this module reads findings, hypotheses, and investigation
 runs from the store and returns plain dicts the template renders. It produces
 DATA, not HTML (apart from finding bodies, which are pre-rendered Markdown).
-
-The small helpers here are reimplemented locally rather than imported from
-``server.app``: importing private names from ``app`` would create a circular
-dependency.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.models import FindingStatus
+from dexta_intelligence.server._format import _relative_time
 from dexta_intelligence.server.render import markdown_to_html
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from dexta_intelligence.models import Finding, Hypothesis, InvestigationRun
     from dexta_intelligence.store.port import StoragePort
 
@@ -34,21 +32,6 @@ INTERNAL_FINDING_KINDS = frozenset({"investigation"})
 _REJECTED_STATUSES = frozenset(
     {FindingStatus.REJECTED, FindingStatus.DISMISSED, FindingStatus.SUPERSEDED}
 )
-
-
-def _relative_time(ts: datetime, now: datetime) -> str:
-    """Human relative time of ``ts`` against ``now``. Naive ``ts`` is read as UTC."""
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=UTC)
-    delta = now - ts.astimezone(UTC)
-    secs = int(delta.total_seconds())
-    if secs < 60:
-        return "just now"
-    if secs < 3600:
-        return f"{secs // 60}m ago"
-    if secs < 86400:
-        return f"{secs // 3600}h ago"
-    return f"{delta.days}d ago"
 
 
 def _skeptic_survived(finding: Finding) -> bool:

@@ -5,23 +5,22 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
 (2026-06-20). Deferred cleanups found while polishing are tracked below
 (2026-06-21).
 
-## Open / deferred (2026-06-21)
+## Open / deferred
 
-### #7 Store-layer dedup (CI unblocker landed; dedup pending)
+None. All tracked items are resolved.
 
-`store/sqlite.py` and `store/postgres.py` duplicate several helpers. A CI
-"Postgres parity" job now runs `tests/test_postgres_store.py` against a live
-`postgres:16` service (the suite skips only when `TEST_DATABASE_URL` is unset),
-so the backend is now tested in CI. Remaining: once that job is green, hoist the
-provably-identical pure helpers into `store/_common.py`, keeping the JSONB-vs-TEXT
-differences per backend, and confirm both suites stay green. Do not refactor
-blind.
+## Resolved (2026-06-21, third pass)
 
-### #9 Near-duplicate helpers worth consolidating (with care)
-
-`_relative_time` (4 server copies, slightly divergent signatures/bucketing) and
-`_parse_json` (3 copies). Consolidating means reconciling small behavioral
-differences and asserted UI text, so it is not a free dedup.
+- **#7** Store-layer dedup: the two provably-identical pure helpers (`_opt_json`,
+  `_prediction_horizon_min`) are hoisted to `store/_common.py` and shared by both
+  backends. The `_row_to_*` mappers genuinely differ (TEXT-JSON vs JSONB) and
+  stay per-backend by design. A CI "Postgres parity" job now runs the parity
+  suite against a live `postgres:16`, so the backend is tested (it previously
+  skipped without `TEST_DATABASE_URL`).
+- **#9** Near-duplicate helpers consolidated: one `_relative_time`
+  (`server/_format.py`, the `None`-safe superset) replaces the 4 server copies;
+  one `parse_json` (`agents/_json.py`, with an optional logging `context`)
+  backs the 3 former `_parse_json` copies.
 
 ## Resolved (2026-06-21, second pass)
 

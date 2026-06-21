@@ -49,6 +49,7 @@ from dexta_intelligence.config import (
 )
 from dexta_intelligence.connectors.base import HealthReport
 from dexta_intelligence.models import ChatTurn, FindingStatus, ManualEvent
+from dexta_intelligence.server._format import _relative_time
 from dexta_intelligence.server.autosync import AutoSyncController
 from dexta_intelligence.server.render import markdown_to_html
 from dexta_intelligence.server.settings_render import field_to_view, panel_to_view
@@ -1716,20 +1717,6 @@ def _mask_dsn(dsn: str) -> str:
     user = parts.username or ""
     netloc = f"{user}:***@{host}" if user else f":***@{host}"
     return urlunsplit(parts._replace(netloc=netloc))
-
-
-def _relative_time(ts: datetime, now: datetime) -> str:
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=UTC)
-    delta = now - ts.astimezone(UTC)
-    secs = int(delta.total_seconds())
-    if secs < 60:
-        return "just now"
-    if secs < 3600:
-        return f"{secs // 60}m ago"
-    if secs < 86400:
-        return f"{secs // 3600}h ago"
-    return f"{delta.days}d ago"
 
 
 def _card_configured(spec: Any, cfg: Config) -> bool:

@@ -28,13 +28,13 @@ With ``model=None`` planning degrades to the full producer set - exactly what
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents import prompts
+from dexta_intelligence.agents._json import parse_json
 from dexta_intelligence.agents.base import AgentRegistry
 from dexta_intelligence.agents.skeptic import skeptic_agent
 from dexta_intelligence.agents.tools.toolkit import _recall
@@ -422,20 +422,4 @@ def _log_skip(name: str, reasons: list[str]) -> None:
 
 
 def _parse_json(content: Any) -> dict[str, Any] | None:
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        text = "".join(
-            part.get("text", "")
-            for part in content
-            if isinstance(part, dict) and part.get("type") == "text"
-        )
-    else:
-        return None
-    text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    try:
-        parsed = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("coordinator: non-JSON planner response: %s", text[:200])
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    return parse_json(content, context="coordinator")
