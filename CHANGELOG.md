@@ -11,7 +11,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - LLM providers: Google DeepMind Gemini (`google_genai`), local Ollama
   (`ollama`, honoring `OLLAMA_HOST`), and local model files via llama.cpp
   (`llamacpp`, the optional `local` extra).
-- `CODE_OF_CONDUCT.md`.
+- Prompt registry: agent prompts live as overridable markdown in
+  `agents/prompts/` (`[prompts] dir`), with the dosing rail locked in code.
+- `Dockerfile` (the compose reference deployment now builds), `CODE_OF_CONDUCT.md`,
+  and `CITATION.cff`.
 
 ### Changed
 
