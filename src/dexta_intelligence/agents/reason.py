@@ -131,22 +131,8 @@ def run_reasoning_loop(
     evidence: dict[str, Any] = {}
 
     for _ in range(max_steps):
-        chunks: list[Any] = []
-        answer_started = False
         try:
-            stream_fn = getattr(bound, "stream", None)
-            if stream_fn is None:
-                response = bound.invoke(messages)
-            else:
-                for chunk in stream_fn(messages):
-                    chunks.append(chunk)
-                    delta = _chunk_text(chunk)
-                    if delta:
-                        if not answer_started:
-                            _emit(on_event, ReasoningEvent("answer_start", {}))
-                            answer_started = True
-                        _emit(on_event, ReasoningEvent("answer_delta", {"delta": delta}))
-                response = _merge_chunks(chunks) if chunks else bound.invoke(messages)
+            response, answer_started = _invoke_model(bound, messages, on_event)
         except Exception as exc:
             logger.warning("reasoning: model call failed", exc_info=True)
             return ReasoningResult(
@@ -171,31 +157,14 @@ def run_reasoning_loop(
             )
 
         messages.append(response)
-        for call in tool_calls:
-            name = call.get("name", "")
-            args = call.get("args") or {}
-            _emit(on_event, ReasoningEvent("tool_call", {"name": name, "args": args}))
-            spec = by_name.get(name)
-            if spec is None:
-                result: Any = {"error": f"unknown tool {name!r}"}
-                ok = False
-            else:
-                try:
-                    result, numbers = spec.fn(args)
-                    ok = not (isinstance(result, dict) and result.get("error"))
-                    _merge_evidence(evidence, name, len(steps), numbers)
-                except Exception as exc:  # a tool fault must not kill the loop
-                    logger.debug("reasoning: tool %s raised: %s", name, exc)
-                    result, ok = {"error": f"{type(exc).__name__}: {exc}"}, False
-            _emit(on_event, ReasoningEvent("tool_result", {"name": name, "ok": ok}))
-            steps.append(ToolCall(name=name, args=args, ok=ok, result=result))
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": call.get("id", name),
-                    "content": json.dumps(result, default=str)[:4000],
-                }
-            )
+        _run_tool_calls(
+            tool_calls,
+            by_name,
+            steps=steps,
+            evidence=evidence,
+            messages=messages,
+            on_event=on_event,
+        )
 
     return ReasoningResult(
         answer="",
@@ -203,6 +172,76 @@ def run_reasoning_loop(
         evidence=evidence,
         stopped_reason="max_steps",
     )
+
+
+def _invoke_model(
+    bound: Any,
+    messages: list[Any],
+    on_event: Callable[[ReasoningEvent], None] | None,
+) -> tuple[Any, bool]:
+    """One model turn, streaming answer deltas when supported. Returns the
+    response and whether answer streaming already began."""
+    stream_fn = getattr(bound, "stream", None)
+    if stream_fn is None:
+        return bound.invoke(messages), False
+    chunks: list[Any] = []
+    answer_started = False
+    for chunk in stream_fn(messages):
+        chunks.append(chunk)
+        delta = _chunk_text(chunk)
+        if delta:
+            if not answer_started:
+                _emit(on_event, ReasoningEvent("answer_start", {}))
+                answer_started = True
+            _emit(on_event, ReasoningEvent("answer_delta", {"delta": delta}))
+    response = _merge_chunks(chunks) if chunks else bound.invoke(messages)
+    return response, answer_started
+
+
+def _run_tool_calls(
+    tool_calls: list[Any],
+    by_name: dict[str, ToolSpec],
+    *,
+    steps: list[ToolCall],
+    evidence: dict[str, Any],
+    messages: list[Any],
+    on_event: Callable[[ReasoningEvent], None] | None,
+) -> None:
+    """Execute every requested tool call, appending steps and tool messages."""
+    for call in tool_calls:
+        name = call.get("name", "")
+        args = call.get("args") or {}
+        _emit(on_event, ReasoningEvent("tool_call", {"name": name, "args": args}))
+        result, ok = _execute_tool(by_name.get(name), name, args, len(steps), evidence)
+        _emit(on_event, ReasoningEvent("tool_result", {"name": name, "ok": ok}))
+        steps.append(ToolCall(name=name, args=args, ok=ok, result=result))
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": call.get("id", name),
+                "content": json.dumps(result, default=str)[:4000],
+            }
+        )
+
+
+def _execute_tool(
+    spec: ToolSpec | None,
+    name: str,
+    args: dict[str, Any],
+    idx: int,
+    evidence: dict[str, Any],
+) -> tuple[Any, bool]:
+    """Run one tool; a fault becomes an error result, never an exception."""
+    if spec is None:
+        return {"error": f"unknown tool {name!r}"}, False
+    try:
+        result, numbers = spec.fn(args)
+        ok = not (isinstance(result, dict) and result.get("error"))
+        _merge_evidence(evidence, name, idx, numbers)
+    except Exception as exc:  # a tool fault must not kill the loop
+        logger.debug("reasoning: tool %s raised: %s", name, exc)
+        return {"error": f"{type(exc).__name__}: {exc}"}, False
+    return result, ok
 
 
 def _model_error_message(exc: Exception) -> str:
