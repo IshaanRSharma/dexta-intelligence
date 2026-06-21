@@ -1,0 +1,116 @@
+/* Shared components: scope chips, evidence cards, findings tabs, goal observability.
+   Kept separate from app.css so it composes cleanly with the rest of the theme. */
+
+/* scope chips */
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
+.chip-kv {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 10px; font-size: 12px; white-space: nowrap;
+}
+.chip-k { color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; }
+.chip-v { color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* evidence card extras */
+.finding-card .counter-evidence {
+  margin: 12px 0 0; padding: 10px 12px; font-size: 13px; line-height: 1.5;
+  background: var(--bad-soft); border: 1px solid var(--bad-border); border-radius: var(--radius-xs);
+}
+.counter-evidence .ce-label {
+  display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--bad); margin-right: 6px;
+}
+
+/* findings tabs + sections */
+.tabbar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+.tabbar a {
+  text-decoration: none; color: var(--muted); font-size: 14px; font-weight: 500;
+  padding: 8px 14px; border-bottom: 2px solid transparent;
+}
+.tabbar a:hover { color: var(--text); }
+.tab-count {
+  display: inline-block; min-width: 18px; text-align: center; font-size: 11px;
+  background: var(--surface-2); border-radius: 999px; padding: 1px 7px; margin-left: 4px; color: var(--muted);
+}
+.findings-section { margin-bottom: 36px; scroll-margin-top: 72px; }
+.section-title { font-size: 18px; margin-bottom: 14px; }
+.plain-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.plain-list li { font-size: 14px; line-height: 1.5; }
+.run-log { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.run-log li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
+.run-log a { color: var(--accent); text-decoration: none; }
+.run-log a:hover { text-decoration: underline; }
+
+/* goal observability */
+.goal-card .goal-progress { margin-top: 12px; }
+.goal-metrics { display: flex; gap: 16px; flex-wrap: wrap; align-items: baseline; margin-top: 8px; font-size: 14px; }
+.goal-metrics .gm-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted); margin-right: 4px;
+}
+.goal-history { margin-top: 12px; }
+.goal-history summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+.checkpoint-list { list-style: none; padding: 8px 0 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.checkpoint-list li { font-size: 13px; line-height: 1.5; }
+.goal-runs { margin-top: 14px; }
+.goal-runs .gm-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+}
+
+/* connectors page */
+.autosync-form { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.autosync-form select { width: auto; min-width: 130px; }
+.conn-card { margin-top: 18px; }
+.conn-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.conn-list { list-style: none; margin: 0; padding: 0; }
+.conn-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 12px 0; border-bottom: 1px solid var(--border);
+}
+.conn-row:last-child { border-bottom: none; }
+.conn-pick { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+.conn-label { font-size: 15px; font-weight: 500; }
+
+/* open investigations queue */
+.open-inv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.open-inv {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow-sm);
+}
+.open-inv-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.open-inv-q { font-size: 15px; font-weight: 500; }
+
+/* live investigation stream (Investigations page) */
+.run-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 12px 0 4px; }
+.run-notes { margin-top: 6px; }
+.step-active .step-mark { color: var(--accent, #4f7cff); }
+.step-active .step-name { font-weight: 600; }
+.step-count { margin-left: 8px; }
+.step-note { padding: 2px 0; }
+.run.running { border-color: var(--accent, #4f7cff); }
+
+/* coverage-aware gating + evidence drawer (Investigations) */
+.run-scope { margin: 8px 0; }
+.evidence-drawer summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.evidence-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.evidence-list .mono { font-size: 12px; color: var(--muted); margin-right: 8px; }
+
+/* evidence-strength chips (Findings) */
+.chip-kv.strength-strong .chip-v { color: var(--ok, #1a7f37); font-weight: 600; }
+.chip-kv.strength-moderate .chip-v { color: var(--warn, #9a6700); font-weight: 600; }
+.chip-kv.strength-weak .chip-v { color: var(--muted); font-weight: 600; }
+
+/* persisted run: tools-called list + live answer card */
+.run-tools { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.run-tools li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.answer-card { margin-top: 12px; }
+
+/* prediction reconciliation page */
+.recon-traces { display: flex; gap: 24px; flex-wrap: wrap; margin: 10px 0; }
+.recon-trace { display: flex; flex-direction: column; gap: 4px; }
+.recon-trace .gm-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+
+/* discussion brief (Reports) */
+.discuss-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.discuss-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+.discuss-head { font-weight: 600; }

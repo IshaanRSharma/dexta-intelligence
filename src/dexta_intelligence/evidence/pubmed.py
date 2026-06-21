@@ -1,19 +1,21 @@
-"""PubMed backend — zero-auth NCBI E-utilities (esearch + esummary).
+"""PubMed backend - zero-auth NCBI E-utilities (esearch + esummary).
 
 Two calls, no key required: ``esearch`` ranks PMIDs for the query by relevance,
 then ``esummary`` resolves each PMID to a title and publication year. The
-snippet is the title — abstracts (``efetch``) are intentionally skipped to keep
+snippet is the title - abstracts (``efetch``) are intentionally skipped to keep
 the round-trip light; ground a pattern, don't write a review.
 
 NCBI etiquette: requests carry ``tool`` and ``email`` params when an email is
 configured (E-utilities asks identifiers so they can contact heavy users before
 throttling). Everything is wrapped so the backend degrades to ``[]`` on any
-HTTP, timeout, or parse failure — it must never raise into a reasoning loop.
+HTTP, timeout, or parse failure - it must never raise into a reasoning loop.
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -33,7 +35,13 @@ EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
 #: NCBI default tool identifier; paired with a configured email per etiquette.
 _TOOL_NAME = "dexta-intelligence"
+#: An NCBI key raises the rate limit from 3 to 10 requests/second (optional).
+_API_KEY_ENV = "NCBI_API_KEY"
 _TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+#: Tighter timeout for interactive (page-load) lookups (interactive=True).
+_INTERACTIVE_TIMEOUT = httpx.Timeout(4.0, connect=2.0)
+#: One short backoff on a 429 (unkeyed NCBI throttles at 3 req/s).
+_RATE_LIMIT_BACKOFF_S = 0.4
 #: Hard ceiling so a runaway ``limit`` can't ask NCBI for a huge page.
 _MAX_RETMAX = 20
 
@@ -50,9 +58,11 @@ class PubMedBackend:
         *,
         email: str = "",
         client: httpx.Client | None = None,
+        interactive: bool = False,
     ) -> None:
         self._email = email
-        self._client = client if client is not None else httpx.Client(timeout=_TIMEOUT)
+        timeout = _INTERACTIVE_TIMEOUT if interactive else _TIMEOUT
+        self._client = client if client is not None else httpx.Client(timeout=timeout)
 
     def search(self, query: str, *, limit: int = 5) -> list[EvidenceHit]:
         """Search PubMed for ``query``; at most ``limit`` hits, ``[]`` on error."""
@@ -78,10 +88,18 @@ class PubMedBackend:
         params: dict[str, str | int] = {"tool": _TOOL_NAME, **extra}
         if self._email:
             params["email"] = self._email
+        key = os.environ.get(_API_KEY_ENV)
+        if key:
+            params["api_key"] = key
         return params
 
     def _get_json(self, path: str, params: dict[str, str | int]) -> Any:
-        response = self._client.get(f"{EUTILS_BASE}{path}", params=self._params(params))
+        url = f"{EUTILS_BASE}{path}"
+        full = self._params(params)
+        response = self._client.get(url, params=full)
+        if response.status_code == httpx.codes.TOO_MANY_REQUESTS:  # NCBI throttle
+            time.sleep(_RATE_LIMIT_BACKOFF_S)
+            response = self._client.get(url, params=full)
         response.raise_for_status()
         return response.json()
 

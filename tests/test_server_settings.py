@@ -1,4 +1,4 @@
-"""Settings & credentials page — per-source cards, TOML writes, secret hygiene.
+"""Settings & credentials page - per-source cards, TOML writes, secret hygiene.
 
 Drive the FastAPI app through TestClient against a tmp_path-pointed config
 file. No network: the test-connection endpoint is exercised through a fake
@@ -17,7 +17,7 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient
 
-from dexta_intelligence.config import Config, load_config, save_config_values
+from dexta_intelligence.config import Config, load_config, save_config_values, secrets_path_for
 from dexta_intelligence.connectors.base import HealthReport
 from dexta_intelligence.models import RawEvent
 from dexta_intelligence.server import create_app
@@ -151,7 +151,7 @@ def test_post_source_writes_toml_with_0600(tmp_path: Path) -> None:
     assert resp.status_code == 200
     assert "Saved." in resp.text
     assert toml_path.stat().st_mode & 0o777 == 0o600
-    assert not list(tmp_path.glob(".dexta.toml.*"))  # no temp files left behind
+    assert not list(tmp_path.glob(".dexta.toml.*"))  # atomic write leaves no temp files
     reloaded = load_config(toml_path)
     assert reloaded.nightscout.url == "https://ns.example.com"
     assert reloaded.nightscout.token == "supersecrettoken"
@@ -199,6 +199,7 @@ def test_general_save_preserves_card_credentials(tmp_path: Path) -> None:
         data={
             "target_low": "65",
             "target_high": "180",
+            "max_reasoning_steps": "24",
             "deep_analysis_window_days": "90",
             "path": str(tmp_path / "wiki"),
             "git": "off",
@@ -211,6 +212,7 @@ def test_general_save_preserves_card_credentials(tmp_path: Path) -> None:
     assert resp.status_code == 303
     reloaded = load_config(toml_path)
     assert reloaded.analysis.target_low == 65
+    assert reloaded.analysis.max_reasoning_steps == 24
     assert reloaded.oura.access_token == "oura-token-9876"
 
 
@@ -365,3 +367,24 @@ def test_unknown_source_is_404(tmp_path: Path) -> None:
     assert client.post("/settings/ghost", data={}).status_code == 404
     assert client.post("/settings/ghost/test").status_code == 404
     assert client.post("/settings/llm/test").status_code == 404  # no connector to test
+
+
+def test_post_llm_env_key_writes_secrets_file(tmp_path: Path) -> None:
+    client, toml_path = _client(tmp_path)
+    secrets = secrets_path_for(toml_path)
+    resp = client.post(
+        "/settings/llm",
+        data={
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-20250514",
+            "env__ANTHROPIC_API_KEY": "sk-ant-test-key-abcd",
+        },
+    )
+    assert resp.status_code == 200
+    assert "Saved." in resp.text
+    assert "Connected" in resp.text
+    assert secrets.exists()
+    assert secrets.stat().st_mode & 0o777 == 0o600
+    assert "sk-ant-test-key-abcd" not in resp.text
+    assert "••••abcd" in resp.text
+    assert "secrets.env" in resp.text

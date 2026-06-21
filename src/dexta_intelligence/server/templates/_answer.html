@@ -6,7 +6,7 @@
 {% else %}
 <article class="card answer">
   <p class="qline muted">{{ question }}</p>
-  <div class="prose">{{ answer }}</div>
+  <div class="prose">{{ answer_html|safe if answer_html else answer }}</div>
   {% if tools %}
   <footer class="footnote">tools: {% for t in tools %}<span class="mono">{{ t }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</footer>
   {% endif %}

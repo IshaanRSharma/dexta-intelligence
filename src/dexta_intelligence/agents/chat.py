@@ -1,4 +1,4 @@
-"""Chat agent — ``dexta ask "..."``, the conversational reasoning surface.
+"""Chat agent - ``dexta ask "..."``, the conversational reasoning surface.
 
 The model reasons over read-only tools (stats arsenal + recall over its own
 memory) and decides per turn whether to compute or answer. Every number in the
@@ -12,8 +12,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.reason import ReasoningResult, run_reasoning_loop
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.trace import TraceLine, render_trace
 from dexta_intelligence.guard.faithfulness import audit
 from dexta_intelligence.guard.treatment_gate import (
@@ -36,7 +36,7 @@ __all__ = ["ChatAgent", "ChatAnswer", "TraceLine"]
 
 _SYSTEM = """You are dexta, a continuous health-intelligence assistant for one \
 Type-1 diabetes patient. You reason over their real data using the tools \
-provided — you never compute statistics yourself, you call a tool. Decide which \
+provided - you never compute statistics yourself, you call a tool. Decide which \
 tools (if any) a question needs; a question about framing or what you already \
 know may need none.
 
@@ -102,10 +102,13 @@ def _finish(
     tools_used = tuple(step.name for step in result.steps)
     trace = tuple(render_trace(result.steps))
     if not result.answer:
-        fallback = {
-            "model_error": "The language model is unavailable right now.",
-            "max_steps": "I ran out of reasoning steps before reaching a confident answer.",
-        }.get(result.stopped_reason, "I could not produce an answer.")
+        if result.stopped_reason == "model_error" and result.error_detail:
+            fallback = result.error_detail
+        else:
+            fallback = {
+                "model_error": "The language model is unavailable right now.",
+                "max_steps": "I ran out of reasoning steps before reaching a confident answer.",
+            }.get(result.stopped_reason, "I could not produce an answer.")
         return ChatAnswer(
             fallback, tools_used, faithful=True, stopped_reason=result.stopped_reason, trace=trace
         )
@@ -115,7 +118,7 @@ def _finish(
         logger.warning("chat: %d untraceable number(s) in answer", len(report.violations))
         warned = (
             result.answer
-            + "\n\n⚠️ Some figures above could not be traced to your data — "
+            + "\n\n⚠️ Some figures above could not be traced to your data - "
             "treat them with caution."
         )
         return ChatAnswer(
@@ -126,15 +129,15 @@ def _finish(
     )
 
 
-def _apply_gate(  # noqa: PLR0911 — one return per gate outcome
+def _apply_gate(  # noqa: PLR0911 - one return per gate outcome
     result: ReasoningResult,
     question: str,
     capabilities: CapabilitySet,
     rerun: Callable[[str], ReasoningResult] | None,
 ) -> ReasoningResult:
-    """The fade gate (WAVE5 §4): retry once with a hint, then the safe sentence.
+    """The fade gate: retry once with a hint, then the safe sentence.
 
-    Deterministic — inspects the tool trace via ``guard.treatment_gate``; the
+    Deterministic - inspects the tool trace via ``guard.treatment_gate``; the
     one allowed retry is a fresh loop with the gate's hint injected into the
     system prompt. Evidence and steps from both attempts merge so the final
     audit sees everything."""
@@ -168,7 +171,7 @@ def _apply_gate(  # noqa: PLR0911 — one return per gate outcome
                 evidence=evidence,
                 stopped_reason=retry.stopped_reason,
             )
-    logger.warning("treatment gate: cause claim without treatment inspection — faded")
+    logger.warning("treatment gate: cause claim without treatment inspection - faded")
     return ReasoningResult(
         answer=SAFE_SENTENCE, steps=steps, evidence=evidence, stopped_reason="treatment_gate"
     )

@@ -1,4 +1,4 @@
-"""Daily rollup computation — pure, deterministic, stdlib-only.
+"""Daily rollup computation - pure, deterministic, stdlib-only.
 
 Turns one UTC day of timeline events into a
 :class:`~dexta_intelligence.models.Rollup` row. The sync workflow
@@ -8,11 +8,11 @@ identical rollup.
 
 Glycemic bands (mg/dL, international consensus; Battelino et al. 2019)
 ----------------------------------------------------------------------
-- ``tir``  — % of readings in the target range [70, 180], bounds inclusive.
-- ``tbr``  — % below 70 (includes very-low readings).
-- ``tbr2`` — % below 54 (very low).
-- ``tar``  — % above 180 (includes very-high readings).
-- ``tar2`` — % above 250 (very high).
+- ``tir``  - % of readings in the target range [70, 180], bounds inclusive.
+- ``tbr``  - % below 70 (includes very-low readings).
+- ``tbr2`` - % below 54 (very low).
+- ``tar``  - % above 180 (includes very-high readings).
+- ``tar2`` - % above 250 (very high).
 
 So ``tir + tar + tbr == 100`` for any non-empty day. The target band
 defaults match :class:`~dexta_intelligence.config.AnalysisConfig`
@@ -91,7 +91,7 @@ def daily_rollup(
 
     Events are filtered to ``day`` defensively (timestamps are UTC by model
     validation), so callers may pass wider windows without skewing the
-    result. Returns ``None`` when the day has no glucose readings — an
+    result. Returns ``None`` when the day has no glucose readings - an
     absent day is not a day of zeros.
 
     Insulin totals: ``bolus_units`` sums every bolus (manual and automatic

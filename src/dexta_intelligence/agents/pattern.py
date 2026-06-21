@@ -1,23 +1,23 @@
-"""Pattern Agent — deterministic correlators and detectors, rigor-gated.
+"""Pattern Agent - deterministic correlators and detectors, rigor-gated.
 
 Sub-checks (each skipped when required data is absent):
 1. ``pattern_tod_drift`` - overnight (00-06 UTC) mean deviation, first vs second
    window half.
-2. ``pattern_weekday_weekend`` — weekday vs weekend TIR (requires
+2. ``pattern_weekday_weekend`` - weekday vs weekend TIR (requires
    ``patterns_weekday_tod`` capability).
-3. ``pattern_post_meal_outlier`` — 2h post-meal rise by time-of-day bucket.
-4. ``pattern_episode_frequency`` — hypo episode rate, first vs second window half.
-5. ``pattern_sleep_glucose`` — sleep duration or recovery score vs next-day glucose.
+3. ``pattern_post_meal_outlier`` - 2h post-meal rise by time-of-day bucket.
+4. ``pattern_episode_frequency`` - hypo episode rate, first vs second window half.
+5. ``pattern_sleep_glucose`` - sleep duration or recovery score vs next-day glucose.
 
 FDR family correction
 ---------------------
 Every sub-check that clears the power gate contributes one hypothesis. Raw
 permutation p-values are collected, then :func:`~dexta_intelligence.stats.rigor.benjamini_hochberg`
 is applied once across that family. A finding is emitted only when its adjusted
-``q`` ≤ alpha **and** split-half replication agrees on direction — matching
+``q`` ≤ alpha **and** split-half replication agrees on direction - matching
 reconciliation's ``verdict == "pass"`` bar.
 
-Spec §7. No LLM imports in this module.
+No LLM imports in this module.
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ class _PatternCandidate:
 
 
 class PatternAgent:
-    """Deterministic pattern agent implementing spec §7 Pattern row."""
+    """Deterministic pattern agent."""
 
     name: str
     requires: DataRequirement

@@ -1,14 +1,14 @@
-"""Deep Analysis workflow — deterministic agents → skeptic → persist.
+"""Deep Analysis workflow - deterministic agents, skeptic review, persist.
 
-Spec ordering: producer agents fan out on the blackboard, the skeptic
-reviews the collected findings, then callers persist. One crashing producer
-never aborts the run.
+Producer agents fan out on the blackboard, the skeptic reviews the collected
+findings, then callers persist. One crashing producer never aborts the run.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from dexta_intelligence.agents.skeptic import AGENT_NAME as SKEPTIC_NAME
@@ -89,7 +89,9 @@ def run_deep_analysis(
     )
 
 
-def persist_findings(store: StoragePort, findings: Iterable[Finding]) -> list[int]:
+def persist_findings(
+    store: StoragePort, findings: Iterable[Finding], *, now: datetime | None = None
+) -> list[int]:
     """Insert findings, superseding any prior ACTIVE one with the same key.
 
     Re-running analysis re-emits the same finding; without dedup each run inserts
@@ -97,7 +99,13 @@ def persist_findings(store: StoragePort, findings: Iterable[Finding]) -> list[in
     on ``(agent, kind, scope)``, the prior ACTIVE finding is marked SUPERSEDED and
     linked via ``superseded_by`` to the new row, so exactly one ACTIVE finding
     survives per key and the superseded history stays in the graveyard.
+
+    Re-derivation is also a freshness signal: the new row carries the prior's
+    ``seen_count + 1`` and a fresh ``last_verified``, so a pattern that keeps
+    recurring stays fresh while one that stops being re-derived ages out (see
+    :mod:`dexta_intelligence.memory.freshness`).
     """
+    moment = now if now is not None else datetime.now(tz=UTC)
     persisted: list[int] = []
     for finding in findings:
         prior = store.get_findings(
@@ -106,10 +114,13 @@ def persist_findings(store: StoragePort, findings: Iterable[Finding]) -> list[in
             status=FindingStatus.ACTIVE,
             limit=100,
         )
-        new_id = store.insert_finding(finding)
+        matching = [old for old in prior if old.scope == finding.scope]
+        carried = max((old.seen_count for old in matching), default=0) + 1
+        stamped = finding.model_copy(update={"seen_count": carried, "last_verified": moment})
+        new_id = store.insert_finding(stamped)
         persisted.append(new_id)
-        for old in prior:
-            if old.id is not None and old.scope == finding.scope:
+        for old in matching:
+            if old.id is not None:
                 store.supersede_finding(old.id, new_id)
     return persisted
 

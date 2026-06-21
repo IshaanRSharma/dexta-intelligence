@@ -178,7 +178,7 @@ class TestEpisodeDetection:
         assert result["episodes"][0]["kind"] == "severe_hypo"
 
     def test_min_duration_boundary_excludes_short(self, store: SQLiteStore) -> None:
-        # 10 minutes — below 15-minute minimum
+        # 10 minutes - below 15-minute minimum
         events = self._hypo_series(T0, 10, 55)
         _insert(store, events)
         result = detect_episodes(store, T0, T0 + timedelta(hours=1))

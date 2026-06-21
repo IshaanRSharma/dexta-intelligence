@@ -1,205 +1,170 @@
 # dexta-intelligence
 
-**Continuous health intelligence for Type 1 diabetes.** A self-hosted agentic harness that turns
-your CGM, insulin, and wearable history into evidence-backed findings — *why did this happen,
-what changed, and what has the system learned from months of your data.*
+Continuous, evidence-grounded intelligence for Type 1 diabetes data. dexta is a self-hosted
+agentic harness that turns your CGM, insulin, pump, and wearable history into traceable findings:
+why something happened, what changed, and what the system has learned over months of your data.
 
 Bring your own model. Bring your own database. Your data never leaves your infrastructure.
 
-> ⚠️ **Not a medical device.** Dexta never gives dosing advice. It surfaces patterns and
-> evidence for you and your care team to review. All findings are hypotheses, not prescriptions.
+> Not a medical device. dexta never gives dosing advice. It surfaces patterns and evidence for you
+> and your care team to review. Every finding is a hypothesis, not a prescription. See
+> [MEDICAL_DISCLAIMER.md](MEDICAL_DISCLAIMER.md) and [PRIVACY.md](PRIVACY.md).
 
-## Eval results
+## What makes it different
 
-Synthetic ground truth, reproducible from the CLI. Numbers below are real output from the
-commands shown — re-run them to verify.
+Most diabetes tools show you what happened. dexta investigates why, shows its work, and stays
+honest about it. Three principles:
 
-| Eval | Measures | Result | Reproduce |
-| --- | --- | --- | --- |
-| **E1** faithfulness | guard catches fabricated numbers | catch rate **100%** | `python -m eval.runner e1` |
-| **E1** faithfulness | guard catches miscontextualized numbers | catch rate **100%** | `python -m eval.runner e1` |
-| **E1** faithfulness | guard wrongly rejects faithful prose | false-rejection **0.0%** | `python -m eval.runner e1` |
-| **E4-null** FDR | empirical false-discovery rate on effect-free data | **5.0%** (target ≤ 10%) | `python -m eval.runner e4-null` |
-| **E5** perturbation | finding-set stability under dropout/dupes/gaps/tz-shift | min Jaccard **1.00**, **0** induced kinds | `python -m eval.runner e5` |
+1. Determinism computes the facts, the model reasons on top. Tested analytics and statistics
+   produce every number (time in range, rigor gates, oref reconciliation). The model plans
+   investigations, ranks hypotheses, and explains. It never invents a figure.
+2. Statistical rigor before any claim. Discovery agents must pass permutation tests and
+   false-discovery control, then survive an independent skeptic, before a finding is shown.
+3. Two hard safety rails. A faithfulness guard rejects any prose whose numbers do not trace to a
+   tool call. A treatment gate blocks dosing, basal, carb-ratio, and correction instructions. Always.
 
-E1 and E5 run in seconds. E4-null defaults to 20 synthetic datasets × 90 days (~minute);
-`python -m eval.runner e4-null --datasets 5 --days 30` is faster but noisier at small N.
-These are calibration/robustness checks on synthetic data, not clinical validation.
-
-## Why this exists
-
-Every diabetes app shows you *what* happened. None of them tell you *why* — or remember what
-they figured out last month. Dexta is built around three ideas:
-
-1. **Evidence substrate, LLM intelligence.** Tested analytics and stats compute the numbers —
-   TIR, rigor gates, oref reconciliation, planted-effect evals. Agents (deterministic and
-   LLM-driven) turn that evidence into findings, hypotheses, and briefs. The LLM is the
-   intelligence layer: discovery, synthesis, ranking, explanation. The faithfulness guard
-   keeps it honest — reasoning must trace to computed evidence, never fabricated figures.
-2. **Statistical rigor before claims.** Discovery agents must pass permutation tests, FDR
-   correction, split-half replication, and power gates before a pattern becomes a finding.
-   A skeptic agent tries to break every finding before you see it.
-3. **Memory.** Findings, hypotheses, and their recurrence counts persist. "This pattern has
-   occurred 28 times since March" is a different class of insight than a 14-day snapshot.
-
-## Architecture (high level)
-
-```
-Nightscout / Dexcom / Libre / Whoop / Oura / CSV
-        │  connectors (pull, normalize, watermark)
-        ▼
-Clinical timeline (SQLite quick-start, Postgres reference)
-        │  analytics + stats/rigor (evidence substrate)
-        ▼
-Reasoning agents ── the model decides which deterministic tool to call
-        │           chat (dexta ask) · discovery (curiosity loop) ·
-        │           goals (cron-friendly ticks) — all on one tool-calling loop
-        │           detectors: observation · pattern · reconciliation · skeptic
-        ▼
-Memory (findings · hypotheses · goal arcs)  →  wiki (markdown knowledge base)
-        │
-        ▼
-Every answer audited: numbers must trace to tool results (faithfulness guard)
-```
-
-**BYOM.** Any LangChain provider, or one `OPENROUTER_API_KEY` for every hosted model.
-Local-only via Ollama. Without any model the deterministic brain still works —
-detectors, rigor, wiki, insights.
-
-**Connectors.** Nightscout is the meta-driver (Loop/AAPS/xDrip+/Omnipod arrive through
-it); Dexcom, Libre, Whoop, Oura, and CSV upload ship in-tree. A connector is one file
-implementing `Connector.pull(since)` with recorded fixtures — see `connectors/oura.py`
-as the template.
-
-## Five-minute tour
-
-Each command prints what it did. Steps that need a model are marked; everything else runs
-with zero API keys.
+## Quickstart
 
 ```bash
-# Not yet on PyPI — install from source (clone, then sync all extras):
-git clone https://github.com/ishaansharma/dexta-intelligence
-cd dexta-intelligence
-uv sync --all-extras                # or: pip install -e '.[all]'
+pip install "dexta-intelligence[gui,llm]"   # or: pip install -e ".[gui,llm]" from source
 
-dexta init                          # writes dexta.toml + creates the SQLite database
-dexta sync                          # pulls recent history → "synced N events"
-                                    #   (configurable lookback; 30-day default first pull)
-dexta upload clarity_export.csv     # or a LibreView export → "imported N glucose rows"
-dexta analyze                       # agents → skeptic → findings; prints survived/rejected
-dexta wiki                          # rebuilds ~/.dexta/wiki (git-versioned) → "wiki: ... N pages"
-
-# with a model key (e.g. export OPENROUTER_API_KEY=...)
-dexta ask "why were my mornings rough this week?"   # reasons over tools + memory, cites n
-dexta goals add "reduce my overnight lows"          # composes a goal plan + deterministic metric
-dexta goals tick                                    # advances due goals — run on a schedule
-                                                    #   (no daemon; cron `dexta goals tick` yourself)
-dexta goals list                                    # progress arcs
-dexta brief                                         # physician-visit brief (guard-checked)
-
-python -m eval.runner e1            # guard faithfulness eval (see table above)
+dexta demo        # load a synthetic patient and run an investigation end to end, no key needed
+dexta serve       # open the web app at http://127.0.0.1:8765
 ```
 
-**Lenses (`--lens`).** `dexta analyze` runs the full producer set by default. Route a subset
-with `dexta analyze --lens watch` (observation + pattern, 7-day pulse — cheap, no LLM),
-`--lens why` (reconciliation + discovery, for a weird week), or `--lens insulin`. Define your
-own in `dexta.toml`:
+`dexta demo` is the fastest way to see it: it loads ~90 days of a realistic Tandem t:slim X2
+patient (CGM, boluses, Control-IQ basals, carb entries, two profile versions, logged forecast
+curves, manual notes) with a planted, explainable dinner-spike, then explains it with a visible
+plan and trace.
 
-```toml
-[lens.morning]
-agents = ["observation", "pattern"]
-window_days = 7
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Sources [Read-only sources]
+    NS[Nightscout]
+    DEX[Dexcom]
+    TAN[Tandem t:slim X2]
+    CSV[CSV / Tidepool]
+    WEAR[Whoop / Oura]
+  end
+  Sources --> SYNC[Sync: idempotent raw events]
+  SYNC --> STORE[(Local store: SQLite or Postgres)]
+  STORE --> AN[Analytics: TIR, rollups, oref, stats]
+  AN --> AG[Agents: discovery, pattern, insulin, reconciliation, skeptic, coordinator]
+  LIT[(PubMed)] -. grounds claims .-> AG
+  AG --> RAILS{Faithfulness guard + treatment gate}
+  RAILS --> UI[Web app: Chat, Investigations, Findings, Reports, System]
 ```
 
-The skeptic post-pass and the faithfulness guard are never routable-out — routing selects
-*what runs*, never *whether it's honest*.
+Layers, bottom to top:
 
-**GUI.** From a source checkout, `uv sync --extra gui` (or `pip install -e '.[gui]'`) then
-`dexta serve` → a local dashboard at
-`127.0.0.1:8787`: findings feed with skeptic badges, rendered wiki, goal arcs, chat, and a
-settings panel (env-var status shown as set/unset dots — values never displayed or stored).
+- Connectors pull provider records as immutable raw events. Read-only by default. Idempotent, so
+  re-syncing is always safe.
+- A storage port (SQLite for zero-setup, Postgres for production) holds raw events, a normalized
+  clinical timeline, rollups, and agent memory (findings, hypotheses, runs).
+- Analytics and statistics compute the facts: time in range, coefficient of variation, oref0
+  IOB and COB and forecast reconciliation, permutation tests, FDR control, error grids.
+- Agents reason over that evidence. Deterministic producers run rigor-gated pattern tests. The
+  coordinator plans which to run. An LLM orchestrator drills single questions tool by tool. An
+  adversarial skeptic re-checks every finding.
+- Two rails bound the output, then the web app renders the plan, trace, evidence, and findings.
 
-## Write your own agent
+## The investigation flow
 
-An agent is **reasoning (LLM) + tools (deterministic) + memory (store)**. Subclass
-`Investigator` — it owns the plan → probe → judge → claim/wonder loop, rigor gating, and the
-faithfulness guard; you supply domain configuration. With no model it runs your
-`fallback_plan` as a deterministic sweep. (The real shape lives in `agents/discovery.py`.)
-
-```python
-from dataclasses import dataclass, field
-from dexta_intelligence.agents.base import DataRequirement
-from dexta_intelligence.agents.investigator import Investigator
-
-# Deterministic sweep used when no model is configured — one tool call per hypothesis.
-FALLBACK = (
-    {"id": "f1", "claim": "Glucose runs higher on low-activity days.",
-     "tool": "groupby_compare", "args": {"group_by": "activity_bucket", "target": "mean_glucose"}},
-)
-
-@dataclass
-class ActivityAgent(Investigator):
-    name: str = "activity"
-    requires: DataRequirement = field(
-        default_factory=lambda: DataRequirement(min_span_days=21.0, min_glucose_coverage_pct=50.0)
-    )
-    rigor_seed: int = 91                       # the skeptic re-runs with a different seed
-    fallback_plan: tuple = FALLBACK
-    plan_prompt: str = "Form 3-5 testable hypotheses about activity and glucose...\n{data_summary}"
-    kind_prefix: str = "activity"
-    scope: str = "activity"
-
-registry.register(ActivityAgent(model=model))  # model=None → deterministic sweep
+```mermaid
+flowchart TD
+  Q[Question or goal] --> P[Plan: which instruments to run]
+  P --> T[Trace: each tool call, scope, and result]
+  T --> E[Evidence: computed numbers plus PubMed citations]
+  E --> S[Skeptic: why not X, counter-evidence]
+  S --> F[Finding: evidence strength and lifecycle]
+  F --> R[Reports: clinician discussion brief]
 ```
 
-Claims you produce are gated by `stats.rigor.assess` and `guard.faithfulness.audit` for free;
-underpowered questions are banked as open hypotheses for a future run. See
-`docs/INTELLIGENCE.md` §5 for the curiosity-loop design.
+Every serious answer carries a visible plan, a tool-by-tool trace, the evidence behind it, the
+competing hypotheses, and what could not be checked.
 
-## Add a connector
+## Features
 
-A connector is one file implementing `Connector.pull(since)` (`connectors/base.py`), returning
-immutable `RawEvent` rows plus normalized typed events. Idempotency is structural — raw events
-carry `(source, source_id)` and the store skips duplicates. Use `connectors/oura.py` as the
-template and record JSON fixtures under `tests/fixtures/`. There's a good-first-issue template
-for new device connectors in `.github/ISSUE_TEMPLATE/connector.md`.
+The web app is one clear feature per tab:
 
-## Community
+| Tab | What it does |
+| --- | --- |
+| Chat | Instant question and answer with a live tool trace. |
+| Investigations | The deep, traced drill: plan to trace to evidence, plus deep analysis and the open-investigations queue. |
+| Findings | Durable memory: active, hypotheses, rejected, and the investigation log, with evidence strength and counter-evidence. Prediction reconciliation lives here. |
+| Reports | A clinician discussion brief (review now, monitor, questions to ask), grounded in your evidence and PubMed, with Markdown export. |
+| Goals | Goals run as recurring investigations, with progress and checkpoints. |
+| Connectors | Data sources, per-source health, and continuous sync. |
+| System | Observability and the evaluation model card. |
+| Settings | Configuration. |
 
-- **Contributing:** `CONTRIBUTING.md` — dev setup, ownership conventions, connector/agent
-  recipes.
-- **What's built:** `docs/CHANGELOG.md`. **Design docs:** `docs/INTELLIGENCE.md`. **Demo
-  script:** `docs/DEMO.md`.
-- **Issues:** bug reports and connector requests welcome. New device connectors are the
-  highest-leverage first contribution.
+Manual context ("+ Log context") is reachable from the Dashboard and Investigations.
 
-## Status & honest limitations
+## Data and connectors
 
-Alpha (`0.1.0`). The rigor / guard / memory / reasoning core is built and tested
-(**665 passed, 41 skipped** — the skips are the env-gated Postgres parity suite, run only
-when `TEST_DATABASE_URL` is set). The honesty thesis applies to our own docs, so here is
-what is **planned, not built**:
+dexta ingests, read-only, and stores locally:
 
-- **PyPI package.** `dexta-intelligence` is not published yet — install from source (clone +
-  `uv sync --all-extras`, or `pip install -e '.[all]'`). `uv add dexta-intelligence` will 404.
-- **"Explain this spike" command.** There is no event/spike explainer surface. The closest
-  shipped capability is `dexta analyze --lens why` (reconciliation + discovery over a
-  *window*, not a single event). A `dexta explain <when>` event explainer is planned.
-- **Goal scheduler.** Goals are advanced by a manual, cron-friendly `dexta goals tick` (no
-  daemon, no in-tree scheduler). You schedule the tick yourself (cron/systemd). Auto-marking
-  a goal "achieved" needs a target the CLI does not yet let you set, so it does not fire from
-  the CLI today.
-- **Cross-model eval matrix.** E1/E4/E5 run single-model. The reproducible
-  rows-are-models matrix (and the E4 power curve) are not built yet.
-- **pgvector / `EmbeddingPort`.** Recall uses a dependency-free lexical index; the swappable
-  embeddings backend is a seam, not a shipped feature.
-- **Harness-MCP server.** A single MCP server exposing `ask`/`recall`/`goals`/`brief` as MCP
-  tools is planned, not shipped.
+- CGM (Nightscout, Dexcom, LibreLinkUp, CSV exports, Tidepool).
+- Insulin and pump data, including Tandem t:slim X2 and Control-IQ (boluses, temp basals, suspends,
+  and the basal, carb-ratio, and ISF profile, versioned over time).
+- Carb entries, sleep and activity (Whoop, Oura), and logged forecast curves (OpenAPS, AAPS, Loop).
+- User-reported manual context (meals, stress, site changes, notes).
 
-Everything else in this README runs today. The deterministic brain
-(`analyze`/`wiki`/`brief`/insights, detectors, rigor, skeptic, cold-start gating) works with
-zero API keys; chat, discovery, synthesis, and goal composition add the LLM on top.
+Nothing is written back to any device or service. Synced data persists in a local SQLite database
+(`~/.dexta/dexta.db`) or a Postgres instance you control.
 
-## License
+## Evaluation and safety
 
-MIT
+dexta ships a reproducible eval harness with synthetic ground truth. Run any of these:
+
+| Eval | Measures | Reproduce |
+| --- | --- | --- |
+| E1 faithfulness | the guard catches fabricated or miscontextualized numbers | `python -m eval.runner e1` |
+| E2 power | true-discovery rate on a planted effect | `python -m eval.runner e2` |
+| E3 accuracy | oref0 forecast vs realized glucose (Clarke and Parkes error grid, MARD) | `python -m eval.runner e3` |
+| E4 null FDR | empirical false-discovery rate on effect-free data | `python -m eval.runner e4-null` |
+| E5 perturbation | finding-set stability under dropout, dupes, gaps, timezone shift | `python -m eval.runner e5` |
+| E_consensus | rollup metrics match the 2019 international-consensus formulas | `python -m eval.runner consensus` |
+| E6 agentic | end-to-end attribution, faithfulness, and a dosing-advice red team (target zero) | `python -m eval.runner e6` |
+
+These are calibration and robustness checks on synthetic data, not clinical validation. E6 needs a
+model provider; the rest run without a key. The web app surfaces a live model card and a dosing
+safety scan at `/evals`. For the deeper design, see [TECHNICAL_REPORT.md](TECHNICAL_REPORT.md).
+
+## Running
+
+```bash
+dexta serve                 # web app (add --sync-every 15 for in-app background sync)
+dexta sync                  # pull configured connectors once
+dexta ask "why are my mornings high?"   # one investigation from the CLI
+dexta investigate           # whole-record deep analysis
+dexta monitor               # deterministic anomaly scan
+dexta daemon                # continuous sync, monitor, goal ticks, periodic deep analysis
+```
+
+A language model unlocks the reasoning layer. Set a provider in Settings (or `dexta.toml`) and an
+API key in your environment. Without one, the deterministic analytics, stats, and monitors still run.
+
+## Testing
+
+```bash
+.venv/bin/ruff check src/ tests/ eval/
+.venv/bin/mypy src/dexta_intelligence/
+.venv/bin/pytest
+```
+
+Line length 100, mypy strict, tests for new behavior.
+
+## Extending
+
+Adding a connector, an analysis agent, or a tool the reasoning loop can call is a small, local
+change. See [EXTENDING.md](EXTENDING.md) for minimal recipes, each backed by a conformance test,
+and [DEXTA_OSS_TECHNICAL_SPEC.md](DEXTA_OSS_TECHNICAL_SPEC.md) for the deeper design.
+
+## Disclaimer
+
+dexta is observation and discussion support, not a medical device, and never produces dosing
+advice. See [MEDICAL_DISCLAIMER.md](MEDICAL_DISCLAIMER.md), [PRIVACY.md](PRIVACY.md),
+[SECURITY.md](SECURITY.md), and [CONTRIBUTING.md](CONTRIBUTING.md).

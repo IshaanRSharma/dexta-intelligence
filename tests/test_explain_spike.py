@@ -1,7 +1,7 @@
-"""explain_spike workflow contract over golden datasets (metrics M3/M5/M10).
+"""explain_spike workflow contract over golden datasets.
 
-The canonical WAVE5 §1 question — "Why did I spike on March 14?" — must
-produce the canonical trace and evidence numbers from the late_bolus plant.
+The canonical question, "Why did I spike on March 14?", must produce the
+canonical trace and evidence numbers from the late_bolus plant.
 """
 
 from __future__ import annotations
@@ -14,8 +14,7 @@ from tests.golden import make_store
 
 from dexta_intelligence.agents.base import AgentContext
 from dexta_intelligence.coldstart import ColdStartReport
-from dexta_intelligence.workflows.explain_spike import (
-    INSUFFICIENT_SENTENCE,
+from dexta_intelligence.investigations.spike import (
     NO_TREATMENT_DISCLAIMER,
     OUTPUT_KEYS,
     SAFETY_LINE,
@@ -115,7 +114,7 @@ def test_no_insulin_discloses_and_makes_no_cause_claim() -> None:
     out = explain_spike(_ctx("no_insulin"), "2026-03-14")
     assert NO_TREATMENT_DISCLAIMER in str(out["headline"])
     assert out["confidence"] == "low"
-    assert NO_TREATMENT_DISCLAIMER in [str(x) for x in out["limitations"]]  # type: ignore[union-attr]
+    assert any(NO_TREATMENT_DISCLAIMER in str(x) for x in out["limitations"])  # type: ignore[union-attr]
     assert "consistent with late" not in str(out["headline"])
 
 
@@ -158,7 +157,7 @@ def test_fabricating_model_falls_back_to_deterministic_headline() -> None:
 
 def test_faithful_model_phrasing_is_kept() -> None:
     fake = _FakeModel(
-        "This looks like late meal insulin rather than basal drift — a "
+        "This looks like late meal insulin rather than basal drift - a "
         "discussion point for your care team."
     )
     out = explain_spike(_ctx("late_bolus"), "2026-03-14", model=fake)

@@ -551,7 +551,7 @@ class TestBootstrapDiffCI:
 
 class TestConfidenceFromNAndD:
     def test_known_answers(self) -> None:
-        # sqrt((8/30) * (0.3/0.8)) = sqrt(0.1) = 0.316 etc. — hand-computed
+        # sqrt((8/30) * (0.3/0.8)) = sqrt(0.1) = 0.316 etc. - hand-computed
         # (the donor docstring's own examples were wrong; these are right).
         assert confidence_from_n_and_d(8, 0.3) == pytest.approx(0.316)
         assert confidence_from_n_and_d(20, 0.5) == pytest.approx(0.645)
@@ -621,7 +621,7 @@ def _assert_all_finite(obj: object) -> None:
 
 class TestNaNFreeGuarantee:
     """Adversarial inputs (constant, tiny, huge, near-collinear) never leak
-    NaN or infinity — undefined results are always spelled None."""
+    NaN or infinity - undefined results are always spelled None."""
 
     CASES: ClassVar[list[list[float]]] = [
         [],

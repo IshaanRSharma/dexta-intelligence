@@ -1,4 +1,4 @@
-"""Connector contract — batch ingest from any sensor source.
+"""Connector contract - batch ingest from any sensor source.
 
 A connector pulls provider records and returns them as immutable
 :class:`~dexta_intelligence.models.RawEvent` rows plus normalized timeline

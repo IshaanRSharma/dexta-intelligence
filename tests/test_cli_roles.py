@@ -3,8 +3,8 @@
 Each command asks the BYOM factory for a model *by role* (plan/discovery/
 skeptic/research/brief/explain/polish). These tests monkeypatch
 ``llm.factory.get_model`` to capture the resolved :class:`ModelSpec` without
-constructing a real chat model, then assert the right role — with its sampling
-defaults and any ``[llm.roles.*]`` override — flows through each call site.
+constructing a real chat model, then assert the right role - with its sampling
+defaults and any ``[llm.roles.*]`` override - flows through each call site.
 """
 
 from __future__ import annotations

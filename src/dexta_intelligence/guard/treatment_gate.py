@@ -1,9 +1,9 @@
-"""The fade gate — no cause claim without treatment-context inspection.
+"""The fade gate - no cause claim without treatment-context inspection.
 
-WAVE5 §4, enforced deterministically: for a cause question (why did I spike /
+Enforced deterministically: for a cause question (why did I spike /
 what caused this high), when insulin data exists, the answer may not claim a
 likely contributor unless the tool trace shows the minimum inspection set.
-The gate inspects ``ToolCall`` steps — it never asks a model whether the model
+The gate inspects ``ToolCall`` steps - it never asks a model whether the model
 did its job.
 
 Fade behavior (the caller implements the retry; this module only judges):
@@ -33,13 +33,13 @@ __all__ = [
     "is_cause_question",
 ]
 
-#: Replaces a persistently non-compliant cause claim (WAVE5 §4, verbatim).
+#: Replaces a persistently non-compliant cause claim (verbatim).
 SAFE_SENTENCE = (
     "I can describe the glucose pattern, but I cannot make a strong cause "
     "hypothesis because treatment context was missing or not inspected."
 )
 
-#: Appended when insulin capability is absent (WAVE5 §4, verbatim).
+#: Appended when insulin capability is absent (verbatim).
 NO_TREATMENT_DISCLAIMER = "Insulin/carb data unavailable. This is glucose-shape inference only."
 
 #: Lowercase markers that make a question a *cause* question.
@@ -64,6 +64,15 @@ _MEAL_TOOLS = ("get_carb_entries",)
 _DATA_TOOLS_EXEMPT = frozenset({"recall", "coverage", "search_evidence",
                                 "get_current_time", "get_weekday", "parse_relative_date"})
 
+#: Workflow tools that internally perform the full treatment inspection - a
+#: successful call covers the granular requirements (the workflow provably
+#: inspects carbs/boluses/basal when the data exists).
+_COMPOSITE_COVERS: dict[str, frozenset[str]] = {
+    "investigate_spike": frozenset(
+        {"zoom_event", "find_spikes", "get_carb_entries", "get_boluses", "get_basal_timeline"}
+    ),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class GateReport:
@@ -77,7 +86,7 @@ class GateReport:
 
     @property
     def retry_hint(self) -> str:
-        """The injected hint for the single fade retry — names the gap."""
+        """The injected hint for the single fade retry - names the gap."""
         if self.research_only:
             return (
                 "You cited literature without inspecting the data. Call the data "
@@ -104,11 +113,11 @@ def assess_trace(
     steps: Sequence[ToolCall],
     capabilities: CapabilitySet,
 ) -> GateReport:
-    """Judge one answer's tool path against the WAVE5 §4 minimum.
+    """Judge one answer's tool path against the minimum.
 
     The required set adapts to capability: streams that do not exist cannot be
     required (their tools are hidden from the belt). When insulin is absent the
-    report is *compliant* but ``insulin_available=False`` — the caller must
+    report is *compliant* but ``insulin_available=False`` - the caller must
     carry :data:`NO_TREATMENT_DISCLAIMER` instead of a cause claim.
     """
     applies = is_cause_question(question)
@@ -118,6 +127,9 @@ def assess_trace(
             missing=(), research_only=False,
         )
     called = {step.name for step in steps if step.ok}
+    for composite, covers in _COMPOSITE_COVERS.items():
+        if composite in called:
+            called = called | covers
     if not capabilities.has_insulin:
         return GateReport(
             applies=True, compliant=True, insulin_available=False,

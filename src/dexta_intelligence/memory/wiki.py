@@ -1,4 +1,4 @@
-"""Wiki — the human-readable markdown projection of the findings store.
+"""Wiki - the human-readable markdown projection of the findings store.
 
 The findings table is the only memory; the wiki is a generated view of it,
 rebuildable byte-identically (``dexta wiki``). Nothing is deleted: retracted
@@ -79,7 +79,7 @@ class WikiReport:
 
 
 def topic_slug(kind: str) -> str:
-    """Kebab-case page slug for a finding kind. Slugs never change (wuphf rule)."""
+    """Kebab-case page slug for a finding kind; stable so links never break."""
     slug = re.sub(r"[^a-z0-9]+", "-", kind.lower()).strip("-")
     return slug or "general"
 
@@ -115,7 +115,7 @@ def generate_wiki(
     own repository and every generation that changes a page is committed.
 
     ``synthesis`` (optional) is the LLM-authored, guard-checked narrative
-    layer (spec §6.4): when given, topic pages gain a ``## Synthesis`` section
+    layer: when given, topic pages gain a ``## Synthesis`` section
     and the index a ``## Connections`` section. With ``synthesis=None`` the
     output is byte-identical to the deterministic templating.
     """
@@ -185,7 +185,7 @@ def _render_index(
     lines = [
         "# dexta wiki",
         "",
-        f"_Generated {today.isoformat()} from the findings store — do not edit; run"
+        f"_Generated {today.isoformat()} from the findings store - do not edit; run"
         " `dexta wiki` to regenerate. Belief history: `git log` in this directory._",
         "",
         f"Coverage: {coverage.span_days:.1f} days · {coverage.glucose_coverage_pct:.0f}%"
@@ -198,13 +198,13 @@ def _render_index(
         lines += ["| finding | topic | confidence | seen | stats |", "|---|---|---|---|---|"]
         lines += [_index_row(f, recurrence[id(f)]) for f in _ranked(fresh, recurrence)]
     elif stale:
-        lines.append("_All active findings have gone stale — `dexta sync && dexta analyze`._")
+        lines.append("_All active findings have gone stale - `dexta sync && dexta analyze`._")
     else:
-        lines.append("_No active findings yet — run `dexta analyze`._")
+        lines.append("_No active findings yet - run `dexta analyze`._")
     if stale:
         lines += [
             "",
-            "## Stale — awaiting fresh data",
+            "## Stale - awaiting fresh data",
             "",
             "_Not retracted; the data has just stopped reinforcing them._",
             "",
@@ -220,13 +220,13 @@ def _render_index(
         "",
         "## Boards",
         "",
-        f"- [Hypotheses](hypotheses.md) — {open_count} open",
-        f"- [Graveyard](graveyard.md) — {buried} retracted or superseded",
+        f"- [Hypotheses](hypotheses.md) - {open_count} open",
+        f"- [Graveyard](graveyard.md) - {buried} retracted or superseded",
     ]
     goals = store.get_goals()
     if goals:
         active_goals = sum(1 for g in goals if g.status.value == "active")
-        lines.append(f"- [Goals](goals.md) — {active_goals} active")
+        lines.append(f"- [Goals](goals.md) - {active_goals} active")
     lines.append("")
     return "\n".join(lines)
 
@@ -246,7 +246,7 @@ def _render_topic(
         for finding in _ranked(active, recurrence):
             lines += _belief_section(finding, recurrence[id(finding)], today=today)
     else:
-        lines += ["_Nothing currently believed — see history below._", ""]
+        lines += ["_Nothing currently believed - see history below._", ""]
     if synthesis is not None and (paragraph := synthesis.topic_paragraphs.get(kind)):
         lines += ["## Synthesis", "", paragraph, ""]
     lines += ["## History", ""]
@@ -278,13 +278,13 @@ def _render_graveyard(findings: list[Finding]) -> str:
     lines = [
         "# Graveyard",
         "",
-        "_What the system stopped believing, and why. Nothing is deleted —"
+        "_What the system stopped believing, and why. Nothing is deleted -"
         " retraction with reasons is the trust artifact._",
         "",
     ]
     buried = [f for f in findings if f.status in _GRAVEYARD_STATUSES]
     if not buried:
-        lines += ["_Empty — no finding has been retracted yet._", ""]
+        lines += ["_Empty - no finding has been retracted yet._", ""]
         return "\n".join(lines)
     for finding in _by_recency(buried):
         mark = _STATUS_MARKS[finding.status]
@@ -311,7 +311,7 @@ def _render_goals(store: StoragePort, goals: list[Any]) -> str:
         "",
     ]
     for goal in goals:
-        lines.append(f"## #{goal.id} — {goal.statement}")
+        lines.append(f"## #{goal.id} - {goal.statement}")
         lines.append(
             f"- {goal.status.value} · metric `{goal.metric.value}` ({goal.direction})"
             f" · every {goal.cadence_days}d"
@@ -333,7 +333,7 @@ def _render_run(new_findings: tuple[Finding, ...], *, today: date) -> str:
     accepted = [f for f in new_findings if f.status == FindingStatus.ACTIVE]
     rejected = [f for f in new_findings if f.status != FindingStatus.ACTIVE]
     lines = [
-        f"# Run — {today.isoformat()}",
+        f"# Run - {today.isoformat()}",
         "",
         f"{len(accepted)} finding(s) survived the skeptic; {len(rejected)} did not.",
         "",
@@ -345,7 +345,7 @@ def _render_run(new_findings: tuple[Finding, ...], *, today: date) -> str:
     if rejected:
         lines += ["## Rejected this run", ""]
         for finding in rejected:
-            note = f" — skeptic: {finding.skeptic_notes}" if finding.skeptic_notes else ""
+            note = f" - skeptic: {finding.skeptic_notes}" if finding.skeptic_notes else ""
             lines.append(f"- {finding.headline} ({finding.agent}){note}")
         lines.append("")
     return "\n".join(lines)
@@ -380,7 +380,7 @@ def _belief_section(finding: Finding, recurrence: int, *, today: date) -> list[s
 def _index_row(finding: Finding, recurrence: int) -> str:
     slug = topic_slug(finding.kind)
     headline = finding.headline.replace("|", "\\|")
-    stats = _stats_line(finding.stats) or "—"
+    stats = _stats_line(finding.stats) or "-"
     return (
         f"| {headline} | [{slug}](topics/{slug}.md) | {finding.confidence:.2f}"
         f" | x{recurrence + 1} | {stats} |"
@@ -437,7 +437,7 @@ def _fmt_value(value: Any) -> str:
 
 
 def _ranked(findings: list[Finding], recurrence: dict[int, int]) -> list[Finding]:
-    """Confidence, then recurrence, then recency — deterministic tie-break on headline."""
+    """Confidence, then recurrence, then recency - deterministic tie-break on headline."""
 
     def key(f: Finding) -> tuple[float, int, str, str]:
         when = f.window_end.isoformat() if f.window_end else ""

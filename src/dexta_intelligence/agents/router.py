@@ -1,4 +1,4 @@
-"""Router / supervisor agent — picks a tool family before the reasoning loop.
+"""Router / supervisor agent - picks a tool family before the reasoning loop.
 
 ``tool_specs()`` hands the model one flat belt of ~13 instruments. As the belt
 grows a single loop with everything in scope dilutes tool selection and inflates
@@ -6,11 +6,11 @@ the prompt. :class:`RouterAgent` runs one cheap classification (a JSON model cal
 or a keyword fallback mirroring ``workflows/goals.py:_keyword_compose``), maps the
 question to a :class:`Route` (a focused system prompt + a tool-name subset), then
 runs the same ``run_reasoning_loop`` over only that subset and finishes through
-``agents/chat.py:_finish`` — so the faithfulness guard runs on every route,
+``agents/chat.py:_finish`` - so the faithfulness guard runs on every route,
 regardless of which subset was exposed.
 
 The router never narrows away ``recall`` (memory grounding) or ``coverage``: every
-route includes both. Filtering can never produce an empty tool list — an empty or
+route includes both. Filtering can never produce an empty tool list - an empty or
 invalid route falls back to the full belt.
 """
 
@@ -22,8 +22,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.chat import _finish
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.reason import run_reasoning_loop
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["FAMILY_TOOLS", "Route", "RouterAgent"]
 
-#: Tools every route keeps no matter what — memory grounding, data coverage,
+#: Tools every route keeps no matter what - memory grounding, data coverage,
 #: and deterministic calendar resolution (LLMs don't understand time).
 #: The router NEVER removes these.
 _ALWAYS = ("recall", "coverage", "get_current_time", "get_weekday", "parse_relative_date")
@@ -82,7 +82,7 @@ FAMILY_TOOLS: dict[str, tuple[str, ...]] = {
         "get_boluses",
         "get_iob",
     ),
-    # Pure memory questions — what does dexta already believe?
+    # Pure memory questions - what does dexta already believe?
     "memory": (),
     # Ground a pattern in published literature.
     "evidence": ("search_evidence",),
@@ -91,7 +91,7 @@ FAMILY_TOOLS: dict[str, tuple[str, ...]] = {
 #: Family-specific system prompts layered on the shared safety preamble.
 _SAFETY = """You are dexta, a continuous health-intelligence assistant for one \
 Type-1 diabetes patient. You reason over their real data using ONLY the tools \
-provided — you never compute statistics yourself, you call a tool.
+provided - you never compute statistics yourself, you call a tool.
 
 Hard rules:
 - Observation and discussion only. NEVER give dosing, insulin, carb-ratio, or \
@@ -233,19 +233,19 @@ _KEYWORD_FAMILY: tuple[tuple[frozenset[str], str], ...] = (
     ),
 )
 
-#: Default family when nothing matches — the broadest comparison surface.
+#: Default family when nothing matches - the broadest comparison surface.
 _DEFAULT_FAMILY = "two_group"
 
 _ROUTE_PROMPT = """Classify this Type-1 patient's question into ONE tool family:
 
-- spike_explanation: WHY a glucose event happened — explaining a spike, a high, \
+- spike_explanation: WHY a glucose event happened - explaining a spike, a high, \
 a bad day, or a recurring post-meal pattern (e.g. "why did I spike on March 14", \
 "what caused last night's high").
 - time_traversal: how something CHANGED over time, trends, a specific month/week \
 (e.g. "what changed in March vs April", "is my variability trending down").
 - two_group: comparing two cohorts of days or events (weekend vs weekday, \
 after-meal vs before, sleep, workouts, boluses).
-- memory: what dexta ALREADY KNOWS — recalling prior findings or open questions.
+- memory: what dexta ALREADY KNOWS - recalling prior findings or open questions.
 - evidence: grounding a pattern in published clinical literature.
 
 Question: "{question}"
@@ -268,7 +268,7 @@ def _route_for(family: str) -> Route:
 
 
 def _keyword_route(question: str) -> Route:
-    """Family from keywords — the fallback when the model is None or fails."""
+    """Family from keywords - the fallback when the model is None or fails."""
     text = f" {question.lower()} "
     for keywords, family in _KEYWORD_FAMILY:
         if any(k in text for k in keywords):
@@ -278,7 +278,7 @@ def _keyword_route(question: str) -> Route:
 
 @dataclass
 class RouterAgent:
-    model: BaseChatModel
+    model: BaseChatModel | None
     max_steps: int = 6
     target_low: int = 70
     target_high: int = 180

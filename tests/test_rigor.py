@@ -210,7 +210,7 @@ def test_power_gate_no_groups() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# assess() — full pipeline
+# assess() - full pipeline
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -312,7 +312,7 @@ def test_bh_controls_fdr_on_synthetic_mixture() -> None:
     zero) and 15 nulls (p ~ Uniform(0, 1), the exact null distribution of a
     valid p-value). BH's guarantee for this mixture is FDR <= alpha * m0/m
     = 0.10 * 15/20 = 0.075, so the empirical mean false-discovery proportion
-    should sit near 0.075 — comfortably below 0.12 and well above zero (the
+    should sit near 0.075 - comfortably below 0.12 and well above zero (the
     test would be vacuous if nothing was ever falsely rejected).
     """
     rng = random.Random(8675309)

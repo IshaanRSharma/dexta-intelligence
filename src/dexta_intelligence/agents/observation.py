@@ -1,18 +1,18 @@
-"""Observation Agent — deterministic facts-only window summary.
+"""Observation Agent - deterministic facts-only window summary.
 
 Computes glycemic metrics, coverage, episode counts, optional insulin totals,
-and wearable presence from the analysis window. Emits direct measurements only —
+and wearable presence from the analysis window. Emits direct measurements only -
 no interpretation, no LLM, no rigor gate.
 
 Finding kinds (documented contract)
 -----------------------------------
-- ``observation_glycemic`` — TIR/TBR/TAR, mean, GMI, CV, coverage, hypo/hyper
+- ``observation_glycemic`` - TIR/TBR/TAR, mean, GMI, CV, coverage, hypo/hyper
   episode counts for the window.
-- ``observation_insulin`` — mean daily bolus and basal totals when insulin
+- ``observation_insulin`` - mean daily bolus and basal totals when insulin
   events exist in the window.
-- ``observation_wearables`` — sleep and recovery event counts (presence facts).
+- ``observation_wearables`` - sleep and recovery event counts (presence facts).
 
-Spec §7. No LLM imports in this module.
+No LLM imports in this module.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ AGENT_NAME = "observation"
 #: Minimum contiguous out-of-range duration to count as an episode (MCP contract).
 EPISODE_MIN_DURATION_MINUTES = 15
 
-#: GMI affine map (Bergenstal et al. 2018) — mirrors rollups daily kernel.
+#: GMI affine map (Bergenstal et al. 2018) - mirrors rollups daily kernel.
 _GMI_INTERCEPT = 3.31
 _GMI_SLOPE = 0.02392
 
@@ -64,7 +64,7 @@ _EpisodeKind = Literal["hypo", "hyper"]
 
 
 class ObservationAgent:
-    """Facts-only agent implementing spec §7 Observation row."""
+    """Facts-only agent."""
 
     name: str
     requires: DataRequirement

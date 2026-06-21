@@ -96,18 +96,17 @@ def test_route_to_two_group_for_comparison() -> None:
     assert "recall" in route.tool_names
     assert "coverage" in route.tool_names
     assert "tod_compare" in route.tool_names
-    assert "set_window" not in route.tool_names  # time tools excluded here
+    assert "set_window" not in route.tool_names
 
 
 def test_route_to_time_traversal_exposes_set_window_not_meal_response() -> None:
     store = _store()
-    # First turn: router classification. Then the loop calls a time tool and answers.
     model = _FakeToolModel(
         [
             '{"family": "time_traversal"}',
             [{"name": "set_window", "args": {"start": "2026-03-01", "end": "2026-03-31"},
               "id": "c1"}],
-            "March and April look similar.",  # no fabricated numbers
+            "March and April look similar.",
         ]
     )
     answer = RouterAgent(model=model).ask(
@@ -117,7 +116,7 @@ def test_route_to_time_traversal_exposes_set_window_not_meal_response() -> None:
     # The loop was bound to the FOCUSED subset: a time tool in, a two-group tool out.
     assert "set_window" in model.seen_tools
     assert "meal_response" not in model.seen_tools
-    assert "recall" in model.seen_tools  # never removed
+    assert "recall" in model.seen_tools
 
 
 # ── keyword fallback (no model) ───────────────────────────────────────────────
@@ -126,7 +125,6 @@ def test_route_to_time_traversal_exposes_set_window_not_meal_response() -> None:
 def test_keyword_fallback_when_model_none() -> None:
     store = _store()
     agent = RouterAgent(model=None)
-    # "vs" + "weekend" → two_group; "changed"/"month" → time_traversal.
     assert agent.route(_ctx(store), "weekend vs weekday glucose").name == "two_group"
     assert agent.route(_ctx(store), "what changed this month over time?").name == "time_traversal"
     assert agent.route(_ctx(store), "what do you already know about my nights?").name == "memory"
@@ -142,7 +140,7 @@ def test_invalid_family_falls_back_to_keyword_route() -> None:
     route = RouterAgent(model=model).route(
         _ctx(store), "weekend vs weekday?"
     )
-    assert route.name in FAMILY_TOOLS  # degraded to a valid keyword family
+    assert route.name in FAMILY_TOOLS
     assert route.name == "two_group"
 
 
@@ -152,7 +150,6 @@ def test_empty_route_exposes_full_belt() -> None:
     model = _FakeToolModel(["Nothing to add."])
     agent = RouterAgent(model=model)
 
-    # Monkeypatch route() to return a route naming only non-existent tools.
     bogus = Route(name="bogus", system="s", tool_names=("does_not_exist",))
     agent.route = lambda _ctx, _q: bogus  # type: ignore[method-assign,assignment]
     agent.ask(_ctx(store), "anything")
@@ -176,7 +173,7 @@ def test_guard_runs_and_flags_fabricated_number() -> None:
             '{"family": "two_group"}',
             [{"name": "tod_compare", "args": {"hours_a": [3, 5], "hours_b": [12, 14]},
               "id": "c1"}],
-            "Your glucose is exactly 999 mg/dL every morning.",  # untraceable
+            "Your glucose is exactly 999 mg/dL every morning.",
         ]
     )
     answer = RouterAgent(model=model).ask(

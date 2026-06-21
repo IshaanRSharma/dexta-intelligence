@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}dexta · log context{% endblock %}
+{% block content %}
+{% from "_components.html" import chip %}
+<div class="page-head">
+  <h1>Log context</h1>
+  <p class="page-sub">Add the real-world context your devices cannot capture: meals, stress, illness, site changes, travel, notes. Manual logs are user-reported and enrich investigations. They are never dosing instructions, and dexta never creates them on its own.</p>
+</div>
+
+{% if flash %}<div class="flash {{ 'error' if flash.kind == 'warn' else '' }}">{{ flash.text }}</div>{% endif %}
+
+<article class="card">
+  <h2>+ Log context</h2>
+  <form method="post" action="/actions/log-context" class="settings-form">
+    <div class="fields">
+      <div class="field">
+        <label class="field-label" for="log-type">What happened?</label>
+        <select id="log-type" name="event_type" required>
+          {% for value, label in event_types %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label" for="log-ts">When?</label>
+        <input id="log-ts" name="event_ts" type="datetime-local" value="{{ default_ts }}" required />
+        <p class="field-hint">In your configured timezone. Defaults to now.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="log-end">End time <span class="field-opt">optional</span></label>
+        <input id="log-end" name="end_ts" type="datetime-local" />
+        <p class="field-hint">For things with a duration, e.g. exercise or sleep.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="log-title">Title <span class="field-opt">optional</span></label>
+        <input id="log-title" name="title" type="text" placeholder="e.g. high-fat dinner" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label class="field-label" for="log-desc">Details <span class="field-opt">optional</span></label>
+        <input id="log-desc" name="description" type="text" placeholder="e.g. pizza and a stressful workday" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label class="field-label" for="log-intensity">Intensity <span class="field-opt">optional</span></label>
+        <input id="log-intensity" name="intensity" type="text" placeholder="e.g. high, moderate" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label class="field-label" for="log-tags">Tags <span class="field-opt">optional</span></label>
+        <input id="log-tags" name="tags" type="text" placeholder="comma separated, e.g. fat, dinner" autocomplete="off" />
+      </div>
+    </div>
+    <div class="card-actions">
+      <button type="submit" id="log-submit">Log context</button>
+    </div>
+  </form>
+</article>
+
+{% if events %}
+<div class="page-head" style="margin-top:24px">
+  <h2>Recent context</h2>
+  <p class="page-sub">The last 30 days of logged context, newest first.</p>
+</div>
+<div class="cards">
+  {% for e in events %}
+  <article class="card finding-card">
+    <div class="card-head">
+      <h2>{{ e.title or e.type_label }}</h2>
+      <span class="badge neutral">{{ e.provenance }}</span>
+    </div>
+    <div class="chips">
+      {{ chip("type", e.type_label) }}
+      {{ chip("when", e.when) }}
+      {{ chip("logged", e.ago) }}
+      {% if e.intensity %}{{ chip("intensity", e.intensity) }}{% endif %}
+      {% for t in e.tags %}{{ chip("tag", t) }}{% endfor %}
+    </div>
+    {% if e.description %}<p class="stats">{{ e.description }}</p>{% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <p>No context logged yet. Add some above so investigations can use it.</p>
+</div>
+{% endif %}
+
+<script>
+(function () {
+  const form = document.querySelector(".settings-form");
+  const btn = document.getElementById("log-submit");
+  if (!form || !btn) return;
+  form.addEventListener("submit", function () {
+    btn.disabled = true;
+    btn.textContent = "Logging…";
+  });
+})();
+</script>
+{% endblock %}

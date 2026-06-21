@@ -1,4 +1,4 @@
-"""CSV file-upload connector — Dexcom Clarity and LibreView exports.
+"""CSV file-upload connector - Dexcom Clarity and LibreView exports.
 
 A degenerate :class:`~dexta_intelligence.connectors.base.Connector`: ``pull``
 reads the file once, normalizes glucose rows, and returns the same
@@ -10,8 +10,8 @@ Supported formats
 -----------------
 **Dexcom Clarity** (``source = "csv:clarity"``):
 
-- ``Timestamp (YYYY-MM-DDThh:mm:ss)`` — device-local, no timezone
-- ``Event Type`` — only ``EGV`` rows are ingested (calibrations skipped)
+- ``Timestamp (YYYY-MM-DDThh:mm:ss)`` - device-local, no timezone
+- ``Event Type`` - only ``EGV`` rows are ingested (calibrations skipped)
 - ``Glucose Value (mg/dL)``
 
 Extra columns are ignored. Minor header spelling variants are tolerated
@@ -19,9 +19,9 @@ Extra columns are ignored. Minor header spelling variants are tolerated
 
 **LibreView** (``source = "csv:libreview"``):
 
-- ``Device Timestamp`` — device-local, no timezone
+- ``Device Timestamp`` - device-local, no timezone
 - ``Historic Glucose mg/dL`` and/or ``Scan Glucose mg/dL``
-- ``Record Type`` — ``0`` (historic) and ``1`` (scan) only
+- ``Record Type`` - ``0`` (historic) and ``1`` (scan) only
 
 LibreView exports often prepend 1-2 metadata rows before the real header;
 those are skipped automatically. A UTF-8 BOM is stripped. When headers
@@ -31,7 +31,7 @@ Timezone caveat
 ---------------
 Export timestamps are **device-local without a zone**. Pass an explicit IANA
 ``tz`` (default ``"UTC"``) so rows become aware UTC via :mod:`zoneinfo`.
-Wrong zone shifts every reading — there is no offset embedded in the file.
+Wrong zone shifts every reading - there is no offset embedded in the file.
 
 Watermark / ``since``
 ---------------------
@@ -85,7 +85,7 @@ def detect_csv_format(fieldnames: list[str]) -> CsvFormat:
         return "clarity"
 
     msg = (
-        "unrecognized CSV header — expected Dexcom Clarity "
+        "unrecognized CSV header - expected Dexcom Clarity "
         "(Timestamp / Event Type / Glucose Value) or LibreView "
         "(Device Timestamp / Record Type / Historic or Scan Glucose)"
     )

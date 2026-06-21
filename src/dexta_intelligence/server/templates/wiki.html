@@ -1,13 +1,34 @@
 {% extends "base.html" %}
 {% block title %}dexta · wiki{% endblock %}
 {% block content %}
+<div class="page-head">
+  <h1>Wiki</h1>
+  <p class="page-sub">Generated from your findings store - read-only beliefs, hypotheses, and history.</p>
+</div>
+
 {% if body %}
-  <article class="prose wiki">{{ body|safe }}</article>
-{% else %}
-  <div class="empty">
-    <p>No wiki page <code>{{ slug }}</code> yet.</p>
-    <p class="hint">Generate the knowledge base with <code>dexta wiki</code>.</p>
-    <p class="muted">Looking in <span class="mono">{{ root }}</span></p>
+<div class="wiki-layout">
+  {% if nav %}
+  <nav class="wiki-nav" aria-label="Wiki pages">
+    <p class="wiki-nav-label">Pages</p>
+    {% for item in nav %}
+      <a href="{{ item.href }}" class="wiki-nav-link {{ 'on' if item.active else '' }} {{ 'topic' if item.topic else '' }}">
+        {{ item.label }}
+      </a>
+    {% endfor %}
+  </nav>
+  {% endif %}
+
+  <div class="wiki-shell">
+    {% if title %}<p class="wiki-page-title">{{ title }}</p>{% endif %}
+    <article class="prose wiki">{{ body|safe }}</article>
   </div>
+</div>
+{% else %}
+<div class="empty card">
+  <p>No wiki page <code>{{ slug }}</code> yet.</p>
+  <p class="hint">Generate the knowledge base with <code>dexta wiki</code>.</p>
+  <p class="muted">Looking in <span class="mono">{{ root }}</span></p>
+</div>
 {% endif %}
 {% endblock %}

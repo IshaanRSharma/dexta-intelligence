@@ -1,4 +1,4 @@
-"""Tests for goal workflows — composition, measurement, and background ticks."""
+"""Tests for goal workflows - composition, measurement, and background ticks."""
 
 from __future__ import annotations
 
@@ -225,17 +225,20 @@ def test_tick_marks_goal_achieved_when_target_met() -> None:
     assert goal_id == stored.id
 
 
-def test_tick_with_llm_model_takes_reasoning_loop_path() -> None:
+def test_tick_with_model_delegates_to_coordinator() -> None:
+    """A goal tick with a model routes its investigation through the coordinator
+    (the unified engine), so the planner is consulted and a checkpoint is recorded."""
     store = _store_with_nocturnal_lows()
     goal = compose_goal("reduce my overnight lows", now=_NOW)
     store.insert_goal(goal)
     stored = store.get_goals()[0]
 
-    model = _FakeToolModel(["Your overnight lows are around 60 mg/dL."])
+    # The coordinator's planner expects JSON; a subset selection delegates the run.
+    model = _FakeToolModel(['{"investigations": ["observation"]}'])
     result = tick_goal(stored, _ctx(store), now=_NOW, model=model)  # type: ignore[arg-type]
 
-    assert "60 mg/dL" in result.checkpoint.note
-    assert model.invocations > 0
+    assert model.invocations > 0  # the coordinator planner was consulted
+    assert result.checkpoint.note  # a checkpoint observation was recorded
 
 
 def test_goal_due_cadence_logic() -> None:
@@ -331,7 +334,6 @@ def test_migrate_upgrades_schema_version() -> None:
         store._conn.execute("UPDATE schema_version SET version = 1")
         store._conn.commit()
 
-        # Migrate again
         store.migrate()
         new_version = store._conn.execute(
             "SELECT version FROM schema_version"

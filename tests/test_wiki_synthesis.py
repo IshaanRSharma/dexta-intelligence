@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.base import AgentContext
-from dexta_intelligence.agents.discovery_tools import _recall
+from dexta_intelligence.agents.tools.toolkit import _recall
 from dexta_intelligence.coldstart import ColdStartReport
 from dexta_intelligence.memory.synthesis import (
     SynthesisResult,
@@ -44,7 +44,7 @@ class _FakeModel:
 
 
 class _BoomModel:
-    """Model that raises — exercises the graceful-None failure path."""
+    """Model that raises - exercises the graceful-None failure path."""
 
     def invoke(self, messages: Any) -> _Response:
         msg = "model exploded"
@@ -111,7 +111,7 @@ def test_fabricated_number_paragraph_is_dropped_by_guard(tmp_path: Path) -> None
     model = _FakeModel(
         {
             "topic_paragraphs": {
-                # 999 is nowhere in the evidence pool — the guard must reject it.
+                # 999 is nowhere in the evidence pool - the guard must reject it.
                 "pattern_tod_drift": "An unexplained spike of 999 mg/dL appeared.",
             },
             "connections": ["Another fabricated jump of 777 units was observed."],

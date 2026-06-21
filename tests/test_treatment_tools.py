@@ -1,21 +1,22 @@
 """Treatment-inspection tools + capability filtering over golden datasets.
 
-Pins WAVE5 §1 canonical numbers end to end: the March 14 dinner bolus is 22
-minutes late, the spike peaks at 246, and 14 of 18 similar dinners spike
-(metrics M3/M6 substrate).
+Pins the canonical numbers end to end: the March 14 dinner bolus is 22 minutes
+late, the spike peaks at 246, and 14 of 18 similar dinners spike.
 """
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 from tests.golden import make_store
 
 from dexta_intelligence.agents.base import AgentContext
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit, tool_specs
-from dexta_intelligence.agents.time_tools import CALENDAR_TOOL_NAMES
+from dexta_intelligence.agents.tools.time_tools import CALENDAR_TOOL_NAMES
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.coldstart import ColdStartReport
+from dexta_intelligence.connectors.tandem import PROFILE_SOURCE_ID, format_insulin_profile
+from dexta_intelligence.models import RawEvent
 
 _WINDOW = (date(2025, 12, 15), date(2026, 3, 15))
 _SPIKE_TS = "2026-03-14T20:42:00+00:00"
@@ -117,7 +118,7 @@ def test_missing_carb_dataset_flags_empty_entries() -> None:
     assert "missing-carb" in result["note"]
 
 
-# ── capability filtering (M6) ─────────────────────────────────────────────────
+# ── capability filtering ──────────────────────────────────────────────────────
 
 
 def test_no_insulin_dataset_hides_treatment_tools() -> None:
@@ -128,6 +129,7 @@ def test_no_insulin_dataset_hides_treatment_tools() -> None:
         "get_boluses",
         "get_basal_timeline",
         "get_iob",
+        "get_insulin_profile",
         "get_carb_entries",
         "get_cob",
         "meal_response",
@@ -148,10 +150,75 @@ def test_insulin_dataset_exposes_full_belt() -> None:
         "get_carb_entries",
         "get_basal_timeline",
         "get_iob",
+        "get_insulin_profile",
         "get_cob",
         "find_spikes",
         "find_similar_events",
     } <= names
+
+
+def test_get_insulin_profile_without_sync_returns_error(
+    late_bolus_toolkit: DiscoveryToolkit,
+) -> None:
+    result = late_bolus_toolkit.get_insulin_profile()
+    assert "error" in result
+    assert "Sync now" in result["note"]
+
+
+def test_get_insulin_profile_reads_synced_snapshot() -> None:
+    store = make_store("late_bolus")
+    ts = datetime(2026, 6, 5, tzinfo=UTC)
+    store.replace_raw_events(
+        [
+            RawEvent(
+                source="tandem",
+                source_id=PROFILE_SOURCE_ID,
+                source_ts=ts,
+                payload=format_insulin_profile(
+                    {
+                        "profiles": {
+                            "activeIdp": 1,
+                            "profile": [
+                                {
+                                    "name": "Weekday",
+                                    "idp": 1,
+                                    "insulinDuration": 300,
+                                    "maxBolus": 5000,
+                                    "tDependentSegs": [
+                                        {
+                                            "startTime": 0,
+                                            "basalRate": 800,
+                                            "isf": 50,
+                                            "carbRatio": 10000,
+                                            "targetBg": 100,
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                        "cgmSettings": {
+                            "highGlucoseAlert": {"mgPerDl": 250, "enabled": 1},
+                            "lowGlucoseAlert": {"mgPerDl": 70, "enabled": 1},
+                        },
+                    },
+                    pump_serial="923983",
+                    as_of=ts,
+                ),
+            )
+        ]
+    )
+    ctx = AgentContext(
+        store=store,
+        window=_WINDOW,
+        gates=ColdStartReport.from_coverage(store.coverage()),
+        run_id="profile-run",
+    )
+    toolkit = DiscoveryToolkit(ctx)
+    result = toolkit.get_insulin_profile()
+    assert result["active_profile"] == "Weekday"
+    assert result["tier"] == "B"
+    assert result["active_segments"][0]["basal_u_hr"] == 0.8
+    assert result["pump_serial"] == "923983"
 
 
 def test_coverage_tool_reports_missing_streams() -> None:

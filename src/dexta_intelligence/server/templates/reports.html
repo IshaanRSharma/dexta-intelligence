@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}dexta · reports{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <h1>Discussion brief</h1>
+  <p class="page-sub">A clinician-facing brief built from this person's own findings, grounded in their evidence and (where available) published literature. Decision support for a visit. Your clinician decides. Pattern analysis only. Not a dosing recommendation.</p>
+  <a class="btn btn-ghost" href="/actions/reports/export">Download Markdown ↓</a>
+</div>
+
+{% if brief.question %}<p class="muted"><strong>Focus:</strong> {{ brief.question }}</p>{% endif %}
+
+{% if brief.analysis %}
+<section class="findings-section">
+  <h2 class="section-title">Analysis</h2>
+  <ul>{% for a in brief.analysis %}<li>{{ a }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if brief.goals %}
+<section class="findings-section">
+  <h2 class="section-title">Goals to discuss</h2>
+  <ul>{% for g in brief.goals %}<li>{{ g }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{# Renders citation-free instantly; HTMX swaps in the cited version. #}
+<div id="cited-sections"{% if cite_enabled %} hx-get="/reports/citations" hx-trigger="load" hx-swap="outerHTML"{% endif %}>
+  {% include "_reports_sections.html" %}
+</div>
+
+<section class="findings-section">
+  <h2 class="section-title">Limitations</h2>
+  <ul>{% for limit in brief.limitations %}<li>{{ limit }}</li>{% endfor %}</ul>
+</section>
+{% endblock %}

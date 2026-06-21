@@ -5,8 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light" />
   <title>{% block title %}dexta{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/app.css?v={{ static_version }}" />
+  <link rel="stylesheet" href="/static/components.css?v={{ static_version }}" />
   <script src="/static/htmx.min.js" defer></script>
+  <script defer>
+    document.addEventListener("DOMContentLoaded", function () {
+      if (typeof htmx === "undefined") return;
+      htmx.config.defaultSettleDelay = 0;
+      htmx.config.defaultSwapDelay = 0;
+    });
+  </script>
 </head>
 <body>
   <header class="topbar">

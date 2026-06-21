@@ -1,10 +1,10 @@
-"""Prediction Reconciliation Agent — deterministic forecast-vs-realized analysis.
+"""Prediction Reconciliation Agent - deterministic forecast-vs-realized analysis.
 
 Compares expected glucose trajectories (logged predBG curves for looping users,
 or oref0-math expectations otherwise) against realized CGM, attributes the error,
 counts recurrence, and gates claims through :mod:`dexta_intelligence.stats.rigor`.
 
-Spec §7.1. No LLM imports in this module.
+No LLM imports in this module.
 """
 
 from __future__ import annotations
@@ -121,7 +121,7 @@ class ReconciliationEpisode(_FrozenModel):
 
 
 class PredictionReconciliationAgent:
-    """Deterministic agent implementing spec §7.1."""
+    """Deterministic agent"""
 
     name: str
     requires: DataRequirement
@@ -499,7 +499,7 @@ def _episodes_to_findings(
             f"{sign}{representative.signed_error_mg_dl:.0f} mg/dL error at "
             f"{representative.horizon_min} min (contributor={contributor}). "
             f"{recurrence_note} "
-            "Retrospective analysis only — not dosing advice."
+            "Retrospective analysis only - not dosing advice."
         ).strip()
 
         confidence = 0.75 if verdict.verdict == "pass" else 0.55

@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 _INIT_TEMPLATE = """\
 # dexta-intelligence configuration
-# Secrets belong in the environment — see comments per section.
+# Secrets belong in the environment - see comments per section.
 
 [data]
 backend = "sqlite"
@@ -38,7 +38,7 @@ token = ""  # API token (or NIGHTSCOUT_TOKEN)
 
 [whoop]
 access_token = ""  # or WHOOP_ACCESS_TOKEN
-# refresh_token = ""  # WHOOP_REFRESH_TOKEN — enables auto-refresh on 401
+# refresh_token = ""  # WHOOP_REFRESH_TOKEN - enables auto-refresh on 401
 # client_id = ""      # WHOOP_CLIENT_ID
 # client_secret = ""  # WHOOP_CLIENT_SECRET
 
@@ -58,12 +58,13 @@ access_token = ""  # personal access token (or OURA_ACCESS_TOKEN)
 
 [llm]
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-6"
 # Per-role overrides live under [llm.roles.<role>] (optional).
 
 [analysis]
 target_low = 70
 target_high = 180
+max_reasoning_steps = 20
 deep_analysis_window_days = 90
 """
 
@@ -187,6 +188,7 @@ def cmd_upload(
     opener: StoreOpener = open_sqlite_store,
     now: datetime | None = None,
 ) -> int:
+    connector: Connector
     if csv_format == "tidepool" or (csv_format == "auto" and path.suffix.lower() == ".json"):
         from dexta_intelligence.config import TidepoolConfig  # noqa: PLC0415
         from dexta_intelligence.connectors.tidepool import TidepoolConnector  # noqa: PLC0415
@@ -233,7 +235,7 @@ def cmd_sync(
 ) -> int:
     connectors = connector_factory(config)
     if not connectors:
-        out.write("No data sources configured — nothing to sync.\n")
+        out.write("No data sources configured - nothing to sync.\n")
         return 0
 
     store = opener(config, db_path)

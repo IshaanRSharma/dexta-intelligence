@@ -466,7 +466,15 @@ class TestUpload:
 
 
 class TestAsk:
-    def test_without_model_explains_how_to_enable(self, tmp_path: Path) -> None:
+    def test_without_model_explains_how_to_enable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Establish the "no model" precondition the test name promises: with no
+        # provider credential, model_for_role returns None regardless of the
+        # developer's shell. (Otherwise an ambient key resolves a real model and
+        # the command correctly reports the data floor instead.)
+        for var in ("ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
         store = _tmp_store(tmp_path)
         out = io.StringIO()
         code = cmd_ask(
@@ -602,12 +610,11 @@ class TestGoals:
 
     def test_tick_with_active_goal_and_glucose(self, tmp_path: Path) -> None:
         store = _tmp_store(tmp_path)
-        # Seed with 30 days of glucose to clear hard floor
+        # 30 days of glucose to clear the hard floor.
         start = FIXED_NOW - timedelta(days=30)
         store.insert_glucose(
             [GlucoseEvent(ts=start + timedelta(hours=i), mg_dl=120) for i in range(24 * 30)]
         )
-        # Add a goal
         goal = compose_goal("reduce my overnight lows", now=FIXED_NOW)
         store.insert_goal(goal)
         out = _capture()
@@ -626,7 +633,6 @@ class TestGoals:
 
         assert code == 0
         assert "#1" in text
-        # Check that a checkpoint was written
         checkpoints = store.get_goal_checkpoints(1)
         assert len(checkpoints) > 0
         store.close()
@@ -707,8 +713,11 @@ class TestMain:
         assert exc.value.code == 2
 
     def _hermetic_db(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        """A migrated db under tmp_path; chdir away from any stray dexta.toml."""
+        """A migrated db under tmp_path, fully isolated from the developer's real
+        config: chdir away from any stray ./dexta.toml and point HOME at tmp so
+        ``~/.dexta/secrets.env`` (real provider keys) never leaks into a run."""
         monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
         db = tmp_path / "main.db"
         SQLiteStore(db).migrate()
         return db

@@ -1,4 +1,4 @@
-"""Tests for the Insulin agent — the LLM curiosity loop over insulin/meal tools.
+"""Tests for the Insulin agent: the LLM curiosity loop over insulin/meal tools.
 
 Covers the deterministic fallback (no model) and the scripted-model reasoning
 loop, so the plan -> judge -> claim/wonder -> guard machinery runs end to end
@@ -16,8 +16,8 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.base import AgentContext
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit
 from dexta_intelligence.agents.insulin import InsulinAgent
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit
 from dexta_intelligence.coldstart import ColdStartReport
 from dexta_intelligence.models import (
     GlucoseEvent,
@@ -88,7 +88,7 @@ def _store_with_insulin_scenarios() -> SQLiteStore:
 
     for day in range(_WINDOW_DAYS):
         base = _START + timedelta(days=day)
-        # background filler — every hour a flat-ish ~100 reading
+        # background filler: every hour a flat-ish ~100 reading
         for hour in range(24):
             glucose.append(GlucoseEvent(ts=base.replace(hour=hour), mg_dl=100 + rng.randint(-8, 8)))
 

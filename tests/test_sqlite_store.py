@@ -1,4 +1,4 @@
-"""SQLiteStore tests — the StoragePort contract exercised against ``:memory:``.
+"""SQLiteStore tests - the StoragePort contract exercised against ``:memory:``.
 
 Window semantics under test are half-open (``start <= ts < end``); dedupe keys
 per table are documented in ``store/sqlite.py``.
@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from dexta_intelligence.connectors.tandem import PROFILE_SOURCE_ID
 from dexta_intelligence.models import (
     ActivityEvent,
     DeviceEvent,
@@ -83,7 +84,7 @@ class TestLifecycle:
 
     def test_migrate_is_idempotent(self, store: SQLiteStore) -> None:
         store.migrate()  # second call: no error
-        assert store.upsert_raw_events([_raw("nightscout", "a", T0)]) == 1
+        assert list(store.upsert_raw_events([_raw("nightscout", "a", T0)])) == ["a"]
         store.migrate()  # third call: existing data untouched
         assert store.get_watermark("nightscout") == T0
 
@@ -102,24 +103,68 @@ class TestLifecycle:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 1 — raw events + watermark
+# Layer 1 - raw events + watermark
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class TestRawEvents:
-    def test_upsert_counts_new_rows(self, store: SQLiteStore) -> None:
+    def test_upsert_returns_ids_for_new_rows(self, store: SQLiteStore) -> None:
         batch = [_raw("nightscout", str(i), T0 + timedelta(minutes=5 * i)) for i in range(3)]
-        assert store.upsert_raw_events(batch) == 3
+        id_map = store.upsert_raw_events(batch)
+        assert set(id_map) == {"0", "1", "2"}
+        assert all(isinstance(v, int) for v in id_map.values())
+        assert len(set(id_map.values())) == 3
 
-    def test_upsert_dedupes_on_source_and_source_id(self, store: SQLiteStore) -> None:
+    def test_upsert_returns_stable_ids_for_existing_rows(self, store: SQLiteStore) -> None:
         batch = [_raw("nightscout", str(i), T0 + timedelta(minutes=5 * i)) for i in range(3)]
-        assert store.upsert_raw_events(batch) == 3
-        assert store.upsert_raw_events(batch) == 0
-        mixed = [*batch, _raw("nightscout", "3", T0), _raw("whoop", "0", T0)]
-        assert store.upsert_raw_events(mixed) == 2
+        first = store.upsert_raw_events(batch)
+        # re-upsert is a no-op but still returns the same assigned ids
+        second = store.upsert_raw_events(batch)
+        assert second == first
+
+    def test_upsert_maps_new_and_preexisting_together(self, store: SQLiteStore) -> None:
+        batch = [_raw("nightscout", str(i), T0 + timedelta(minutes=5 * i)) for i in range(3)]
+        first = store.upsert_raw_events(batch)
+        mixed = [*batch, _raw("nightscout", "3", T0)]
+        id_map = store.upsert_raw_events(mixed)
+        # pre-existing ids unchanged, the new key gets a fresh distinct id
+        assert {k: id_map[k] for k in first} == first
+        assert id_map["3"] not in first.values()
+
+    def test_existing_raw_ids_reports_only_stored_subset(self, store: SQLiteStore) -> None:
+        stored = [_raw("nightscout", str(i), T0 + timedelta(minutes=5 * i)) for i in range(2)]
+        store.upsert_raw_events(stored)
+        probe = [*stored, _raw("nightscout", "9", T0)]
+        existing = store.existing_raw_ids(probe)
+        assert set(existing) == {"0", "1"}
 
     def test_upsert_empty_batch(self, store: SQLiteStore) -> None:
-        assert store.upsert_raw_events([]) == 0
+        assert store.upsert_raw_events([]) == {}
+        assert store.existing_raw_ids([]) == {}
+
+    def test_replace_raw_events_overwrites_payload(self, store: SQLiteStore) -> None:
+        event = RawEvent(
+            source="tandem",
+            source_id=PROFILE_SOURCE_ID,
+            source_ts=T0,
+            payload={"active_profile": "A"},
+        )
+        store.replace_raw_events([event])
+        updated = RawEvent(
+            source="tandem",
+            source_id=PROFILE_SOURCE_ID,
+            source_ts=T0 + timedelta(hours=1),
+            payload={"active_profile": "B"},
+        )
+        ids = store.replace_raw_events([updated])
+        assert len(ids) == 1
+        loaded = store.get_raw_event("tandem", PROFILE_SOURCE_ID)
+        assert loaded is not None
+        assert loaded.payload["active_profile"] == "B"
+        assert loaded.source_ts == T0 + timedelta(hours=1)
+
+    def test_get_raw_event_missing_returns_none(self, store: SQLiteStore) -> None:
+        assert store.get_raw_event("tandem", "missing") is None
 
     def test_watermark_none_when_empty(self, store: SQLiteStore) -> None:
         assert store.get_watermark("nightscout") is None
@@ -148,9 +193,24 @@ class TestRawEvents:
         assert store.get_watermark("whoop") == T0
         assert store.get_watermark("dexcom") is None
 
+    def test_source_event_counts_empty(self, store: SQLiteStore) -> None:
+        assert store.source_event_counts() == {}
+
+    def test_source_event_counts_per_source(self, store: SQLiteStore) -> None:
+        store.upsert_raw_events(
+            [
+                _raw("nightscout", "a", T0),
+                _raw("nightscout", "b", T0 + timedelta(minutes=5)),
+                _raw("nightscout", "c", T0 + timedelta(minutes=10)),
+                _raw("whoop", "a", T0),
+                _raw("whoop", "b", T0 + timedelta(minutes=5)),
+            ]
+        )
+        assert store.source_event_counts() == {"nightscout": 3, "whoop": 2}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 2 — typed event round trips
+# Layer 2 - typed event round trips
 # ─────────────────────────────────────────────────────────────────────────────
 
 WIDE_START = T0 - timedelta(days=2)
@@ -388,7 +448,7 @@ class TestCoverage:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 3 — rollups
+# Layer 3 - rollups
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -451,7 +511,7 @@ class TestRollups:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 4 — findings & hypotheses
+# Layer 4 - findings & hypotheses
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -461,7 +521,12 @@ class TestFindings:
         fid = store.insert_finding(finding)
         assert fid == 1
         (got,) = store.get_findings()
-        assert got == finding.model_copy(update={"id": fid})
+        # last_verified is stamped at insert when absent; normalize it out of the
+        # structural round-trip and assert it was populated separately.
+        assert got.last_verified is not None
+        assert got.model_copy(update={"last_verified": None}) == finding.model_copy(
+            update={"id": fid}
+        )
         assert got.window_start is not None
         assert got.window_start.tzinfo == UTC
 

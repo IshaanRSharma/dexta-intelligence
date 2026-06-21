@@ -1,4 +1,4 @@
-"""Skeptic Agent — independent rigor re-check, memory scan, confound flags.
+"""Skeptic Agent - independent rigor re-check, memory scan, confound flags.
 
 Consumes candidate findings from the current analysis run (not the timeline
 directly). Re-runs :func:`~dexta_intelligence.stats.rigor.assess` with a
@@ -6,7 +6,7 @@ directly). Re-runs :func:`~dexta_intelligence.stats.rigor.assess` with a
 for contradicting priors, and flags known confound pairs (e.g. weekday vs
 sleep effects competing for the same variance).
 
-Spec §8. Deterministic — no LLM imports in this module.
+Deterministic - no LLM imports in this module.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ _QUANTITATIVE_AGENTS = frozenset({"pattern", "reconciliation", "discovery"})
 
 
 class SkepticAgent:
-    """Post-producer gate — call :meth:`review`, not :meth:`run`, in pipelines."""
+    """Post-producer gate - call :meth:`review`, not :meth:`run`, in pipelines."""
 
     name: str
     requires: DataRequirement
@@ -69,7 +69,7 @@ class SkepticAgent:
         self.requires = requires or DataRequirement()
 
     def run(self, ctx: AgentContext) -> list[Finding]:
-        """Registry hook — reviews active findings already in the store."""
+        """Registry hook - reviews active findings already in the store."""
         pending = ctx.store.get_findings(status=FindingStatus.ACTIVE, limit=100)
         producers = [f for f in pending if f.agent != AGENT_NAME]
         return self.review(producers, ctx)
@@ -102,7 +102,7 @@ class SkepticAgent:
         confidence = finding.confidence
 
         if finding.agent == "observation":
-            notes.append("observation summary — descriptive, no rigor gate")
+            notes.append("observation summary - descriptive, no rigor gate")
             return finding.model_copy(
                 update={"skeptic_notes": "; ".join(notes) if notes else finding.skeptic_notes}
             )
@@ -135,7 +135,7 @@ class SkepticAgent:
                 confidence = min(confidence, 0.45)
                 notes.append("demoted: significant but not replicated on skeptic re-check")
         else:
-            notes.append("no raw groups in evidence — stats-block audit only")
+            notes.append("no raw groups in evidence - stats-block audit only")
             if finding.stats.p_perm is None and finding.stats.effect_size is not None:
                 status = FindingStatus.REJECTED
                 notes.append("rejected: quantitative claim without permutation p-value")
@@ -222,7 +222,7 @@ def _confound_note(kind: str, active_kinds: frozenset[str] | set[str]) -> str | 
                 partner = next(iter(partners & active_kinds))
                 return (
                     f"{_CONFOUND_FLAG}{kind} co-occurring with {partner} "
-                    f"— shared variance, not isolated causality"
+                    f"- shared variance, not isolated causality"
                 )
     return None
 
@@ -232,14 +232,14 @@ def confound_hypotheses(findings: Sequence[Finding]) -> list[Hypothesis]:
 
     Each reviewed finding whose ``skeptic_notes`` carries a ``confound flag:``
     marker (written by :func:`_confound_note`) names a co-occurring kind pair
-    competing for the same variance. A confound is symmetric — a pair surfaces
-    on both findings — so hypotheses are keyed on the unordered ``{kind_a,
+    competing for the same variance. A confound is symmetric - a pair surfaces
+    on both findings - so hypotheses are keyed on the unordered ``{kind_a,
     kind_b}`` pair and emitted once each, in first-seen order.
 
     Returns OPEN :class:`Hypothesis` records with statements of the form::
 
         Disentangle <kind_a> vs <kind_b>: <note excerpt>
-        — stratify when more data allows [skeptic]
+        - stratify when more data allows [skeptic]
     """
     seen: set[frozenset[str]] = set()
     out: list[Hypothesis] = []
@@ -263,7 +263,7 @@ def confound_hypotheses(findings: Sequence[Finding]) -> list[Hypothesis]:
                 Hypothesis(
                     statement=(
                         f"Disentangle {kind_a} vs {kind_b}: {excerpt} "
-                        f"— stratify when more data allows [skeptic]"
+                        f"- stratify when more data allows [skeptic]"
                     ),
                     source_finding_id=finding.id,
                 )

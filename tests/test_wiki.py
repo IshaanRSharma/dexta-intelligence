@@ -136,7 +136,7 @@ def test_stale_active_finding_is_demoted_on_index(tmp_path: Path) -> None:
     index = (report.root / "index.md").read_text()
     assert "| Fresh belief |" in index
     assert "| Ancient belief |" not in index
-    assert "## Stale — awaiting fresh data" in index
+    assert "## Stale - awaiting fresh data" in index
     assert "- Ancient belief" in index
 
 
@@ -167,7 +167,7 @@ def test_run_changelog_records_survivors_and_rejections(tmp_path: Path) -> None:
     run_page = (report.root / "runs" / "2026-06-11.md").read_text()
     assert "1 finding(s) survived the skeptic; 1 did not." in run_page
     assert "- Survived (pattern)" in run_page
-    assert "- Killed (pattern) — skeptic: did not replicate" in run_page
+    assert "- Killed (pattern) - skeptic: did not replicate" in run_page
 
 
 def test_git_history_commits_only_on_change(tmp_path: Path) -> None:

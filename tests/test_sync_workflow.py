@@ -10,6 +10,8 @@ import pytest
 from dexta_intelligence.connectors.base import Connector, HealthReport, NormalizedBatch
 from dexta_intelligence.models import (
     ActivityEvent,
+    ChatSession,
+    ChatTurn,
     CoverageStats,
     DeviceEvent,
     Finding,
@@ -21,13 +23,17 @@ from dexta_intelligence.models import (
     Hypothesis,
     InsulinEvent,
     InsulinKind,
+    InvestigationRun,
+    ManualEvent,
     MealEvent,
+    OpenInvestigation,
     PredictionEvent,
     RawEvent,
     RecoveryEvent,
     Rollup,
     RollupPeriod,
     SleepEvent,
+    TherapyProfile,
 )
 from dexta_intelligence.store.port import StoragePort
 from dexta_intelligence.workflows.sync import (
@@ -58,6 +64,8 @@ class FakeStore:
 
     def __init__(self) -> None:
         self.raw: dict[tuple[str, str], RawEvent] = {}
+        self.raw_ids: dict[tuple[str, str], int] = {}
+        self._next_raw_id = 0
         self.glucose: dict[datetime, GlucoseEvent] = {}
         self.insulin: dict[tuple[datetime, InsulinKind], InsulinEvent] = {}
         self.meals: dict[datetime, MealEvent] = {}
@@ -72,22 +80,52 @@ class FakeStore:
         self.hypotheses: list[Hypothesis] = []
         self.goals: list[Goal] = []
         self.goal_checkpoints: list[GoalCheckpoint] = []
+        self.chat_turns: list[ChatTurn] = []
+        self.investigation_runs: list[InvestigationRun] = []
+        self.open_investigations: list[OpenInvestigation] = []
+        self.manual_events: list[ManualEvent] = []
+        self.profile_versions: list[TherapyProfile] = []
 
     def migrate(self) -> None:
         return None
 
-    def upsert_raw_events(self, events: list[RawEvent]) -> int:
-        new = 0
+    def existing_raw_ids(self, events: list[RawEvent]) -> dict[str, int]:
+        return {
+            e.source_id: self.raw_ids[(e.source, e.source_id)]
+            for e in events
+            if (e.source, e.source_id) in self.raw
+        }
+
+    def upsert_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
         for event in events:
             key = (event.source, event.source_id)
             if key not in self.raw:
                 self.raw[key] = event
-                new += 1
-        return new
+                self._next_raw_id += 1
+                self.raw_ids[key] = self._next_raw_id
+        return {e.source_id: self.raw_ids[(e.source, e.source_id)] for e in events}
+
+    def replace_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
+        for event in events:
+            key = (event.source, event.source_id)
+            if key not in self.raw_ids:
+                self._next_raw_id += 1
+                self.raw_ids[key] = self._next_raw_id
+            self.raw[key] = event
+        return {e.source_id: self.raw_ids[(e.source, e.source_id)] for e in events}
+
+    def get_raw_event(self, source: str, source_id: str) -> RawEvent | None:
+        return self.raw.get((source, source_id))
 
     def get_watermark(self, source: str) -> datetime | None:
         stamps = [e.source_ts for e in self.raw.values() if e.source == source]
         return max(stamps) if stamps else None
+
+    def source_event_counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for event in self.raw.values():
+            counts[event.source] = counts.get(event.source, 0) + 1
+        return counts
 
     def insert_glucose(self, events: list[GlucoseEvent]) -> int:
         new = 0
@@ -247,6 +285,110 @@ class FakeStore:
 
     def get_goal_checkpoints(self, goal_id: int) -> list[GoalCheckpoint]:
         return [c for c in self.goal_checkpoints if c.goal_id == goal_id]
+
+    def append_chat_turn(self, turn: ChatTurn) -> int:
+        self.chat_turns.append(turn)
+        return len(self.chat_turns)
+
+    def get_chat_turns(self, session_id: str, *, limit: int = 50) -> list[ChatTurn]:
+        turns = [t for t in self.chat_turns if t.session_id == session_id]
+        return turns[-limit:]
+
+    def get_chat_sessions(self, *, limit: int = 50) -> list[ChatSession]:
+        by_session: dict[str, list[ChatTurn]] = {}
+        for turn in self.chat_turns:
+            by_session.setdefault(turn.session_id, []).append(turn)
+        sessions = [
+            ChatSession(
+                session_id=sid,
+                last_ts=turns[-1].ts,
+                turn_count=len(turns),
+                preview=next((t.content for t in turns if t.role == "user"), ""),
+            )
+            for sid, turns in by_session.items()
+        ]
+        sessions.sort(key=lambda s: s.last_ts, reverse=True)
+        return sessions[:limit]
+
+    def delete_chat_session(self, session_id: str) -> int:
+        before = len(self.chat_turns)
+        self.chat_turns = [t for t in self.chat_turns if t.session_id != session_id]
+        return before - len(self.chat_turns)
+
+    def insert_investigation_run(self, run: InvestigationRun) -> int:
+        self.investigation_runs.append(run)
+        return len(self.investigation_runs)
+
+    def get_investigation_runs(self, *, limit: int = 50) -> list[InvestigationRun]:
+        return list(reversed(self.investigation_runs))[:limit]
+
+    def get_investigation_run(self, run_db_id: int) -> InvestigationRun | None:
+        idx = run_db_id - 1
+        if 0 <= idx < len(self.investigation_runs):
+            return self.investigation_runs[idx]
+        return None
+
+    def insert_open_investigation(self, inv: OpenInvestigation) -> int:
+        new_id = len(self.open_investigations) + 1
+        self.open_investigations.append(inv.model_copy(update={"id": new_id}))
+        return new_id
+
+    def get_open_investigations(
+        self, *, status: str | None = None
+    ) -> list[OpenInvestigation]:
+        rows = list(reversed(self.open_investigations))
+        if status is not None:
+            rows = [r for r in rows if r.status == status]
+        return rows
+
+    def update_open_investigation(
+        self,
+        inv_id: int,
+        *,
+        current: float,
+        status: str,
+        promoted_run_id: str | None = None,
+    ) -> None:
+        for i, inv in enumerate(self.open_investigations):
+            if inv.id == inv_id:
+                self.open_investigations[i] = inv.model_copy(
+                    update={
+                        "current": current,
+                        "status": status,
+                        "promoted_run_id": promoted_run_id,
+                    }
+                )
+                return
+
+    def add_manual_event(self, event: ManualEvent) -> int:
+        new_id = len(self.manual_events) + 1
+        self.manual_events.append(event.model_copy(update={"id": new_id}))
+        return new_id
+
+    def get_manual_events(self, start: datetime, end: datetime) -> list[ManualEvent]:
+        return sorted(
+            (e for e in self.manual_events if start <= e.event_ts < end),
+            key=lambda e: e.event_ts,
+        )
+
+    def add_profile_version(self, profile: TherapyProfile) -> int:
+        latest = self.profile_versions[-1] if self.profile_versions else None
+        if latest is not None and latest.content_hash == profile.content_hash:
+            return latest.id or 0
+        if latest is not None and latest.active_to is None:
+            self.profile_versions[-1] = latest.model_copy(
+                update={"active_to": profile.active_from}
+            )
+        new_id = len(self.profile_versions) + 1
+        self.profile_versions.append(profile.model_copy(update={"id": new_id}))
+        return new_id
+
+    def get_profile_versions(self) -> list[TherapyProfile]:
+        return sorted(self.profile_versions, key=lambda p: p.active_from)
+
+    def get_active_profile(self, at: datetime) -> TherapyProfile | None:
+        candidates = [p for p in self.profile_versions if p.active_from <= at]
+        return max(candidates, key=lambda p: p.active_from) if candidates else None
 
 
 @dataclass
@@ -423,6 +565,48 @@ class TestUtcEnforcement:
         assert report.until.tzinfo == UTC
 
 
+class TestProvenance:
+    def test_glucose_linked_to_originating_raw(self) -> None:
+        store = FakeStore()
+        sync(FakeConnector(source="fake", batch=make_batch()), store, now=FIXED_NOW)
+        stored = sorted(store.glucose.values(), key=lambda e: e.ts)
+        assert all(g.raw_event_id is not None for g in stored)
+        # each glucose points at the raw row sharing its instant
+        for g in stored:
+            raw_key = next(
+                k for k, r in store.raw.items() if r.source_ts == g.ts
+            )
+            assert g.raw_event_id == store.raw_ids[raw_key]
+
+    def test_typed_event_without_matching_raw_stays_unlinked(self) -> None:
+        # make_batch's insulin/meal sit at 23:52, an instant with no raw row.
+        store = FakeStore()
+        sync(FakeConnector(source="fake", batch=make_batch()), store, now=FIXED_NOW)
+        assert all(i.raw_event_id is None for i in store.insulin.values())
+        assert all(m.raw_event_id is None for m in store.meals.values())
+
+    def test_ambiguous_timestamp_left_unlinked(self) -> None:
+        ts = DAY2 + timedelta(hours=1)
+        raw = [
+            RawEvent(source="fake", source_id="a", source_ts=ts, payload={}),
+            RawEvent(source="fake", source_id="b", source_ts=ts, payload={}),
+        ]
+        batch = NormalizedBatch(raw=raw, glucose=[GlucoseEvent(ts=ts, mg_dl=110)])
+        store = FakeStore()
+        sync(FakeConnector(source="fake", batch=batch), store, now=FIXED_NOW)
+        assert store.glucose[ts].raw_event_id is None
+
+    def test_relink_is_idempotent_across_resync(self) -> None:
+        store = FakeStore()
+        connector = FakeConnector(source="fake", batch=make_batch())
+        sync(connector, store, now=FIXED_NOW)
+        first = {ts: g.raw_event_id for ts, g in store.glucose.items()}
+        sync(connector, store, now=FIXED_NOW + timedelta(hours=1))
+        second = {ts: g.raw_event_id for ts, g in store.glucose.items()}
+        assert first == second
+        assert all(v is not None for v in second.values())
+
+
 class TestPredictions:
     def test_predictions_persisted(self) -> None:
         batch = make_batch()
@@ -446,4 +630,6 @@ class TestPredictions:
         assert report.ok
         assert report.notes == ()
         assert report.inserted["predictions"] == 1
-        assert list(store.predictions.values()) == [pred]
+        stored = list(store.predictions.values())
+        assert len(stored) == 1
+        assert stored[0].model_copy(update={"raw_event_id": None}) == pred

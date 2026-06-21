@@ -1,4 +1,4 @@
-"""PostgresStore — the reference backend for :class:`StoragePort`.
+"""PostgresStore - the reference backend for :class:`StoragePort`.
 
 psycopg 3 (``psycopg[binary]``). This is the production-grade twin of
 ``SQLiteStore``: identical semantics, native column types. The only design
@@ -9,7 +9,7 @@ so the two backends are observationally indistinguishable through the port.
   (psycopg adapts the tz); reads are normalized to aware UTC, matching sqlite.
 - **JSON payloads** (``payload``/``evidence``/``stats``/``tests``/``tools``/
   ``values_mg_dl``/``stages``) are stored as ``JSONB`` and round-trip as native
-  Python objects — no manual ``json.loads`` on the way out.
+  Python objects - no manual ``json.loads`` on the way out.
 - **Ids** are ``BIGSERIAL``.
 - **Window queries** are half-open (``start <= ts < end``), ordered ascending;
   sleep is windowed and ordered on ``ts_start``.
@@ -23,11 +23,14 @@ so the two backends are observationally indistinguishable through the port.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import json
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.models import (
     ActivityEvent,
+    ChatSession,
+    ChatTurn,
     CoverageStats,
     Finding,
     FindingStats,
@@ -41,20 +44,26 @@ from dexta_intelligence.models import (
     HypothesisStatus,
     InsulinEvent,
     InsulinKind,
+    InvestigationRun,
+    ManualEvent,
     MealEvent,
+    OpenInvestigation,
     PredictionEvent,
+    RawEvent,
     RecoveryEvent,
     Rollup,
     RollupPeriod,
+    RunFinding,
     SleepEvent,
+    TherapyProfile,
 )
 
 if TYPE_CHECKING:
-    from dexta_intelligence.models import DeviceEvent, RawEvent
+    from dexta_intelligence.models import DeviceEvent
 
 __all__ = ["PostgresStore"]
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 7
 
 _SECONDS_PER_DAY = 86400.0
 _CGM_SLOT_SECONDS = 300.0  # expected 5-minute CGM cadence
@@ -193,7 +202,9 @@ CREATE TABLE IF NOT EXISTS findings (
     skeptic_notes TEXT,
     window_start TIMESTAMPTZ,
     window_end TIMESTAMPTZ,
-    superseded_by BIGINT
+    superseded_by BIGINT,
+    last_verified TIMESTAMPTZ,
+    seen_count INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_findings_agent_kind_status ON findings (agent, kind, status);
 
@@ -225,6 +236,77 @@ CREATE TABLE IF NOT EXISTS goal_checkpoints (
     note TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_goal_checkpoints_goal ON goal_checkpoints (goal_id, ts);
+
+CREATE TABLE IF NOT EXISTS chat_turns (
+    id BIGSERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    ts TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns (session_id, id);
+
+CREATE TABLE IF NOT EXISTS investigation_runs (
+    id BIGSERIAL PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    question TEXT,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    plan TEXT NOT NULL,
+    trace TEXT NOT NULL,
+    findings TEXT NOT NULL,
+    n_findings INTEGER NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL,
+    finished_at TIMESTAMPTZ NOT NULL,
+    coverage_summary TEXT,
+    tool_calls TEXT,
+    evidence_items TEXT,
+    answer TEXT
+);
+
+CREATE TABLE IF NOT EXISTS open_investigations (
+    id BIGSERIAL PRIMARY KEY,
+    question TEXT NOT NULL,
+    condition_type TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    target DOUBLE PRECISION NOT NULL,
+    current DOUBLE PRECISION NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    promoted_run_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_open_investigations_status ON open_investigations (status);
+
+CREATE TABLE IF NOT EXISTS manual_events (
+    id BIGSERIAL PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    event_ts TIMESTAMPTZ NOT NULL,
+    end_ts TIMESTAMPTZ,
+    title TEXT,
+    description TEXT,
+    tags JSONB NOT NULL,
+    intensity TEXT,
+    confidence TEXT NOT NULL,
+    source TEXT NOT NULL,
+    linked_run_id TEXT,
+    linked_glucose_event_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_manual_events_ts ON manual_events (event_ts);
+
+CREATE TABLE IF NOT EXISTS therapy_profiles (
+    id BIGSERIAL PRIMARY KEY,
+    source TEXT NOT NULL,
+    name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    active_from TIMESTAMPTZ NOT NULL,
+    active_to TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_therapy_profiles_active ON therapy_profiles (active_from);
 """
 
 
@@ -244,6 +326,102 @@ def _to_utc(value: datetime) -> datetime:
 
 def _opt_utc(value: datetime | None) -> datetime | None:
     return None if value is None else _to_utc(value)
+
+
+_RUN_COLUMNS = (
+    "id, run_id, kind, status, question, window_start, window_end, "
+    "plan, trace, findings, n_findings, started_at, finished_at, "
+    "coverage_summary, tool_calls, evidence_items, answer"
+)
+
+
+def _opt_json(value: str | None, default: Any) -> Any:
+    """Decode a nullable JSON text column, falling back for legacy NULL rows."""
+    return default if value is None else json.loads(value)
+
+
+def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:
+    return InvestigationRun(
+        id=r[0],
+        run_id=r[1],
+        kind=r[2],
+        status=r[3],
+        question=r[4],
+        window_start=date.fromisoformat(r[5]),
+        window_end=date.fromisoformat(r[6]),
+        plan=json.loads(r[7]),
+        trace=json.loads(r[8]),
+        findings=[RunFinding(**f) for f in json.loads(r[9])],
+        n_findings=r[10],
+        started_at=_to_utc(r[11]),
+        finished_at=_to_utc(r[12]),
+        coverage_summary=_opt_json(r[13], None),
+        tool_calls=_opt_json(r[14], []),
+        evidence_items=_opt_json(r[15], []),
+        answer=r[16],
+    )
+
+
+_OPEN_INVESTIGATION_COLUMNS = (
+    "id, question, condition_type, subject, target, current, status, "
+    "created_at, promoted_run_id"
+)
+
+
+def _row_to_open_investigation(r: tuple[Any, ...]) -> OpenInvestigation:
+    return OpenInvestigation(
+        id=r[0],
+        question=r[1],
+        condition_type=r[2],
+        subject=r[3],
+        target=r[4],
+        current=r[5],
+        status=r[6],
+        created_at=_to_utc(r[7]),
+        promoted_run_id=r[8],
+    )
+
+
+_MANUAL_EVENT_COLUMNS = (
+    "id, event_type, event_ts, end_ts, title, description, tags, intensity, "
+    "confidence, source, linked_run_id, linked_glucose_event_id, created_at"
+)
+
+
+_THERAPY_PROFILE_COLUMNS = (
+    "id, source, name, content, content_hash, active_from, active_to, created_at"
+)
+
+
+def _row_to_therapy_profile(r: tuple[Any, ...]) -> TherapyProfile:
+    return TherapyProfile(
+        id=r[0],
+        source=r[1],
+        name=r[2],
+        content=json.loads(r[3]),
+        content_hash=r[4],
+        active_from=_to_utc(r[5]),
+        active_to=_opt_utc(r[6]),
+        created_at=_to_utc(r[7]),
+    )
+
+
+def _row_to_manual_event(r: tuple[Any, ...]) -> ManualEvent:
+    return ManualEvent(
+        id=r[0],
+        event_type=r[1],
+        event_ts=_to_utc(r[2]),
+        end_ts=_opt_utc(r[3]),
+        title=r[4],
+        description=r[5],
+        tags=r[6],
+        intensity=r[7],
+        confidence=r[8],
+        source=r[9],
+        linked_run_id=r[10],
+        linked_glucose_event_id=r[11],
+        created_at=_to_utc(r[12]),
+    )
 
 
 def _row_to_goal(r: tuple[Any, ...]) -> Goal:
@@ -282,6 +460,18 @@ class PostgresStore:
         """Create or upgrade the schema. Idempotent (IF NOT EXISTS throughout)."""
         with self._conn, self._conn.cursor() as cur:
             cur.execute(_SCHEMA)
+            # Additive column upgrades for DBs created before these columns existed.
+            cur.execute(
+                "ALTER TABLE findings ADD COLUMN IF NOT EXISTS last_verified TIMESTAMPTZ"
+            )
+            cur.execute(
+                "ALTER TABLE findings ADD COLUMN IF NOT EXISTS "
+                "seen_count INTEGER NOT NULL DEFAULT 1"
+            )
+            for col in ("coverage_summary", "tool_calls", "evidence_items", "answer"):
+                cur.execute(
+                    f"ALTER TABLE investigation_runs ADD COLUMN IF NOT EXISTS {col} TEXT"
+                )
             cur.execute("SELECT version FROM schema_version")
             row = cur.fetchone()
             if row is None:
@@ -293,16 +483,80 @@ class PostgresStore:
 
     # ── layer 1: raw events ──────────────────────────────────────────────────
 
-    def upsert_raw_events(self, events: list[RawEvent]) -> int:
+    def upsert_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
+        if not events:
+            return {}
         rows = [
             (e.source, e.source_id, _to_utc(e.source_ts), self._jsonb(e.payload))
             for e in events
         ]
-        return self._write_counted(
-            "INSERT INTO raw_events (source, source_id, source_ts, payload) "
-            "VALUES (%s, %s, %s, %s) ON CONFLICT (source, source_id) DO NOTHING",
-            rows,
+        with self._conn, self._conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO raw_events (source, source_id, source_ts, payload) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT (source, source_id) DO NOTHING",
+                rows,
+            )
+        return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def replace_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
+        if not events:
+            return {}
+        rows = [
+            (e.source, e.source_id, _to_utc(e.source_ts), self._jsonb(e.payload))
+            for e in events
+        ]
+        with self._conn, self._conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO raw_events (source, source_id, source_ts, payload) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT (source, source_id) DO UPDATE SET "
+                "source_ts = EXCLUDED.source_ts, payload = EXCLUDED.payload",
+                rows,
+            )
+        return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def get_raw_event(self, source: str, source_id: str) -> RawEvent | None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT source, source_id, source_ts, payload FROM raw_events "
+                "WHERE source = %s AND source_id = %s",
+                (source, source_id),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        payload = row[3]
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        return RawEvent(
+            source=row[0],
+            source_id=row[1],
+            source_ts=_to_utc(row[2]),
+            payload=payload if isinstance(payload, dict) else json.loads(payload),
         )
+
+    def existing_raw_ids(self, events: list[RawEvent]) -> dict[str, int]:
+        if not events:
+            return {}
+        return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def _raw_ids(self, keys: set[tuple[str, str]]) -> dict[str, int]:
+        """Resolve ``source_id -> id`` for the given ``(source, source_id)`` keys.
+
+        ``ON CONFLICT DO NOTHING ... RETURNING`` skips the conflicting rows, so
+        the ids are read back here - covering both freshly-inserted and
+        pre-existing rows. ``source_id`` is unique within a source.
+        """
+        result: dict[str, int] = {}
+        with self._conn.cursor() as cur:
+            for source, source_id in keys:
+                cur.execute(
+                    "SELECT id FROM raw_events WHERE source = %s AND source_id = %s",
+                    (source, source_id),
+                )
+                row = cur.fetchone()
+                if row is not None:
+                    result[source_id] = int(row[0])
+        return result
 
     def get_watermark(self, source: str) -> datetime | None:
         with self._conn.cursor() as cur:
@@ -310,6 +564,12 @@ class PostgresStore:
             row = cur.fetchone()
         assert row is not None
         return _opt_utc(row[0])
+
+    def source_event_counts(self) -> dict[str, int]:
+        with self._conn.cursor() as cur:
+            cur.execute("SELECT source, COUNT(*) FROM raw_events GROUP BY source")
+            rows = cur.fetchall()
+        return {r[0]: int(r[1]) for r in rows}
 
     # ── layer 2: clinical timeline ───────────────────────────────────────────
 
@@ -659,11 +919,13 @@ class PostgresStore:
 
     def insert_finding(self, finding: Finding) -> int:
         """Persist a finding with a freshly assigned id (any incoming id is ignored)."""
+        last_verified = finding.last_verified or datetime.now(tz=UTC)
         with self._conn, self._conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO findings (agent, kind, scope, headline, body_md, evidence, stats, "
-                "confidence, status, skeptic_notes, window_start, window_end, superseded_by) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                "confidence, status, skeptic_notes, window_start, window_end, superseded_by, "
+                "last_verified, seen_count) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     finding.agent,
                     finding.kind,
@@ -678,6 +940,8 @@ class PostgresStore:
                     _opt_utc(finding.window_start),
                     _opt_utc(finding.window_end),
                     finding.superseded_by,
+                    _to_utc(last_verified),
+                    finding.seen_count,
                 ),
             )
             row = cur.fetchone()
@@ -721,7 +985,8 @@ class PostgresStore:
         with self._conn.cursor() as cur:
             cur.execute(
                 "SELECT id, agent, kind, scope, headline, body_md, evidence, stats, confidence, "
-                "status, skeptic_notes, window_start, window_end, superseded_by FROM findings "
+                "status, skeptic_notes, window_start, window_end, superseded_by, last_verified, "
+                "seen_count FROM findings "
                 f"{where}ORDER BY id DESC LIMIT %s",
                 params,
             )
@@ -742,6 +1007,8 @@ class PostgresStore:
                 window_start=_opt_utc(r[11]),
                 window_end=_opt_utc(r[12]),
                 superseded_by=r[13],
+                last_verified=_opt_utc(r[14]),
+                seen_count=r[15] if r[15] is not None else 1,
             )
             for r in fetched
         ]
@@ -860,6 +1127,256 @@ class PostgresStore:
             )
             for r in fetched
         ]
+
+    # ── chat history ─────────────────────────────────────────────────────────
+
+    def append_chat_turn(self, turn: ChatTurn) -> int:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO chat_turns (session_id, role, content, ts) "
+                "VALUES (%s, %s, %s, %s) RETURNING id",
+                (turn.session_id, turn.role, turn.content, _to_utc(turn.ts)),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def get_chat_turns(self, session_id: str, *, limit: int = 50) -> list[ChatTurn]:
+        with self._conn.cursor() as cur:
+            # Take the most-recent `limit` rows (id DESC), then re-order ascending
+            # so the result is chronological (oldest→newest).
+            cur.execute(
+                "SELECT id, session_id, role, content, ts FROM ("
+                "SELECT id, session_id, role, content, ts FROM chat_turns "
+                "WHERE session_id = %s ORDER BY id DESC LIMIT %s"
+                ") sub ORDER BY id ASC",
+                (session_id, limit),
+            )
+            fetched = cur.fetchall()
+        return [
+            ChatTurn(id=r[0], session_id=r[1], role=r[2], content=r[3], ts=_to_utc(r[4]))
+            for r in fetched
+        ]
+
+    def get_chat_sessions(self, *, limit: int = 50) -> list[ChatSession]:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT session_id, MAX(ts) AS last_ts, COUNT(*) AS turn_count, "
+                "(SELECT content FROM chat_turns inner_t "
+                " WHERE inner_t.session_id = chat_turns.session_id AND inner_t.role = 'user' "
+                " ORDER BY inner_t.id ASC LIMIT 1) AS preview "
+                "FROM chat_turns GROUP BY session_id "
+                "ORDER BY last_ts DESC, MAX(id) DESC LIMIT %s",
+                (limit,),
+            )
+            fetched = cur.fetchall()
+        return [
+            ChatSession(
+                session_id=r[0],
+                last_ts=_to_utc(r[1]),
+                turn_count=int(r[2]),
+                preview=r[3] or "",
+            )
+            for r in fetched
+        ]
+
+    def delete_chat_session(self, session_id: str) -> int:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute("DELETE FROM chat_turns WHERE session_id = %s", (session_id,))
+            deleted = cur.rowcount
+        return int(deleted)
+
+    # ── investigation runs ─────────────────────────────────────────────────────
+
+    def insert_investigation_run(self, run: InvestigationRun) -> int:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO investigation_runs "
+                "(run_id, kind, status, question, window_start, window_end, plan, trace, "
+                "findings, n_findings, started_at, finished_at, "
+                "coverage_summary, tool_calls, evidence_items, answer) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "RETURNING id",
+                (
+                    run.run_id,
+                    run.kind,
+                    run.status,
+                    run.question,
+                    run.window_start.isoformat(),
+                    run.window_end.isoformat(),
+                    json.dumps(run.plan),
+                    json.dumps(run.trace),
+                    json.dumps([f.model_dump() for f in run.findings]),
+                    run.n_findings,
+                    _to_utc(run.started_at),
+                    _to_utc(run.finished_at),
+                    None if run.coverage_summary is None else json.dumps(run.coverage_summary),
+                    json.dumps(run.tool_calls),
+                    json.dumps(run.evidence_items),
+                    run.answer,
+                ),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def get_investigation_runs(self, *, limit: int = 50) -> list[InvestigationRun]:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_RUN_COLUMNS} FROM investigation_runs ORDER BY id DESC LIMIT %s",
+                (limit,),
+            )
+            rows = cur.fetchall()
+        return [_row_to_run(r) for r in rows]
+
+    def get_investigation_run(self, run_db_id: int) -> InvestigationRun | None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_RUN_COLUMNS} FROM investigation_runs WHERE id = %s",
+                (run_db_id,),
+            )
+            row = cur.fetchone()
+        return _row_to_run(row) if row is not None else None
+
+    # ── open investigations ─────────────────────────────────────────────────────
+
+    def insert_open_investigation(self, inv: OpenInvestigation) -> int:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO open_investigations "
+                "(question, condition_type, subject, target, current, status, "
+                "created_at, promoted_run_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    inv.question,
+                    inv.condition_type,
+                    inv.subject,
+                    inv.target,
+                    inv.current,
+                    inv.status,
+                    _to_utc(inv.created_at),
+                    inv.promoted_run_id,
+                ),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def get_open_investigations(
+        self, *, status: str | None = None
+    ) -> list[OpenInvestigation]:
+        sql = f"SELECT {_OPEN_INVESTIGATION_COLUMNS} FROM open_investigations"
+        params: tuple[Any, ...] = ()
+        if status is not None:
+            sql += " WHERE status = %s"
+            params = (status,)
+        sql += " ORDER BY id DESC"
+        with self._conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        return [_row_to_open_investigation(r) for r in rows]
+
+    def update_open_investigation(
+        self,
+        inv_id: int,
+        *,
+        current: float,
+        status: str,
+        promoted_run_id: str | None = None,
+    ) -> None:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE open_investigations "
+                "SET current = %s, status = %s, promoted_run_id = %s WHERE id = %s",
+                (current, status, promoted_run_id, inv_id),
+            )
+
+    # ── manual context ───────────────────────────────────────────────────────
+
+    def add_manual_event(self, event: ManualEvent) -> int:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO manual_events "
+                "(event_type, event_ts, end_ts, title, description, tags, intensity, "
+                "confidence, source, linked_run_id, linked_glucose_event_id, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    event.event_type,
+                    _to_utc(event.event_ts),
+                    _opt_utc(event.end_ts),
+                    event.title,
+                    event.description,
+                    self._jsonb(event.tags),
+                    event.intensity,
+                    event.confidence,
+                    event.source,
+                    event.linked_run_id,
+                    event.linked_glucose_event_id,
+                    _to_utc(event.created_at),
+                ),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def get_manual_events(self, start: datetime, end: datetime) -> list[ManualEvent]:
+        rows = self._window(
+            f"SELECT {_MANUAL_EVENT_COLUMNS} FROM manual_events", "event_ts", start, end
+        )
+        return [_row_to_manual_event(r) for r in rows]
+
+    # ── therapy profile versions ─────────────────────────────────────────────
+
+    def add_profile_version(self, profile: TherapyProfile) -> int:
+        with self._conn, self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles "
+                "ORDER BY active_from DESC, id DESC LIMIT 1"
+            )
+            latest = cur.fetchone()
+            if latest is not None and latest[4] == profile.content_hash:
+                return int(latest[0])
+            if latest is not None and latest[6] is None:
+                cur.execute(
+                    "UPDATE therapy_profiles SET active_to = %s WHERE id = %s",
+                    (_to_utc(profile.active_from), latest[0]),
+                )
+            cur.execute(
+                "INSERT INTO therapy_profiles "
+                "(source, name, content, content_hash, active_from, active_to, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    profile.source,
+                    profile.name,
+                    json.dumps(profile.content),
+                    profile.content_hash,
+                    _to_utc(profile.active_from),
+                    _opt_utc(profile.active_to),
+                    _to_utc(profile.created_at),
+                ),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def get_profile_versions(self) -> list[TherapyProfile]:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles "
+                "ORDER BY active_from ASC"
+            )
+            rows = cur.fetchall()
+        return [_row_to_therapy_profile(r) for r in rows]
+
+    def get_active_profile(self, at: datetime) -> TherapyProfile | None:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles "
+                "WHERE active_from <= %s ORDER BY active_from DESC, id DESC LIMIT 1",
+                (_to_utc(at),),
+            )
+            row = cur.fetchone()
+        return _row_to_therapy_profile(row) if row is not None else None
 
     # ── internals ────────────────────────────────────────────────────────────
 

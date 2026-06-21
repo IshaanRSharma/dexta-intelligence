@@ -1,9 +1,9 @@
-"""Libre connector tests - pure conversion on stub measurements, connector on a stub client.
+"""Libre connector tests: pure conversion on stub measurements, connector on a stub client.
 
-No network and no real pylibrelinkup session: ``_StubMeasurement`` satisfies
-the ``LibreMeasurementLike`` duck type and ``_StubLinkUpClient`` stands in
-for the pylibrelinkup ``PyLibreLinkUp`` object, serving separate graph and
-logbook lists so the merge/dedupe behaviour of ``pull`` is testable.
+No network and no real pylibrelinkup session. ``_StubMeasurement`` satisfies the
+``LibreMeasurementLike`` duck type and ``_StubLinkUpClient`` stands in for the
+pylibrelinkup ``PyLibreLinkUp`` object, serving separate graph and logbook lists
+so the merge/dedupe behaviour of ``pull`` is testable.
 """
 
 from __future__ import annotations

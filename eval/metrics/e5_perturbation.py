@@ -1,4 +1,4 @@
-"""E5 robustness — deterministic agents under data corruption.
+"""E5 robustness - deterministic agents under data corruption.
 
 Ground truth is non-LLM: the deterministic observation + pattern agents run on
 clean :func:`scenario_all` glucose and on corrupted variants of it. A robust
@@ -7,12 +7,12 @@ regardless of realistic data defects.
 
 Corruptions applied to the clean series (each independently):
 
-- ``dropout`` — 15% of readings removed at random.
-- ``duplicates`` — 5% of readings re-inserted at ±1s offsets (the store dedupes
+- ``dropout`` - 15% of readings removed at random.
+- ``duplicates`` - 5% of readings re-inserted at ±1s offsets (the store dedupes
   exact-timestamp collisions, so duplicates are nudged to survive the UNIQUE
   index and exercise downstream dedup tolerance).
-- ``gap`` — a contiguous 3-day block of readings removed.
-- ``tz_shift`` — a +1h timestamp shift applied to a contiguous one-week block.
+- ``gap`` - a contiguous 3-day block of readings removed.
+- ``tz_shift`` - a +1h timestamp shift applied to a contiguous one-week block.
 
 Metrics per corruption: Jaccard similarity of the clean-vs-corrupted finding
 ``kind`` sets (target ≥ 0.8) and the count of corruption-induced *new* kinds
@@ -37,7 +37,7 @@ from dexta_intelligence.workflows.deep_analysis import run_deep_analysis
 
 __all__ = ["E5PerturbationResult", "run_e5"]
 
-#: Spec §14 robustness targets.
+#: Robustness target.
 _JACCARD_TARGET = 0.8
 
 #: Corruption parameters.

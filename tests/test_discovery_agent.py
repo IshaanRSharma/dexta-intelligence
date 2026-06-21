@@ -1,4 +1,4 @@
-"""Tests for the Discovery agent — the LLM curiosity loop.
+"""Tests for the Discovery agent: the LLM curiosity loop.
 
 Two paths are covered: the deterministic fallback (no model) and the full
 reasoning loop driven by a scripted fake model, so the plan -> judge ->
@@ -103,7 +103,6 @@ def test_fallback_sweep_finds_planted_dawn_effect() -> None:
     assert finding.agent == "discovery"
     assert finding.stats.effect_size is not None and finding.stats.effect_size > 40
     assert finding.stats.q_fdr is not None
-    # every cited number traces to evidence (deterministic headline)
     assert finding.evidence["tool"] == "tod_compare"
 
 

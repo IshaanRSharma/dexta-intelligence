@@ -1,0 +1,38 @@
+{# Reusable render components: scope chips and the evidence card. #}
+
+{% macro chip(label, value) %}
+<span class="chip-kv"><span class="chip-k">{{ label }}</span><span class="chip-v">{{ value }}</span></span>
+{%- endmacro %}
+
+{% macro item_block(it) %}
+<li class="discuss-item">
+  <span class="discuss-head">{{ it.item }}</span>
+  {% if it.rationale %}<p class="muted small">{{ it.rationale }}</p>{% endif %}
+  <div class="chips">
+    {% for ref in it.evidence_refs %}{{ chip("evidence", ref) }}{% endfor %}
+    {% for pmid in it.citations %}<a class="chip" href="https://pubmed.ncbi.nlm.nih.gov/{{ pmid }}/">PMID {{ pmid }}</a>{% endfor %}
+  </div>
+</li>
+{%- endmacro %}
+
+{% macro finding_card(c) %}
+<article class="card finding-card">
+  <div class="card-head">
+    <h2>{{ c.headline }}</h2>
+    <span class="badge {{ 'ok' if c.lifecycle == 'verified' else 'neutral' }}" title="finding lifecycle">{{ c.lifecycle }}</span>
+  </div>
+  <div class="chips">
+    {{ chip("agent", c.agent) }}
+    {{ chip("scope", c.scope) }}
+    <span class="chip-kv strength-{{ c.strength }}"><span class="chip-k">evidence</span><span class="chip-v">{{ c.strength }}</span></span>
+    {% if c.seen_count and c.seen_count > 1 %}{{ chip("seen", "x" ~ c.seen_count) }}{% endif %}
+    {% if c.last_verified_rel %}{{ chip("verified", c.last_verified_rel) }}{% endif %}
+    {% if c.window_label %}{{ chip("window", c.window_label) }}{% endif %}
+  </div>
+  {% if c.stats_line %}<p class="stats">{{ c.stats_line }}</p>{% endif %}
+  {% if c.body_html %}<div class="prose">{{ c.body_html|safe }}</div>{% endif %}
+  {% if c.skeptic_notes %}
+  <p class="counter-evidence"><span class="ce-label">Counter-evidence</span> {{ c.skeptic_notes }}</p>
+  {% endif %}
+</article>
+{%- endmacro %}

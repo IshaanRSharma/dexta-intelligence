@@ -3,6 +3,12 @@
 Every tool is a pure read over the store. Results carry the exact numbers any
 prose will be audited against, plus the raw day-level groups so the rigor
 layer and skeptic can re-test claims independently.
+
+Context policy: data enters the model's context only when a tool is called -
+nothing here is injected eagerly. Every list-returning tool is bounded (see
+``_MAX_LISTED_EVENTS`` / ``_MAX_RECALL_ITEMS``) with a truncation note, so a
+single call can never blow the context budget. Descriptions are kept terse on
+purpose: they ship in every prompt.
 """
 
 from __future__ import annotations
@@ -11,19 +17,31 @@ import bisect
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from dexta_intelligence.agents.reason import ToolSpec
-from dexta_intelligence.agents.time_tools import time_tool_specs
 from dexta_intelligence.analytics.oref import carbs_on_board, insulin_totals
 from dexta_intelligence.coldstart import CapabilitySet
-from dexta_intelligence.models import HypothesisStatus, InsulinKind
-from dexta_intelligence.stats.core import cohen_d, mean, stdev
+from dexta_intelligence.connectors.tandem import PROFILE_SOURCE_ID
+from dexta_intelligence.models import FindingStatus, HypothesisStatus, InsulinKind
+from dexta_intelligence.stats.core import (
+    cliffs_delta,
+    cohen_d,
+    mann_whitney_u,
+    mean,
+    pearson_r,
+    spearman_rho,
+    stdev,
+    student_t_two_sided_p,
+    summarize,
+    welch_t_test,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from dexta_intelligence.agents.base import AgentContext
-    from dexta_intelligence.models import InsulinEvent, MealEvent
+    from dexta_intelligence.agents.reason import ToolSpec
+    from dexta_intelligence.models import InsulinEvent, ManualEvent, MealEvent
 
 __all__ = [
     "TOOL_SCHEMA_FOR_LLM",
@@ -38,12 +56,27 @@ _MIN_READINGS_PER_DAY = 12
 #: Minimum readings on each side of an event for a pre/post pair.
 _MIN_READINGS_PER_SIDE = 2
 _WEEKEND = (5, 6)
+#: Glucose Management Indicator (Bergenstal 2018): GMI% = 3.31 + 0.02392·mean(mg/dL).
+_GMI_INTERCEPT = 3.31
+_GMI_SLOPE = 0.02392
+
+
+def _percentile(sorted_vals: list[float], q: float) -> float:
+    """Linear-interpolation quantile of an already-sorted, non-empty list (q in 0-100)."""
+    if len(sorted_vals) == 1:
+        return sorted_vals[0]
+    pos = (q / 100.0) * (len(sorted_vals) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(sorted_vals) - 1)
+    return sorted_vals[lo] * (1.0 - (pos - lo)) + sorted_vals[hi] * (pos - lo)
 
 #: Default spike threshold (mg/dL) for find_spikes / find_similar_events.
 _SPIKE_THRESHOLD = 200.0
 #: Max items returned in any treatment-tool event list (context budget).
 _MAX_LISTED_EVENTS = 40
-#: Analysis-only oref profile defaults — mirrors the reconciliation agent.
+#: Max findings / connections / open-questions recall returns (context budget).
+_MAX_RECALL_ITEMS = 8
+#: Analysis-only oref profile defaults - mirrors the reconciliation agent.
 #: Never used for dosing; tier-B labeling on every result that uses them.
 _ANALYSIS_ISF = 50.0
 _ANALYSIS_CARB_RATIO = 10.0
@@ -54,6 +87,7 @@ _TOOL_NEEDS: dict[str, str] = {
     "get_boluses": "insulin",
     "get_basal_timeline": "insulin",
     "get_iob": "insulin",
+    "get_insulin_profile": "insulin",
     "correction_outcome": "insulin",
     "get_carb_entries": "meals",
     "get_cob": "meals",
@@ -100,85 +134,17 @@ Every tool returns: ok, n_a, n_b, mean_a, mean_b, delta (mean_a - mean_b),
 cohen_d, interpretation ("negligible"|"small"|"moderate"|"large"), and the
 raw per-day/per-event groups used.
 
-TIME-TRAVERSAL TOOLS (re-scope the window the analysis tools above operate on):
-
-7. list_segments()
-   Coarse structure of the whole record so you can decide where to drill: one
-   row per month (or per week if the span is under 60 days), each with period,
-   n_days, mean_glucose, tir_pct, n_lows. Cheap and deterministic. Call this
-   FIRST to orient before narrowing.
-
-8. set_window(start, end)
-   start/end: ISO dates ("2026-03-01"). Narrows the ACTIVE window every later
-   tool (tod_compare, groupby_compare, event_proximity, daily_series, ...) reads
-   from. Clamps to available data and returns {active_start, active_end, n_days,
-   n_readings} so you see exactly what you selected. Out-of-range dates clamp.
-
-9. zoom_event(timestamp, pad_hours=12)
-   timestamp: ISO datetime of a spike/event. Sets the active window tight around
-   it (+/- pad_hours) and returns the minute-level trace: {readings:[{ts,mg_dl}],
-   pre_mean, post_mean, peak, nadir}. The spike-drill primitive.
-
-10. daily_series(metric)
-    metric: "tir" | "mean_glucose" | "tbr" | "cv". Returns the per-day time
-    series over the ACTIVE window as [{date, value}] so you can spot trends and
-    change-points yourself before comparing groups.
-
-TREATMENT TOOLS (insulin/carb context — exposed only when the data exists;
-REQUIRED before claiming a likely cause for a spike/high/meal/correction):
-
-11. get_carb_entries()
-    Carb entries inside the ACTIVE window: [{ts, carbs_g, ...}], n_entries,
-    total_carbs_g. An empty result around a spike is itself a signal
-    (possible missing carb entry).
-
-12. get_boluses()
-    Boluses inside the ACTIVE window: [{ts, units, minutes_after_carb_entry}],
-    n_boluses, total_units. minutes_after_carb_entry is the late-bolus signal.
-
-13. get_basal_timeline()
-    Basal / temp-basal / suspend events inside the ACTIVE window plus
-    basal_stable (no temp-basal/suspend interruptions) — rules basal in or out.
-
-14. get_iob(timestamp) / 15. get_cob(timestamp)
-    Insulin-on-board / carbs-on-board at an ISO datetime (computed, oref0
-    curves, tier B — analysis context only, never dosing).
-
-16. find_spikes(threshold=200, top_n=10)
-    Excursion peaks inside the ACTIVE window: [{ts, peak_mg_dl, duration_min}],
-    largest first. Locates the spike when the user names a day but not a time.
-
-17. find_similar_events(timestamp, threshold=200)
-    Recurrence over the WHOLE record: same-time-of-day events (carb entries
-    when logged) with per-event peak, spiked flag, and bolus_delay_min →
-    n_similar, n_spiking, mean bolus delays spiking vs not.
-
-CALENDAR TOOLS (always available — never compute dates in your head):
-
-18. get_current_time(timezone)   what "now"/"today" is, with weekday
-19. get_weekday(date)            weekday for any ISO date
-20. parse_relative_date(expression, timezone)
-    "last Tuesday" / "yesterday" / "3 days ago" → concrete ISO date for
-    set_window / zoom_event arguments.
-
-WORKFLOW: orient with list_segments, narrow with set_window, drill a spike with
-zoom_event, read trends with daily_series, THEN compare with tod_compare /
-groupby_compare / event_proximity. The analysis tools always honor the active
-window; call set_window again (or with the full span) to widen back out.
-
-SPIKE/CAUSE WORKFLOW: resolve dates (calendar tools) → list_segments →
-set_window → find_spikes / zoom_event → get_carb_entries → get_boluses +
-get_iob → get_basal_timeline → find_similar_events → only THEN state the most
-consistent contributor. NEVER claim a likely cause from glucose shape alone
-while treatment tools are available; if they are absent, say explicitly:
-"Insulin/carb data unavailable. This is glucose-shape inference only."
-Ground a confirmed pattern with search_evidence AFTER the data work, never
-instead of it. Observation and discussion only — never dosing advice."""
+Each tool compares two groups over the whole analysis window. Form one
+hypothesis, pick the single tool that tests it, and read the effect size and
+direction. Choose a group split the data actually supports (enough days/events
+per side). The rigor gate and an independent skeptic re-check every result after
+you, so prefer running a comparison over guessing its outcome. Observation and
+discussion only - never dosing advice."""
 
 
 @dataclass(frozen=True, slots=True)
 class ToolResult:
-    """One tool invocation's outcome — the evidence pool for any prose about it."""
+    """One tool invocation's outcome - the evidence pool for any prose about it."""
 
     ok: bool
     tool: str
@@ -207,13 +173,17 @@ class DiscoveryToolkit:
         target_low: int = 70,
         target_high: int = 180,
     ) -> None:
-        start = datetime.combine(ctx.window[0], time.min, tzinfo=UTC)
-        end = datetime.combine(ctx.window[1], time.max, tzinfo=UTC)
+        #: Patient-local zone for all date/time-of-day bucketing. Storage stays
+        #: UTC; "dinner", "overnight", and per-day grouping are computed in this
+        #: zone so they land at the patient's clock time, not UTC's.
+        self._tz = _resolve_tz(getattr(ctx, "timezone", "UTC"))
+        start = datetime.combine(ctx.window[0], time.min, tzinfo=self._tz).astimezone(UTC)
+        end = datetime.combine(ctx.window[1], time.max, tzinfo=self._tz).astimezone(UTC)
         self._target = (target_low, target_high)
-        #: Full ctx.window bounds — the active sub-window can never exceed these.
+        #: Full ctx.window bounds - the active sub-window can never exceed these.
         self._full_start = start
         self._full_end = end
-        #: Active sub-window (defaults to the full window: today's behavior).
+        #: Active sub-window (defaults to the full window).
         self._active_start = start
         self._active_end = end
         glucose = sorted(ctx.store.get_glucose(start, end), key=lambda g: g.ts)
@@ -224,7 +194,7 @@ class DiscoveryToolkit:
         self._sleep_score: dict[date, float] = {}
         for s in ctx.store.get_sleep(start, end):
             if s.score is not None:
-                self._sleep_score[s.ts_end.date()] = float(s.score)
+                self._sleep_score[self._ld(s.ts_end)] = float(s.score)
         self._activity_ts = [a.ts for a in ctx.store.get_activity(start, end)]
         self._meals: list[MealEvent] = sorted(ctx.store.get_meals(start, end), key=lambda m: m.ts)
         self._meal_ts = [m.ts for m in self._meals]
@@ -232,10 +202,13 @@ class DiscoveryToolkit:
             ctx.store.get_insulin(start, end), key=lambda i: i.ts
         )
         self._bolus_ts = [i.ts for i in self._insulin if i.kind is InsulinKind.BOLUS]
-        #: Nights touched by temp-basal / suspend events (excluded from drift when insulin exists).
         self._has_insulin = bool(self._insulin)
+        self._last_insulin_ts = self._insulin[-1].ts if self._insulin else None
+        self._last_meal_ts = self._meals[-1].ts if self._meals else None
+        self._last_glucose_ts = self._glucose_ts[-1] if self._glucose_ts else None
+        #: Nights touched by temp-basal / suspend (excluded from drift when insulin exists).
         self._basal_intervention_dates: set[date] = {
-            i.ts.date()
+            self._ld(i.ts)
             for i in self._insulin
             if i.kind in (InsulinKind.TEMP_BASAL, InsulinKind.SUSPEND)
         }
@@ -243,9 +216,48 @@ class DiscoveryToolkit:
             self._n_predictions = len(ctx.store.get_predictions(start, end))
         except (AttributeError, NotImplementedError):  # minimal/partial stores
             self._n_predictions = 0
+        try:
+            self._manual: list[ManualEvent] = sorted(
+                ctx.store.get_manual_events(start, end), key=lambda m: m.event_ts
+            )
+        except (AttributeError, NotImplementedError):  # minimal/partial stores
+            self._manual = []
+        self._manual_ts = [m.event_ts for m in self._manual]
+        self._insulin_profile: dict[str, Any] | None = None
+        try:
+            profile_raw = ctx.store.get_raw_event("tandem", PROFILE_SOURCE_ID)
+        except (AttributeError, NotImplementedError):
+            profile_raw = None
+        if profile_raw is not None:
+            self._insulin_profile = dict(profile_raw.payload)
+        try:
+            self._profile_versions = list(ctx.store.get_profile_versions())
+        except (AttributeError, NotImplementedError):  # minimal/partial stores
+            self._profile_versions = []
+
+    # ── local-time helpers (bucket in the patient's zone, slice the UTC arrays) ──
+
+    def _ld(self, ts: datetime) -> date:
+        """Calendar date of ``ts`` in the patient's local zone."""
+        return ts.astimezone(self._tz).date()
+
+    def _lh(self, ts: datetime) -> int:
+        """Hour-of-day of ``ts`` in the patient's local zone (0-23)."""
+        return ts.astimezone(self._tz).hour
+
+    def _day_bounds(self, day: date) -> tuple[datetime, datetime]:
+        """UTC instants bracketing one local calendar ``day`` (for bisecting)."""
+        start = datetime.combine(day, time.min, tzinfo=self._tz).astimezone(UTC)
+        end = datetime.combine(day, time.max, tzinfo=self._tz).astimezone(UTC)
+        return start, end
+
+    @property
+    def tzinfo(self) -> ZoneInfo:
+        """The patient-local zone used for all bucketing (callers localize for display)."""
+        return self._tz
 
     def capabilities(self) -> CapabilitySet:
-        """Which streams exist in this window — drives tool exposure."""
+        """Which streams exist in this window - drives tool exposure."""
         return CapabilitySet(
             has_insulin=self._has_insulin,
             has_meals=bool(self._meals),
@@ -263,7 +275,7 @@ class DiscoveryToolkit:
         the clamped (start, end) actually applied."""
         lo = max(start, self._full_start)
         hi = min(end, self._full_end)
-        if lo > hi:  # degenerate request — fall back to the full window
+        if lo > hi:  # degenerate request - fall back to the full window
             lo, hi = self._full_start, self._full_end
         self._active_start = lo
         self._active_end = hi
@@ -271,9 +283,9 @@ class DiscoveryToolkit:
 
     @property
     def _daily(self) -> dict[date, tuple[float, float]]:
-        """The full-window daily frame filtered to the active sub-window."""
-        lo, hi = self._active_start.date(), self._active_end.date()
-        if lo == self._full_start.date() and hi == self._full_end.date():
+        """The full-window daily frame filtered to the active sub-window (local dates)."""
+        lo, hi = self._ld(self._active_start), self._ld(self._active_end)
+        if lo == self._ld(self._full_start) and hi == self._ld(self._full_end):
             return self._daily_full
         return {d: v for d, v in self._daily_full.items() if lo <= d <= hi}
 
@@ -291,17 +303,45 @@ class DiscoveryToolkit:
 
     # ── context for the planner ──────────────────────────────────────────────
 
+    def _insulin_in_active_window(self) -> bool:
+        return any(self._active_start <= i.ts <= self._active_end for i in self._insulin)
+
+    def _treatment_gap_note(self) -> str | None:
+        """Explain when glucose spans the active window but pump data does not."""
+        if not self._has_insulin or self._last_insulin_ts is None:
+            return None
+        if self._insulin_in_active_window():
+            return None
+        if self._last_insulin_ts >= self._active_start:
+            return None
+        local = self._last_insulin_ts.astimezone(self._tz).strftime("%b %d %H:%M")
+        return (
+            f"pump/insulin data in dexta ends {local} - before this window. "
+            "CGM may be newer than Tandem uploads; open t:connect/Tandem Source on your "
+            "phone to upload recent pump history, then Sync now."
+        )
+
     def data_summary(self) -> str:
         """One block the planner reads before proposing hypotheses."""
         days = sorted(self._daily)
         span = f"{days[0].isoformat()} → {days[-1].isoformat()}" if days else "no data"
-        return (
-            f"- glucose days with enough readings: {len(self._daily)} ({span})\n"
-            f"- sleep-scored days: {len(self._sleep_score)}\n"
-            f"- activity events: {len(self._activity_ts)}"
-            f" · meals logged: {len(self._meal_ts)}"
-            f" · boluses logged: {len(self._bolus_ts)}"
-        )
+        lines = [
+            f"- glucose days with enough readings: {len(self._daily)} ({span})",
+            f"- sleep-scored days: {len(self._sleep_score)}",
+            (
+                f"- activity events: {len(self._activity_ts)}"
+                f" · meals logged: {len(self._meal_ts)}"
+                f" · boluses logged: {len(self._bolus_ts)}"
+            ),
+        ]
+        if self._last_glucose_ts and self._last_insulin_ts:
+            g = self._last_glucose_ts.astimezone(self._tz).strftime("%b %d %H:%M")
+            ins = self._last_insulin_ts.astimezone(self._tz).strftime("%b %d %H:%M")
+            lines.append(f"- latest glucose: {g} · latest pump/insulin: {ins}")
+        gap = self._treatment_gap_note()
+        if gap:
+            lines.append(f"- treatment gap: {gap}")
+        return "\n".join(lines)
 
     # ── dispatch ─────────────────────────────────────────────────────────────
 
@@ -351,7 +391,7 @@ class DiscoveryToolkit:
             series = {d: v for d, v in series.items() if d in scored}
             labels = ("poorer_sleep", "better_sleep")
         elif group_by == "workout_day":
-            workout_days = {ts.date() for ts in self._activity_ts}
+            workout_days = {self._ld(ts) for ts in self._activity_ts}
             in_a = {d for d in series if d in workout_days}
             labels = ("workout_day", "rest_day")
         else:
@@ -362,8 +402,18 @@ class DiscoveryToolkit:
         group_b = tuple(series[d] for d in ordered if d not in in_a)
         return _two_group("groupby_compare", args, group_a, group_b, labels)
 
+    def _active_day_count(self) -> int:
+        lo, hi = self._ld(self._active_start), self._ld(self._active_end)
+        return (hi - lo).days + 1
+
     def _tod_compare(self, hours_a: tuple[int, int], hours_b: tuple[int, int]) -> ToolResult:
         args = {"hours_a": list(hours_a), "hours_b": list(hours_b)}
+        if self._active_day_count() < 2:
+            return _error(
+                "tod_compare",
+                args,
+                "need at least 2 days in the active window - widen with set_window first",
+            )
         group_a = self._daily_window_means(hours_a)
         group_b = self._daily_window_means(hours_b)
         labels = (f"{hours_a[0]:02d}-{hours_a[1]:02d}h", f"{hours_b[0]:02d}-{hours_b[1]:02d}h")
@@ -397,23 +447,25 @@ class DiscoveryToolkit:
         """Re-scope the active window to ISO dates; clamp to available data.
 
         Returns what was actually selected so the model sees the clamp. Never
-        raises: bad ISO strings come back as an ``error`` dict."""
+        raises: bad ISO strings come back as an ``error`` dict. Dates are the
+        patient's local calendar days."""
         try:
-            start = datetime.combine(date.fromisoformat(start_iso), time.min, tzinfo=UTC)
-            end = datetime.combine(date.fromisoformat(end_iso), time.max, tzinfo=UTC)
+            d0, d1 = date.fromisoformat(start_iso), date.fromisoformat(end_iso)
         except (TypeError, ValueError) as exc:
             return {"error": f"bad date: {exc}"}
-        if start > end:
-            start, end = end, start
+        if d0 > d1:
+            d0, d1 = d1, d0
+        start, _ = self._day_bounds(d0)
+        _, end = self._day_bounds(d1)
         lo, hi = self.set_active_window(start, end)
         ts_list, _ = self._active_glucose()
         note = None
         if lo > start or hi < end:
             note = "clamped to available data"
         out: dict[str, Any] = {
-            "active_start": lo.date().isoformat(),
-            "active_end": hi.date().isoformat(),
-            "n_days": (hi.date() - lo.date()).days + 1,
+            "active_start": self._ld(lo).isoformat(),
+            "active_end": self._ld(hi).isoformat(),
+            "n_days": (self._ld(hi) - self._ld(lo)).days + 1,
             "n_readings": len(ts_list),
         }
         if note:
@@ -454,7 +506,7 @@ class DiscoveryToolkit:
 
     def zoom_event(self, timestamp_iso: str, pad_hours: int = 12) -> dict[str, Any]:
         """Set the active window tight around ``timestamp`` (+/- pad_hours) and
-        return the minute-level glucose trace there — the spike-drill primitive.
+        return the minute-level glucose trace there - the spike-drill primitive.
         Never raises on bad args."""
         try:
             center = datetime.fromisoformat(timestamp_iso)
@@ -493,7 +545,7 @@ class DiscoveryToolkit:
         by_day: dict[date, list[float]] = {}
         ts_list, vals_list = self._active_glucose()
         for ts, val in zip(ts_list, vals_list, strict=True):
-            by_day.setdefault(ts.date(), []).append(val)
+            by_day.setdefault(self._ld(ts), []).append(val)
         series: list[dict[str, Any]] = []
         values: list[float] = []
         for d in sorted(by_day):
@@ -522,12 +574,136 @@ class DiscoveryToolkit:
         return 100.0 * stdev(vals) / m if m else 0.0
 
     def _day_values(self, day: date) -> list[float]:
-        """All readings for one calendar day (over the full loaded series)."""
-        start = datetime.combine(day, time.min, tzinfo=UTC)
-        end = datetime.combine(day, time.max, tzinfo=UTC)
+        """All readings for one local calendar day (over the full loaded series)."""
+        start, end = self._day_bounds(day)
         lo = bisect.bisect_left(self._glucose_ts, start)
         hi = bisect.bisect_right(self._glucose_ts, end)
         return self._glucose_vals[lo:hi]
+
+    def glucose_stats(
+        self, *, day: str = "", hours: tuple[int, int] | None = None
+    ) -> dict[str, Any]:
+        """Descriptive stats over a window - the answer to "what was my mean / SD /
+        variance / CV / TIR for <period>". Defaults to the ACTIVE window; ``day``
+        (ISO date) scopes to one local calendar day; ``hours`` = [start, end) filters
+        to a local time-of-day band. All bucketing is patient-local; never raises."""
+        if day:
+            try:
+                d = date.fromisoformat(day)
+            except ValueError:
+                return {"error": f"bad day {day!r}; expected an ISO date like 2026-06-15"}
+            start, end = self._day_bounds(d)
+            scope: dict[str, Any] = {"day": d.isoformat()}
+        else:
+            start, end = self._active_start, self._active_end
+            scope = {
+                "start": start.astimezone(self._tz).date().isoformat(),
+                "end": end.astimezone(self._tz).date().isoformat(),
+            }
+        lo = bisect.bisect_left(self._glucose_ts, start)
+        hi = bisect.bisect_right(self._glucose_ts, end)
+        ts_list = self._glucose_ts[lo:hi]
+        vals = self._glucose_vals[lo:hi]
+        if hours is not None:
+            h0, h1 = hours
+            vals = [v for ts, v in zip(ts_list, vals, strict=True) if h0 <= self._lh(ts) < h1]
+            scope["hours"] = [h0, h1]
+
+        n = len(vals)
+        if n == 0:
+            return {**scope, "n": 0, "note": "no readings in this window"}
+
+        s = summarize(vals)
+        ordered = sorted(vals)
+        lo_t, hi_t = self._target
+        out: dict[str, Any] = {
+            **scope,
+            "n": n,
+            "mean": round(s.mean, 1) if s.mean is not None else None,
+            "sd": round(s.sd, 1) if s.sd is not None else None,
+            "variance": round(s.sd**2, 1) if s.sd is not None else None,
+            "cv_pct": round(s.cv_pct, 1) if s.cv_pct is not None else None,
+            "median": round(s.median, 1) if s.median is not None else None,
+            "p10": round(_percentile(ordered, 10), 1),
+            "p25": round(_percentile(ordered, 25), 1),
+            "p75": round(_percentile(ordered, 75), 1),
+            "p90": round(_percentile(ordered, 90), 1),
+            "minimum": round(s.minimum, 1) if s.minimum is not None else None,
+            "maximum": round(s.maximum, 1) if s.maximum is not None else None,
+            "tir_pct": round(100.0 * sum(1 for v in vals if lo_t <= v <= hi_t) / n, 1),
+            "tbr_pct": round(100.0 * sum(1 for v in vals if v < lo_t) / n, 1),
+            "tar_pct": round(100.0 * sum(1 for v in vals if v > hi_t) / n, 1),
+            "tbr54_pct": round(100.0 * sum(1 for v in vals if v < 54) / n, 1),
+            "tar250_pct": round(100.0 * sum(1 for v in vals if v > 250) / n, 1),
+            "target_range": [lo_t, hi_t],
+        }
+        if s.mean is not None:
+            out["gmi_pct"] = round(_GMI_INTERCEPT + _GMI_SLOPE * s.mean, 1)
+        return out
+
+    # ── correlation ──────────────────────────────────────────────────────────
+
+    _CORRELATE_METRICS = ("mean_glucose", "tir", "tbr", "cv", "sleep_score")
+
+    def _per_day_metric(self, key: str) -> dict[date, float]:
+        """Per-day series of ``key`` over the ACTIVE window, keyed by local date."""
+        if key == "sleep_score":
+            lo, hi = self._ld(self._active_start), self._ld(self._active_end)
+            return {d: v for d, v in self._sleep_score.items() if lo <= d <= hi}
+        by_day: dict[date, list[float]] = {}
+        ts_list, vals_list = self._active_glucose()
+        for ts, val in zip(ts_list, vals_list, strict=True):
+            by_day.setdefault(self._ld(ts), []).append(val)
+        out: dict[date, float] = {}
+        for d, vals in by_day.items():
+            if len(vals) < _MIN_READINGS_PER_DAY:
+                continue
+            out[d] = self._daily_metric(key, vals)
+        return out
+
+    def correlate(self, x: str, y: str) -> dict[str, Any]:
+        """Correlate two per-day metrics across the ACTIVE window (inner-join on
+        local date). Supported keys: mean_glucose|tir|tbr|cv|sleep_score. Requires
+        n >= 4 paired days; never raises."""
+        for key in (x, y):
+            if key not in self._CORRELATE_METRICS:
+                return {"x": x, "y": y, "error": f"unknown metric {key!r}"}
+        sx, sy = self._per_day_metric(x), self._per_day_metric(y)
+        days = sorted(set(sx) & set(sy))
+        n = len(days)
+        if n < 4:
+            return {
+                "x": x,
+                "y": y,
+                "n": n,
+                "note": "fewer than 4 overlapping days - not enough to correlate",
+            }
+        xs = [sx[d] for d in days]
+        ys = [sy[d] for d in days]
+        r = pearson_r(xs, ys)
+        rho = spearman_rho(xs, ys)
+        if r is None or abs(r) >= 1.0 or n < 3:
+            p: float | None = 0.0 if r is not None and abs(r) >= 1.0 else None
+        else:
+            t = r * ((n - 2) / (1.0 - r * r)) ** 0.5
+            p = student_t_two_sided_p(t, n - 2)
+        if r is None:
+            direction = "none"
+        elif r > 0:
+            direction = "positive"
+        elif r < 0:
+            direction = "negative"
+        else:
+            direction = "none"
+        return {
+            "x": x,
+            "y": y,
+            "n": n,
+            "pearson_r": round(r, 3) if r is not None else None,
+            "spearman_rho": round(rho, 3) if rho is not None else None,
+            "p": round(p, 4) if p is not None else None,
+            "direction": direction,
+        }
 
     # ── insulin / meal instruments ───────────────────────────────────────────
 
@@ -536,6 +712,13 @@ class DiscoveryToolkit:
         second half of the run. Nights touched by temp-basal/suspend are excluded
         when insulin data exists (overnight basal effect, not algorithm overrides)."""
         args = {"hours": list(hours)}
+        if self._active_day_count() < 4:
+            return _error(
+                "basal_overnight",
+                args,
+                "need at least 4 nights in the active window - widen with set_window "
+                "(e.g. 14+ days)",
+            )
         drift: list[tuple[date, float]] = []
         for night, vals in sorted(self._overnight_segments(hours).items()):
             if self._has_insulin and night in self._basal_intervention_dates:
@@ -614,7 +797,7 @@ class DiscoveryToolkit:
             result.summary["n_boluses"] = len(rows)
         return result
 
-    # ── treatment inspection (Wave 5 — read the events, not just aggregates) ──
+    # ── treatment inspection - read the events, not just aggregates ──
 
     def get_carb_entries(self) -> dict[str, Any]:
         """Carb entries inside the ACTIVE window, listed individually so the
@@ -625,12 +808,19 @@ class DiscoveryToolkit:
             if self._active_start <= m.ts <= self._active_end and m.carbs_g is not None
         ]
         if not meals:
-            return {
+            out: dict[str, Any] = {
                 "n_entries": 0,
                 "entries": [],
-                "note": "no carb entries in the active window — widen with set_window "
-                "or treat this as a possible missing-carb-entry pattern",
             }
+            gap = self._treatment_gap_note()
+            if gap:
+                out["note"] = gap
+            else:
+                out["note"] = (
+                    "no carb entries in the active window - widen with set_window "
+                    "or treat this as a possible missing-carb-entry pattern"
+                )
+            return out
         entries = [
             {
                 "ts": m.ts.isoformat(),
@@ -641,7 +831,7 @@ class DiscoveryToolkit:
             }
             for m in meals[:_MAX_LISTED_EVENTS]
         ]
-        out: dict[str, Any] = {
+        out = {
             "n_entries": len(meals),
             "total_carbs_g": round(sum(float(m.carbs_g or 0.0) for m in meals), 1),
             "entries": entries,
@@ -652,19 +842,26 @@ class DiscoveryToolkit:
 
     def get_boluses(self) -> dict[str, Any]:
         """Boluses inside the ACTIVE window with their timing vs the nearest
-        carb entry — ``minutes_after_carb_entry`` is the late-bolus signal."""
+        carb entry - ``minutes_after_carb_entry`` is the late-bolus signal."""
         boluses = [
             i
             for i in self._insulin
             if i.kind is InsulinKind.BOLUS and self._active_start <= i.ts <= self._active_end
         ]
         if not boluses:
-            return {
+            out: dict[str, Any] = {
                 "n_boluses": 0,
                 "boluses": [],
-                "note": "no boluses in the active window — widen with set_window; "
-                "if a meal is present this may be a missed-bolus pattern",
             }
+            gap = self._treatment_gap_note()
+            if gap:
+                out["note"] = gap
+            else:
+                out["note"] = (
+                    "no boluses in the active window - widen with set_window; "
+                    "if a meal is present this may be a missed-bolus pattern"
+                )
+            return out
         rows: list[dict[str, Any]] = []
         for b in boluses[:_MAX_LISTED_EVENTS]:
             row: dict[str, Any] = {"ts": b.ts.isoformat()}
@@ -676,7 +873,7 @@ class DiscoveryToolkit:
             if delay is not None:
                 row["minutes_after_carb_entry"] = delay
             rows.append(row)
-        out: dict[str, Any] = {
+        out = {
             "n_boluses": len(boluses),
             "total_units": round(sum(float(b.units) for b in boluses if b.units is not None), 2),
             "boluses": rows,
@@ -717,16 +914,77 @@ class DiscoveryToolkit:
             "events": rows,
         }
         if not events:
-            out["note"] = (
-                "no basal records in the active window — basal context unavailable here"
+            gap = self._treatment_gap_note()
+            out["note"] = gap or (
+                "no basal records in the active window - basal context unavailable here"
             )
         if len(events) > _MAX_LISTED_EVENTS:
             out["note"] = f"showing first {_MAX_LISTED_EVENTS} of {len(events)}"
         return out
 
+    def get_insulin_profile(self) -> dict[str, Any]:
+        """Pump-reported basal/ISF/carb-ratio/target segments (Tandem sync).
+
+        Tier B - analysis context only, never dosing."""
+        if self._insulin_profile is None:
+            return {
+                "error": "no insulin profile synced",
+                "note": (
+                    "Connect Tandem in Settings and Sync now - profile is captured "
+                    "from pump settings on each sync"
+                ),
+            }
+        active = next(
+            (p for p in self._insulin_profile.get("profiles") or [] if p.get("active")),
+            None,
+        )
+        out: dict[str, Any] = {
+            **self._insulin_profile,
+            "active_segments": (active or {}).get("segments") or [],
+            "tier": "B",
+            "method": "pump-reported settings from Tandem Source (sync snapshot)",
+        }
+        return out
+
+    def get_active_profile(self, timestamp_iso: str) -> dict[str, Any]:
+        """The therapy profile VERSION in effect at ``timestamp`` - so an event
+        in March reads the March profile, not today's. Falls back to the current
+        snapshot when no version history exists yet. Tier B, never dosing."""
+        at = _parse_ts(timestamp_iso)
+        if at is None:
+            return {"error": f"bad timestamp: {timestamp_iso!r}"}
+        covering = [p for p in self._profile_versions if p.active_from <= at]
+        if not covering:
+            if self._insulin_profile is not None:
+                return {
+                    **self._insulin_profile,
+                    "as_of": at.isoformat(),
+                    "versioned": False,
+                    "tier": "B",
+                    "note": (
+                        "no profile version recorded at this time - showing the "
+                        "current snapshot; versions accrue from future syncs"
+                    ),
+                }
+            return {
+                "error": "no therapy profile available",
+                "note": "connect Tandem in Settings and Sync to capture the profile",
+            }
+        version = max(covering, key=lambda p: p.active_from)
+        return {
+            **version.content,
+            "version_name": version.name,
+            "active_from": version.active_from.isoformat(),
+            "active_to": version.active_to.isoformat() if version.active_to else None,
+            "as_of": at.isoformat(),
+            "versioned": True,
+            "tier": "B",
+            "method": "therapy-profile version in effect at the timestamp",
+        }
+
     def get_iob(self, timestamp_iso: str) -> dict[str, Any]:
         """Insulin-on-board at ``timestamp`` from logged boluses (oref0
-        exponential curve, rapid-acting defaults). Tier B — computed for
+        exponential curve, rapid-acting defaults). Tier B - computed for
         analysis context, never dosing. Never raises on bad args."""
         at = _parse_ts(timestamp_iso)
         if at is None:
@@ -755,7 +1013,7 @@ class DiscoveryToolkit:
 
     def get_cob(self, timestamp_iso: str) -> dict[str, Any]:
         """Carbs-on-board at ``timestamp`` from announced carb entries (oref0
-        deviation-based decay, analysis-profile defaults). Tier B — computed
+        deviation-based decay, analysis-profile defaults). Tier B - computed
         for analysis context, never dosing. Never raises on bad args."""
         at = _parse_ts(timestamp_iso)
         if at is None:
@@ -772,7 +1030,7 @@ class DiscoveryToolkit:
                 "cob_g": 0.0,
                 "n_carb_entries": 0,
                 "tier": "B",
-                "note": "no announced carbs in the prior 6h — unannounced carbs "
+                "note": "no announced carbs in the prior 6h - unannounced carbs "
                 "would not appear here",
             }
         glucose = list(
@@ -806,10 +1064,97 @@ class DiscoveryToolkit:
             "analysis-profile defaults)",
         }
 
+    def _manual_row(self, e: ManualEvent) -> dict[str, Any]:
+        """One manual event as a tool-facing row. ``provenance`` is always
+        user-reported: manual events are submitted by the user, never inferred."""
+        row: dict[str, Any] = {
+            "ts": e.event_ts.isoformat(),
+            "event_type": e.event_type,
+            "provenance": "user-reported",
+        }
+        if e.end_ts is not None:
+            row["end_ts"] = e.end_ts.isoformat()
+        if e.title:
+            row["title"] = e.title
+        if e.description:
+            row["description"] = e.description
+        if e.tags:
+            row["tags"] = list(e.tags)
+        if e.intensity:
+            row["intensity"] = e.intensity
+        return row
+
+    def _manual_in_active_window(self) -> list[ManualEvent]:
+        lo = bisect.bisect_left(self._manual_ts, self._active_start)
+        hi = bisect.bisect_right(self._manual_ts, self._active_end)
+        return self._manual[lo:hi]
+
+    _MANUAL_EMPTY_NOTE = (
+        "no user-reported context in this window - manual logs are added by the "
+        "user, never inferred"
+    )
+
+    def get_manual_events(self) -> dict[str, Any]:
+        """User-reported context in the ACTIVE window ({ts, event_type, title,
+        description, tags, intensity}). Manual logs are user-submitted only;
+        an empty result means none were logged, not that nothing happened."""
+        events = self._manual_in_active_window()
+        rows = [self._manual_row(e) for e in events[:_MAX_LISTED_EVENTS]]
+        out: dict[str, Any] = {"n_events": len(events), "events": rows}
+        if not events:
+            out["note"] = self._MANUAL_EMPTY_NOTE
+        elif len(events) > _MAX_LISTED_EVENTS:
+            out["note"] = f"showing first {_MAX_LISTED_EVENTS} of {len(events)}"
+        return out
+
+    def search_manual_events(self, query: str) -> dict[str, Any]:
+        """User-reported context in the ACTIVE window whose type/title/description/
+        tags contain ``query`` (case-insensitive)."""
+        q = query.strip().lower()
+        events = self._manual_in_active_window()
+        if q:
+            events = [e for e in events if q in self._manual_haystack(e)]
+        rows = [self._manual_row(e) for e in events[:_MAX_LISTED_EVENTS]]
+        out: dict[str, Any] = {"query": query, "n_events": len(events), "events": rows}
+        if not events:
+            out["note"] = self._MANUAL_EMPTY_NOTE
+        elif len(events) > _MAX_LISTED_EVENTS:
+            out["note"] = f"showing first {_MAX_LISTED_EVENTS} of {len(events)}"
+        return out
+
+    @staticmethod
+    def _manual_haystack(e: ManualEvent) -> str:
+        parts = [e.event_type, e.title or "", e.description or "", " ".join(e.tags)]
+        return " ".join(parts).lower()
+
+    def get_context_around_event(
+        self, timestamp_iso: str, pad_hours: float = 4.0
+    ) -> dict[str, Any]:
+        """User-reported context within ``pad_hours`` of ``timestamp`` (whole
+        record, like get_iob/find_similar_events). Pads around a specific glucose
+        event so the agent can ask 'what did the user log near this spike?'."""
+        at = _parse_ts(timestamp_iso)
+        if at is None:
+            return {"error": f"bad timestamp: {timestamp_iso!r}"}
+        pad = timedelta(hours=max(0.0, min(float(pad_hours), 48.0)))
+        events = [e for e in self._manual if abs(e.event_ts - at) <= pad]
+        rows = [self._manual_row(e) for e in events[:_MAX_LISTED_EVENTS]]
+        out: dict[str, Any] = {
+            "timestamp": at.isoformat(),
+            "pad_hours": pad.total_seconds() / 3600.0,
+            "n_events": len(events),
+            "events": rows,
+        }
+        if not events:
+            out["note"] = self._MANUAL_EMPTY_NOTE
+        elif len(events) > _MAX_LISTED_EVENTS:
+            out["note"] = f"showing first {_MAX_LISTED_EVENTS} of {len(events)}"
+        return out
+
     def find_spikes(
         self, threshold: float = _SPIKE_THRESHOLD, top_n: int = 10
     ) -> dict[str, Any]:
-        """Excursion peaks above ``threshold`` inside the ACTIVE window —
+        """Excursion peaks above ``threshold`` inside the ACTIVE window -
         contiguous above-threshold runs, one peak each, largest first."""
         threshold = max(140.0, min(float(threshold), 400.0))
         top_n = max(1, min(int(top_n), 25))
@@ -858,29 +1203,32 @@ class DiscoveryToolkit:
         self, timestamp_iso: str, threshold: float = _SPIKE_THRESHOLD
     ) -> dict[str, Any]:
         """Recurrence check over the WHOLE record (ignores the active window,
-        like list_segments): events at the same time of day as ``timestamp`` —
-        carb entries when meals are logged, otherwise daily clock anchors —
+        like list_segments): events at the same time of day as ``timestamp`` -
+        carb entries when meals are logged, otherwise daily clock anchors -
         each with its post-event peak and bolus timing. The '14 of 18 similar
         dinners' instrument. Never raises on bad args."""
         anchor = _parse_ts(timestamp_iso)
         if anchor is None:
             return {"error": f"bad timestamp: {timestamp_iso!r}"}
         band_min = 90
-        anchor_min = anchor.hour * 60 + anchor.minute
+        anchor_local = anchor.astimezone(self._tz)
+        anchor_min = anchor_local.hour * 60 + anchor_local.minute
         if self._meals:
             anchors = [
                 m.ts
                 for m in self._meals
                 if m.carbs_g is not None
-                and abs(m.ts.hour * 60 + m.ts.minute - anchor_min) <= band_min
+                and abs(self._lh(m.ts) * 60 + m.ts.astimezone(self._tz).minute - anchor_min)
+                <= band_min
             ]
-            basis = "carb entries at the same time of day"
+            basis = "carb entries at the same local time of day"
         else:
-            days = sorted({ts.date() for ts in self._glucose_ts})
+            days = sorted({self._ld(ts) for ts in self._glucose_ts})
+            clock = time(anchor_local.hour, anchor_local.minute)
             anchors = [
-                datetime.combine(d, time(anchor.hour, anchor.minute), tzinfo=UTC) for d in days
+                datetime.combine(d, clock, tzinfo=self._tz).astimezone(UTC) for d in days
             ]
-            basis = "same clock time each day (no carb entries logged)"
+            basis = "same local clock time each day (no carb entries logged)"
         events: list[dict[str, Any]] = []
         delays_spiking: list[float] = []
         delays_other: list[float] = []
@@ -907,7 +1255,7 @@ class DiscoveryToolkit:
             return {
                 "n_similar": 0,
                 "events": [],
-                "note": "no comparable events found — not enough history at this "
+                "note": "no comparable events found - not enough history at this "
                 "time of day",
             }
         n_spiking = sum(1 for e in events if e["spiked"])
@@ -966,10 +1314,10 @@ class DiscoveryToolkit:
     # ── frame builders ───────────────────────────────────────────────────────
 
     def _build_daily(self, glucose: Sequence[Any]) -> dict[date, tuple[float, float]]:
-        """date → (mean mg/dL, TIR %) for days with enough readings."""
+        """local date → (mean mg/dL, TIR %) for days with enough readings."""
         by_day: dict[date, list[float]] = {}
         for g in glucose:
-            by_day.setdefault(g.ts.date(), []).append(float(g.mg_dl))
+            by_day.setdefault(self._ld(g.ts), []).append(float(g.mg_dl))
         lo, hi = self._target
         out: dict[date, tuple[float, float]] = {}
         for day, vals in by_day.items():
@@ -983,8 +1331,9 @@ class DiscoveryToolkit:
         ts_list, vals_list = self._active_glucose()
         by_day: dict[date, list[float]] = {}
         for ts, val in zip(ts_list, vals_list, strict=True):
-            if hours[0] <= ts.hour < hours[1]:
-                by_day.setdefault(ts.date(), []).append(val)
+            local = ts.astimezone(self._tz)
+            if hours[0] <= local.hour < hours[1]:
+                by_day.setdefault(local.date(), []).append(val)
         return tuple(
             mean(vals) for _, vals in sorted(by_day.items()) if len(vals) >= 3
         )
@@ -1002,8 +1351,9 @@ class DiscoveryToolkit:
         out: dict[date, list[float]] = {}
         ts_list, vals_list = self._active_glucose()
         for ts, val in zip(ts_list, vals_list, strict=True):
-            if hours[0] <= ts.hour < hours[1]:
-                out.setdefault(ts.date(), []).append(val)
+            local = ts.astimezone(self._tz)
+            if hours[0] <= local.hour < hours[1]:
+                out.setdefault(local.date(), []).append(val)
         return out
 
 
@@ -1022,6 +1372,10 @@ def _two_group(
         return _error(tool, args, msg)
     mean_a, mean_b = mean(group_a), mean(group_b)
     d = cohen_d(group_a, group_b)
+    welch = welch_t_test(group_a, group_b)
+    mw = mann_whitney_u(group_a, group_b)
+    delta_c = cliffs_delta(group_a, group_b)
+    p_welch = round(welch.p_two_sided, 4) if welch is not None else None
     summary: dict[str, Any] = {
         "label_a": labels[0],
         "label_b": labels[1],
@@ -1032,6 +1386,13 @@ def _two_group(
         "delta": round(mean_a - mean_b, 1),
         "cohen_d": round(d, 3) if d is not None else None,
         "interpretation": _interpret(d),
+        "welch_t": round(welch.t, 3) if welch is not None else None,
+        "welch_df": round(welch.df, 1) if welch is not None else None,
+        "p_welch": p_welch,
+        "mann_whitney_p": round(mw.p_two_sided, 4) if mw is not None else None,
+        "rank_biserial": round(mw.rank_biserial, 3) if mw is not None else None,
+        "cliffs_delta": round(delta_c, 3) if delta_c is not None else None,
+        "significant": p_welch is not None and p_welch < 0.05,
     }
     return ToolResult(
         ok=True, tool=tool, args=args, summary=summary, group_a=group_a, group_b=group_b
@@ -1064,6 +1425,22 @@ def _numbers(result: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
     return {k: result[k] for k in keys if isinstance(result.get(k), (int, float))}
 
 
+def _item_numbers(rows: list[dict[str, Any]], prefix: str) -> dict[str, Any]:
+    """Per-row numeric fields, keyed ``{prefix}_{i}``, for list-returning tools."""
+    return {
+        f"{prefix}_{i}": {k: v for k, v in row.items() if isinstance(v, (int, float))}
+        for i, row in enumerate(rows)
+    }
+
+
+def _resolve_tz(name: str) -> ZoneInfo:
+    """Resolve an IANA zone name, falling back to UTC on anything empty/unknown."""
+    try:
+        return ZoneInfo(name or "UTC")
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return ZoneInfo("UTC")
+
+
 def _parse_ts(timestamp_iso: str) -> datetime | None:
     """ISO datetime → aware UTC datetime, or None on garbage (never raises)."""
     try:
@@ -1074,7 +1451,7 @@ def _parse_ts(timestamp_iso: str) -> datetime | None:
 
 
 def _week_key(d: date) -> str:
-    """ISO-year + ISO-week label, e.g. ``2026-W11`` — sorts chronologically."""
+    """ISO-year + ISO-week label, e.g. ``2026-W11`` - sorts chronologically."""
     iso = d.isocalendar()
     return f"{iso.year:04d}-W{iso.week:02d}"
 
@@ -1088,13 +1465,15 @@ def _error(tool: str, args: dict[str, Any], message: str) -> ToolResult:
 # ── clinical-evidence grounding (reasoning-loop only) ────────────────────────
 
 
-def evidence_backend() -> Any:
+def evidence_backend(*, interactive: bool = False) -> Any:
     """Build the configured evidence backend (lazy; PubMed default).
 
     Imports inside the function so the deterministic toolkit never pulls in
     ``httpx`` / the evidence package unless a reasoning loop actually grounds a
     pattern. Falls back to the zero-auth PubMed backend if the config names an
     unknown backend, so a bad ``[evidence].backend`` value never breaks search.
+    ``interactive`` tightens the timeout; a non-zero ``cache_ttl_minutes`` wraps
+    the backend in a TTL cache.
     """
     from dexta_intelligence.config import load_config  # noqa: PLC0415
     from dexta_intelligence.evidence.pubmed import PubMedBackend  # noqa: PLC0415
@@ -1103,8 +1482,14 @@ def evidence_backend() -> Any:
     if cfg.backend == "openevidence":
         from dexta_intelligence.evidence.openevidence import OpenEvidenceBackend  # noqa: PLC0415
 
-        return OpenEvidenceBackend()
-    return PubMedBackend(email=cfg.email)
+        backend: Any = OpenEvidenceBackend()
+    else:
+        backend = PubMedBackend(email=cfg.email, interactive=interactive)
+    if cfg.cache_ttl_minutes > 0:
+        from dexta_intelligence.evidence.cache import CachingEvidenceBackend  # noqa: PLC0415
+
+        return CachingEvidenceBackend(backend, ttl_seconds=cfg.cache_ttl_minutes * 60)
+    return backend
 
 
 def _search_evidence(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
@@ -1141,456 +1526,59 @@ _HOURS_PAIR = {"type": "array", "items": {"type": "integer"}, "minItems": 2, "ma
 
 
 def tool_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
-    """The read-only instruments a reasoning loop may call."""
+    """The read-only instruments a reasoning loop may call.
 
-    def run(tool: str) -> Any:
-        def call(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-            result = toolkit.run(tool, args)
-            return result.summary, result.evidence()
+    Thin delegator: the belt is assembled, domain by domain, in the
+    :mod:`dexta_intelligence.agents.tools` package. Imported lazily so this
+    module never depends on the belt wiring at import time (the tools package
+    imports helpers back from here).
+    """
+    from dexta_intelligence.agents.tools import build_belt  # noqa: PLC0415
 
-        return call
-
-    def recall(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        return _recall(ctx, str(args.get("query", "")))
-
-    def set_window(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        result = toolkit.set_window(str(args.get("start", "")), str(args.get("end", "")))
-        return result, _numbers(result, ("n_days", "n_readings"))
-
-    def list_segments(_args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        result = toolkit.list_segments()
-        numbers: dict[str, Any] = {}
-        for seg in result.get("segments", []):
-            numbers[seg["period"]] = {
-                "n_days": seg["n_days"],
-                "mean_glucose": seg["mean_glucose"],
-                "tir_pct": seg["tir_pct"],
-                "n_lows": seg["n_lows"],
-            }
-        return result, numbers
-
-    def zoom_event(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        result = toolkit.zoom_event(
-            str(args.get("timestamp", "")), int(args.get("pad_hours", 12))
-        )
-        return result, _numbers(result, ("pre_mean", "post_mean", "peak", "nadir"))
-
-    def daily_series(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        result = toolkit.daily_series(str(args.get("metric", "")))
-        numbers: dict[str, Any] = {}
-        for row in result.get("series", []):
-            numbers[row["date"]] = row["value"]
-        if result.get("mean_value") is not None:
-            numbers["mean_value"] = result["mean_value"]
-        return result, numbers
-
-    def coverage(_args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        cov = ctx.store.coverage()
-        numbers = {
-            "span_days": cov.span_days,
-            "glucose_coverage_pct": cov.glucose_coverage_pct,
-            "n_meals": cov.n_meals,
-            "n_insulin": cov.n_insulin,
-            "n_sleep": cov.n_sleep,
-            "n_activity": cov.n_activity,
-        }
-        out: dict[str, Any] = {"summary": toolkit.data_summary(), **numbers}
-        missing = toolkit.capabilities().missing_notes()
-        if missing:
-            out["unavailable"] = missing
-        return out, numbers
-
-    specs = [
-        ToolSpec(
-            name="recall",
-            description=(
-                "Search what dexta already believes — past findings and open questions "
-                "from prior runs. Call FIRST for questions about known patterns."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "topic, e.g. 'overnight'"}
-                },
-                "required": ["query"],
-            },
-            fn=recall,
-        ),
-        ToolSpec(
-            name="coverage",
-            description="How much data exists (days, coverage %, streams).",
-            parameters={"type": "object", "properties": {}},
-            fn=coverage,
-        ),
-        ToolSpec(
-            name="list_segments",
-            description=(
-                "Coarse structure of the whole record: one row per month "
-                "(or per week if span < 60d) with n_days, mean_glucose, tir_pct, "
-                "n_lows. Call FIRST to orient before narrowing with set_window."
-            ),
-            parameters={"type": "object", "properties": {}},
-            fn=list_segments,
-        ),
-        ToolSpec(
-            name="set_window",
-            description=(
-                "Narrow the ACTIVE window every later tool reads from to "
-                "[start, end] ISO dates. Clamps to available data; returns "
-                "active_start, active_end, n_days, n_readings. Call again with "
-                "the full span to widen back out."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "start": {"type": "string", "description": "ISO date, e.g. 2026-03-01"},
-                    "end": {"type": "string", "description": "ISO date, e.g. 2026-03-31"},
-                },
-                "required": ["start", "end"],
-            },
-            fn=set_window,
-        ),
-        ToolSpec(
-            name="zoom_event",
-            description=(
-                "Drill a spike: set the active window tight around an ISO "
-                "timestamp (+/- pad_hours, default 12) and return the minute-level "
-                "trace with pre_mean, post_mean, peak, nadir."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "timestamp": {"type": "string", "description": "ISO datetime of the event"},
-                    "pad_hours": {"type": "integer", "minimum": 1, "maximum": 72},
-                },
-                "required": ["timestamp"],
-            },
-            fn=zoom_event,
-        ),
-        ToolSpec(
-            name="daily_series",
-            description=(
-                "Per-day time series over the ACTIVE window as [{date, value}] "
-                "so you can spot trends/change-points. "
-                "metric: tir|mean_glucose|tbr|cv."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "metric": {
-                        "type": "string",
-                        "enum": ["tir", "mean_glucose", "tbr", "cv"],
-                    },
-                },
-                "required": ["metric"],
-            },
-            fn=daily_series,
-        ),
-        ToolSpec(
-            name="groupby_compare",
-            description=(
-                "Compare a daily metric between two groups of days. "
-                "group_by: weekend|sleep_bucket|workout_day. target: mean_glucose|tir_pct."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "group_by": {
-                        "type": "string",
-                        "enum": ["weekend", "sleep_bucket", "workout_day"],
-                    },
-                    "target": {"type": "string", "enum": ["mean_glucose", "tir_pct"]},
-                },
-                "required": ["group_by", "target"],
-            },
-            fn=run("groupby_compare"),
-        ),
-        ToolSpec(
-            name="tod_compare",
-            description=(
-                "Compare mean glucose between two time-of-day windows. "
-                "hours_a/hours_b are [start,end) hours 0-24."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {"hours_a": _HOURS_PAIR, "hours_b": _HOURS_PAIR},
-                "required": ["hours_a", "hours_b"],
-            },
-            fn=run("tod_compare"),
-        ),
-        ToolSpec(
-            name="event_proximity",
-            description=(
-                "Average glucose after an event vs the hour before it. "
-                "event_type: meal|workout|bolus. window_min: 30-240."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "event_type": {"type": "string", "enum": ["meal", "workout", "bolus"]},
-                    "window_min": {"type": "integer", "minimum": 30, "maximum": 240},
-                },
-                "required": ["event_type"],
-            },
-            fn=run("event_proximity"),
-        ),
-        ToolSpec(
-            name="basal_overnight",
-            description=(
-                "Per-night overnight glucose drift, first-half vs second-half nights. "
-                "hours is the [start,end) overnight window (default [0,6])."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {"hours": _HOURS_PAIR},
-            },
-            fn=run("basal_overnight"),
-        ),
-        ToolSpec(
-            name="meal_response",
-            description=(
-                "Per-meal excursion (peak minus pre-meal baseline) for bigger-carb vs "
-                "smaller-carb meals, split at median carbs. window_min: 30-240."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "window_min": {"type": "integer", "minimum": 30, "maximum": 240},
-                },
-            },
-            fn=run("meal_response"),
-        ),
-        ToolSpec(
-            name="correction_outcome",
-            description=(
-                "Per-bolus glucose delta (window-end minus baseline), newer vs older "
-                "boluses, plus rebound_low_rate (% with a <70 reading). window_min: 30-240."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "window_min": {"type": "integer", "minimum": 30, "maximum": 240},
-                },
-            },
-            fn=run("correction_outcome"),
-        ),
-        ToolSpec(
-            name="search_evidence",
-            description=(
-                "Search clinical literature (PubMed). Use to ground a confirmed personal "
-                "pattern in published evidence or note contradiction. Cite only returned PMIDs."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "clinical search terms"},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 8},
-                },
-                "required": ["query"],
-            },
-            fn=_search_evidence,
-        ),
-    ]
-    specs.extend(_treatment_specs(toolkit))
-    caps = toolkit.capabilities()
-    specs = [spec for spec in specs if caps.allows(_TOOL_NEEDS.get(spec.name))]
-    specs.extend(time_tool_specs())
-    return specs
-
-
-def _treatment_specs(toolkit: DiscoveryToolkit) -> list[ToolSpec]:
-    """Treatment-inspection ToolSpecs (Wave 5). Capability filtering happens in
-    :func:`tool_specs`; these are built unconditionally."""
-
-    def _item_numbers(rows: list[dict[str, Any]], prefix: str) -> dict[str, Any]:
-        return {
-            f"{prefix}_{i}": {k: v for k, v in row.items() if isinstance(v, (int, float))}
-            for i, row in enumerate(rows)
-        }
-
-    def get_carb_entries(_args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        result = toolkit.get_carb_entries()
-        numbers = _numbers(result, ("n_entries", "total_carbs_g"))
-        numbers.update(_item_numbers(result.get("entries", []), "entry"))
-        return result, numbers
-
-    def get_boluses(_args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        result = toolkit.get_boluses()
-        numbers = _numbers(result, ("n_boluses", "total_units"))
-        numbers.update(_item_numbers(result.get("boluses", []), "bolus"))
-        return result, numbers
-
-    def get_basal_timeline(_args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        result = toolkit.get_basal_timeline()
-        numbers = _numbers(result, ("n_basal", "n_temp_basal", "n_suspend"))
-        numbers.update(_item_numbers(result.get("events", []), "event"))
-        return result, numbers
-
-    def get_iob(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        result = toolkit.get_iob(str(args.get("timestamp", "")))
-        return result, _numbers(result, ("iob_units", "n_recent_boluses"))
-
-    def get_cob(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        result = toolkit.get_cob(str(args.get("timestamp", "")))
-        return result, _numbers(result, ("cob_g", "absorbed_g", "n_carb_entries"))
-
-    def find_spikes(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        result = toolkit.find_spikes(
-            float(args.get("threshold", _SPIKE_THRESHOLD)), int(args.get("top_n", 10))
-        )
-        numbers = _numbers(result, ("threshold", "n_spikes"))
-        numbers.update(_item_numbers(result.get("spikes", []), "spike"))
-        return result, numbers
-
-    def find_similar_events(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        result = toolkit.find_similar_events(
-            str(args.get("timestamp", "")), float(args.get("threshold", _SPIKE_THRESHOLD))
-        )
-        numbers = _numbers(
-            result,
-            (
-                "n_similar",
-                "n_spiking",
-                "mean_peak_spiking",
-                "mean_bolus_delay_spiking_min",
-                "mean_bolus_delay_other_min",
-            ),
-        )
-        numbers.update(_item_numbers(result.get("events", []), "similar"))
-        return result, numbers
-
-    return [
-        ToolSpec(
-            name="get_carb_entries",
-            description=(
-                "List carb entries inside the ACTIVE window individually "
-                "({ts, carbs_g, ...}) with n_entries and total_carbs_g. Call when "
-                "explaining a spike/meal — an empty result around a spike is itself "
-                "a signal (possible missing carb entry)."
-            ),
-            parameters={"type": "object", "properties": {}},
-            fn=get_carb_entries,
-        ),
-        ToolSpec(
-            name="get_boluses",
-            description=(
-                "List boluses inside the ACTIVE window individually ({ts, units, "
-                "minutes_after_carb_entry}). minutes_after_carb_entry is the timing "
-                "vs the nearest carb entry — the late-bolus signal. Call when "
-                "explaining a spike/meal/correction."
-            ),
-            parameters={"type": "object", "properties": {}},
-            fn=get_boluses,
-        ),
-        ToolSpec(
-            name="get_basal_timeline",
-            description=(
-                "Basal / temp-basal / suspend events inside the ACTIVE window plus "
-                "basal_stable (true when no temp-basal or suspend interruptions). "
-                "Call to rule basal in or out as a spike contributor."
-            ),
-            parameters={"type": "object", "properties": {}},
-            fn=get_basal_timeline,
-        ),
-        ToolSpec(
-            name="get_iob",
-            description=(
-                "Insulin-on-board at an ISO datetime, computed from logged boluses "
-                "(oref0 curve, tier B — analysis context only, never dosing)."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "timestamp": {"type": "string", "description": "ISO datetime"},
-                },
-                "required": ["timestamp"],
-            },
-            fn=get_iob,
-        ),
-        ToolSpec(
-            name="get_cob",
-            description=(
-                "Carbs-on-board at an ISO datetime from announced carb entries "
-                "(oref0 decay, tier B — analysis context only). Unannounced carbs "
-                "do not appear here."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "timestamp": {"type": "string", "description": "ISO datetime"},
-                },
-                "required": ["timestamp"],
-            },
-            fn=get_cob,
-        ),
-        ToolSpec(
-            name="find_spikes",
-            description=(
-                "Excursion peaks above threshold inside the ACTIVE window "
-                "({ts, peak_mg_dl, duration_min}, largest first). Use to locate the "
-                "spike to zoom_event when the user names a day but not a time."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "threshold": {"type": "number", "minimum": 140, "maximum": 400},
-                    "top_n": {"type": "integer", "minimum": 1, "maximum": 25},
-                },
-            },
-            fn=find_spikes,
-        ),
-        ToolSpec(
-            name="find_similar_events",
-            description=(
-                "Recurrence check over the WHOLE record: events at the same time of "
-                "day as the given timestamp (carb entries when logged), each with its "
-                "post-event peak, spiked flag, and bolus_delay_min. Returns n_similar, "
-                "n_spiking and mean bolus delays for spiking vs non-spiking events — "
-                "the 'N of M similar dinners' instrument."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "timestamp": {"type": "string", "description": "ISO datetime of the event"},
-                    "threshold": {"type": "number", "minimum": 140, "maximum": 400},
-                },
-                "required": ["timestamp"],
-            },
-            fn=find_similar_events,
-        ),
-    ]
+    return build_belt(ctx, toolkit)
 
 
 def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
+    """The structured shared-context channel: what other agents already believe.
+
+    Returns each relevant finding's headline AND the reasoning left behind -
+    ``status``, ``confidence`` and the skeptic's ``skeptic_notes`` (why it was
+    doubted / what confound was flagged) when present - plus the open
+    hypotheses (what is suspected) and synthesis ``connections`` (what is
+    contested across agents). The caller reads these to pick better tools.
+    Findings, connections and open questions are each capped at
+    :data:`_MAX_RECALL_ITEMS` with a note.
+    """
     from dexta_intelligence.memory import embeddings  # noqa: PLC0415
     from dexta_intelligence.memory.synthesis import load_latest  # noqa: PLC0415
 
     candidates = [
-        f for f in ctx.store.get_findings(limit=50) if f.agent != "synthesis"
+        f
+        for f in ctx.store.get_findings(limit=50)
+        if f.agent != "synthesis"
+        and f.kind != "investigation"
+        and f.status != FindingStatus.STALE
     ]
     q = query.strip()
     if q and candidates:
-        scored = embeddings.rank(
-            q,
-            [(f"{f.headline} {f.kind} {f.scope}", f) for f in candidates],
-            top_k=8,
-        )
-        findings = [f for score, f in scored if score > 0.05] or candidates[:5]
+        scored = embeddings.rank_findings(q, candidates, top_k=_MAX_RECALL_ITEMS)
+        findings = [f for _score, f in scored] or candidates[:5]
     else:
         findings = candidates[:5]
 
     numbers: dict[str, Any] = {}
     items: list[dict[str, Any]] = []
-    for f in findings[:8]:
-        items.append(
-            {
-                "headline": f.headline,
-                "effect_size": f.stats.effect_size,
-                "n": f.stats.n,
-                "confidence": f.confidence,
-                "status": f.status.value,
-            }
-        )
+    for f in findings[:_MAX_RECALL_ITEMS]:
+        item: dict[str, Any] = {
+            "headline": f.headline,
+            "effect_size": f.stats.effect_size,
+            "n": f.stats.n,
+            "confidence": f.confidence,
+            "status": f.status.value,
+        }
+        if f.skeptic_notes:
+            item["skeptic_notes"] = f.skeptic_notes
+        items.append(item)
         numbers[f"finding_{len(items)}"] = {
             "effect_size": f.stats.effect_size,
             "n": f.stats.n,
@@ -1604,8 +1592,12 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
 
     payload: dict[str, Any] = {
         "findings": items,
-        "open_questions": [h.statement for h in open_q[:5]],
+        "open_questions": [h.statement for h in open_q[:_MAX_RECALL_ITEMS]],
     }
+    if len(open_q) > _MAX_RECALL_ITEMS:
+        payload["open_questions_note"] = (
+            f"showing first {_MAX_RECALL_ITEMS} of {len(open_q)}"
+        )
 
     synthesis = load_latest(ctx.store)
     if synthesis is not None and synthesis.connections:
@@ -1613,11 +1605,16 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
             ranked = embeddings.rank(
                 q,
                 [(line, line) for line in synthesis.connections],
-                top_k=len(synthesis.connections),
+                top_k=_MAX_RECALL_ITEMS,
+                synonyms=True,
             )
             connections = [line for _score, line in ranked]
         else:
-            connections = list(synthesis.connections)
+            connections = list(synthesis.connections[:_MAX_RECALL_ITEMS])
         payload["connections"] = connections
+        if len(synthesis.connections) > _MAX_RECALL_ITEMS:
+            payload["connections_note"] = (
+                f"showing first {_MAX_RECALL_ITEMS} of {len(synthesis.connections)}"
+            )
 
     return (payload, numbers)

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}dexta · reconciliation{% endblock %}
+{% block content %}
+{% from "_components.html" import chip %}
+{% set cards = cards|default([]) %}
+
+<div class="page-head">
+  <h1>Prediction reconciliation</h1>
+  <p class="page-sub">What did the looping algorithm expect, and where did reality diverge? dexta compares logged forecast curves against realized CGM and surfaces recurring forecast misses. Retrospective analysis only. Not a dosing recommendation.</p>
+</div>
+
+{% if cards %}
+<div class="cards">
+  {% for c in cards %}
+  <article class="card finding-card">
+    <div class="card-head">
+      <h2>{{ c.contributor }}</h2>
+      <span class="badge {{ 'neutral' if c.limited else 'ok' }}">{{ c.tier_label }}</span>
+    </div>
+    <div class="chips">
+      {{ chip("max error", c.max_error) }}
+      {{ chip("diverged", c.divergence) }}
+      {{ chip("curve", c.curve) }}
+      {{ chip("episodes", c.n_episodes) }}
+      {% if c.recurrence and c.recurrence > 1 %}{{ chip("recurrence", c.recurrence) }}{% endif %}
+      {% if c.p is not none %}{{ chip("p", "%.3f"|format(c.p)) }}{% endif %}
+    </div>
+
+    <p class="stats">{{ c.summary }}</p>
+
+    {% if c.expected_spark and c.actual_spark %}
+    <div class="recon-traces">
+      <div class="recon-trace">
+        <span class="gm-label">expected</span>
+        <div class="arc">{{ c.expected_spark|safe }}</div>
+      </div>
+      <div class="recon-trace">
+        <span class="gm-label">actual</span>
+        <div class="arc">{{ c.actual_spark|safe }}</div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if c.limited %}
+    <p class="muted small">Computed expectations (no logged forecast curves found) - weaker evidence.</p>
+    {% endif %}
+    <p class="muted small">Pattern analysis only. Not a dosing recommendation.</p>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <p>No forecast misses detected.</p>
+  <p class="hint">Reconciliation needs logged forecast curves (OpenAPS/AAPS/Loop devicestatus) or enough insulin and carb data to compute expectations. Try <code>dexta demo</code> to see it in action.</p>
+</div>
+{% endif %}
+{% endblock %}

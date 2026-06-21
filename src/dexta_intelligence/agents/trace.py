@@ -2,9 +2,9 @@
 
 The "show your thinking" surface. ``render_trace`` turns a sequence of executed
 ``ToolCall``s (``agents/reason.py``) into one ``TraceLine`` each, restating only
-fields the tool result already guarantees (the schemas documented in
-``docs/WAVE4.md`` Part 1). It NEVER makes a model call and NEVER introduces a
-number absent from the result — it cannot fabricate, so it needs no guard. Every
+fields the tool result already guarantees. It NEVER makes a model call and NEVER
+introduces a number absent from the result - it cannot fabricate, so it needs no
+guard. Every
 field access tolerates a missing key, so a partial result degrades to a plainer
 line instead of raising.
 """
@@ -32,7 +32,7 @@ class TraceLine:
     ``icon`` is a stable category the surface maps to a glyph/colour:
     ``scope`` | ``zoom`` | ``compare`` | ``recall`` | ``scan`` | ``trend``
     | ``treatment`` | ``time``.
-    ``text`` restates the tool result — no number not already in it.
+    ``text`` restates the tool result - no number not already in it.
     """
 
     icon: str
@@ -69,7 +69,7 @@ def _set_window(r: dict[str, Any]) -> TraceLine:
     text = f"narrowed to {start} → {end} ({days}, {readings})"
     note = r.get("note")
     if note:
-        text = f"{text} — {note}"
+        text = f"{text} - {note}"
     return TraceLine("scope", text)
 
 
@@ -78,7 +78,7 @@ def _zoom_event(r: dict[str, Any]) -> TraceLine:
     pad = _get(r, "pad_hours", "?")
     peak = _get(r, "peak", "?")
     nadir = _get(r, "nadir", "?")
-    return TraceLine("zoom", f"zoomed to {center} ±{pad}h — peak {peak}, nadir {nadir}")
+    return TraceLine("zoom", f"zoomed to {center} ±{pad}h - peak {peak}, nadir {nadir}")
 
 
 def _daily_series(r: dict[str, Any]) -> TraceLine:
@@ -124,7 +124,7 @@ def _search_evidence(r: dict[str, Any]) -> TraceLine:
 def _get_carb_entries(r: dict[str, Any]) -> TraceLine:
     n = r.get("n_entries")
     if n == 0:
-        return TraceLine("treatment", "checked carb entries — none in the window")
+        return TraceLine("treatment", "checked carb entries - none in the window")
     total = r.get("total_carbs_g")
     extra = f", {total}g total" if isinstance(total, (int, float)) else ""
     return TraceLine(
@@ -135,7 +135,7 @@ def _get_carb_entries(r: dict[str, Any]) -> TraceLine:
 def _get_boluses(r: dict[str, Any]) -> TraceLine:
     n = r.get("n_boluses")
     if n == 0:
-        return TraceLine("treatment", "checked bolus timing — no boluses in the window")
+        return TraceLine("treatment", "checked bolus timing - no boluses in the window")
     delays = [
         b["minutes_after_carb_entry"]
         for b in r.get("boluses") or []
@@ -149,12 +149,12 @@ def _get_boluses(r: dict[str, Any]) -> TraceLine:
 
 def _get_basal_timeline(r: dict[str, Any]) -> TraceLine:
     if r.get("basal_stable"):
-        return TraceLine("treatment", "checked basal/temp-basal context — stable")
+        return TraceLine("treatment", "checked basal/temp-basal context - stable")
     n_temp = r.get("n_temp_basal", "?")
     n_susp = r.get("n_suspend", "?")
     return TraceLine(
         "treatment",
-        f"checked basal/temp-basal context — {n_temp} temp-basal, {n_susp} suspend",
+        f"checked basal/temp-basal context - {n_temp} temp-basal, {n_susp} suspend",
     )
 
 
@@ -163,6 +163,23 @@ def _get_iob(r: dict[str, Any]) -> TraceLine:
         "treatment",
         f"checked insulin on board ({_get(r, 'iob_units', '?')} U, tier {_get(r, 'tier', '?')})",
     )
+
+
+def _get_insulin_profile(r: dict[str, Any]) -> TraceLine:
+    if r.get("error"):
+        return TraceLine("treatment", "checked insulin profile - not synced")
+    name = _get(r, "active_profile", "?")
+    n_seg = len(r.get("active_segments") or [])
+    return TraceLine("treatment", f"checked insulin profile - {name!r} ({n_seg} segments)")
+
+
+def _get_active_profile(r: dict[str, Any]) -> TraceLine:
+    if r.get("error"):
+        return TraceLine("treatment", "checked therapy profile - none available")
+    name = _get(r, "version_name", _get(r, "active_profile", "?"))
+    if r.get("versioned"):
+        return TraceLine("treatment", f"loaded the profile in effect then - {name!r}")
+    return TraceLine("treatment", f"loaded the current profile (no history yet) - {name!r}")
 
 
 def _get_cob(r: dict[str, Any]) -> TraceLine:
@@ -182,11 +199,38 @@ def _find_spikes(r: dict[str, Any]) -> TraceLine:
 def _find_similar_events(r: dict[str, Any]) -> TraceLine:
     n = r.get("n_similar")
     if not n:
-        return TraceLine("compare", "looked for similar events — none found")
+        return TraceLine("compare", "looked for similar events - none found")
     spiking = r.get("n_spiking", "?")
     return TraceLine(
         "compare", f"compared {_plural(int(n), 'similar event')} ({spiking} spiked)"
     )
+
+
+def _manual_summary(r: dict[str, Any]) -> str:
+    rows = r.get("events") or []
+    types = [e.get("event_type") for e in rows if isinstance(e, dict) and e.get("event_type")]
+    head = f": {types[0]}" if len(types) == 1 else ""
+    return f"{_count(r, 'n_events', 'user-reported note')}{head}"
+
+
+def _get_manual_events(r: dict[str, Any]) -> TraceLine:
+    if not r.get("n_events"):
+        return TraceLine("recall", "checked manual context - no user-reported context found")
+    return TraceLine("recall", f"checked manual context ({_manual_summary(r)})")
+
+
+def _search_manual_events(r: dict[str, Any]) -> TraceLine:
+    q = _get(r, "query", "")
+    label = f" for {q!r}" if q else ""
+    if not r.get("n_events"):
+        return TraceLine("recall", f"searched manual context{label} - no matches")
+    return TraceLine("recall", f"searched manual context{label} ({_manual_summary(r)})")
+
+
+def _get_context_around_event(r: dict[str, Any]) -> TraceLine:
+    if not r.get("n_events"):
+        return TraceLine("recall", "checked manual context - no user-reported context found")
+    return TraceLine("recall", f"checked manual context near the event ({_manual_summary(r)})")
 
 
 def _current_time(r: dict[str, Any]) -> TraceLine:
@@ -206,9 +250,14 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], TraceLine]] = {
     "get_boluses": _get_boluses,
     "get_basal_timeline": _get_basal_timeline,
     "get_iob": _get_iob,
+    "get_insulin_profile": _get_insulin_profile,
+    "get_active_profile": _get_active_profile,
     "get_cob": _get_cob,
     "find_spikes": _find_spikes,
     "find_similar_events": _find_similar_events,
+    "get_manual_events": _get_manual_events,
+    "search_manual_events": _search_manual_events,
+    "get_context_around_event": _get_context_around_event,
     "get_current_time": _current_time,
     "get_weekday": _weekday,
     "parse_relative_date": _relative_date,

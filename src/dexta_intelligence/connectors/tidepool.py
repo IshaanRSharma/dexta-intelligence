@@ -1,11 +1,11 @@
-"""Tidepool JSON export connector — offline import from tidepool.org exports.
+"""Tidepool JSON export connector - offline import from tidepool.org exports.
 
 Tidepool's open data model stores CGM readings as ``cbg`` and pump boluses as
 ``bolus`` records. Users download a JSON export from the Tidepool web app
-(Upload → Export device data). This connector reads that file once per sync,
+(Upload then Export device data). This connector reads that file once per sync,
 normalizes glucose and insulin, and dedupes via ``(source, source_id)``.
 
-Live Tidepool Platform API sync is out of scope here — it requires OAuth client
+Live Tidepool Platform API sync is out of scope here - it requires OAuth client
 registration. JSON export is the zero-friction OSS path.
 """
 
@@ -20,7 +20,6 @@ from dexta_intelligence.connectors.base import HealthReport, NormalizedBatch
 from dexta_intelligence.models import GlucoseEvent, InsulinEvent, InsulinKind, RawEvent
 
 if TYPE_CHECKING:
-    from pathlib import Path
 
     from dexta_intelligence.config import TidepoolConfig
 
@@ -146,7 +145,9 @@ def _records_from_export(doc: Any) -> list[Any]:
     return []
 
 
-def _parse_record(record: dict[str, Any]) -> tuple[str, datetime, dict[str, Any]] | None:
+def _parse_record(  # noqa: PLR0911 - one return per Tidepool record type
+    record: dict[str, Any],
+) -> tuple[str, datetime, dict[str, Any]] | None:
     dtype = record.get("type")
     ts = _parse_time(record.get("time") or record.get("createdTime"))
     if ts is None:
@@ -197,7 +198,7 @@ def _glucose_mg_dl(record: dict[str, Any]) -> int | None:
     units = str(record.get("units", "mg/dL")).lower()
     if "mmol" in units:
         return round(numeric * _MMOL_TO_MGDL)
-    return int(round(numeric))
+    return round(numeric)
 
 
 def _bolus_units(record: dict[str, Any]) -> float | None:

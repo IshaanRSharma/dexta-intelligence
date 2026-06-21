@@ -1,13 +1,14 @@
-"""Hand-rolled rendering helpers — no extra dependencies.
+"""Hand-rolled rendering helpers - no extra dependencies.
 
 Three small renderers the GUI needs and we refuse to pull a library for:
 
-- :func:`markdown_to_html` — the fixed subset our own wiki generator emits
-  (headings, lists, tables, links, bold/italic/code, paragraphs). It is *not*
-  a general Markdown engine; it only has to read what :mod:`memory.wiki` writes.
-- :func:`emit_toml` — serialize a :class:`Config` back to the flat schema the
+- :func:`markdown_to_html` - a small, dependency-free general Markdown renderer.
+  It covers what our wiki generator emits *and* the prose LLM answers produce
+  (headings, ordered/unordered lists, tables, links, bold/italic/code, fenced
+  code, blockquotes, horizontal rules, paragraphs). It is escape-first.
+- :func:`emit_toml` - serialize a :class:`Config` back to the flat schema the
   loader accepts. Comments are not preserved (regenerated from current values).
-- :func:`sparkline_svg` — a hand-drawn polyline of a goal's checkpoint arc.
+- :func:`sparkline_svg` - a hand-drawn polyline of a goal's checkpoint arc.
 
 Everything here escapes untrusted text; the wiki is generated, but findings
 carry user/model prose, so HTML escaping is non-negotiable.
@@ -31,9 +32,13 @@ __all__ = ["emit_toml", "markdown_to_html", "sparkline_svg"]
 
 _INLINE_CODE = re.compile(r"`([^`]+)`")
 _BOLD = re.compile(r"\*\*([^*]+)\*\*")
+_BOLD_US = re.compile(r"(?<!\w)__([^_]+)__(?!\w)")
 _ITALIC = re.compile(r"(?<![*\w])\*([^*]+)\*(?![*\w])")
 _ITALIC_US = re.compile(r"(?<![_\w])_([^_]+)_(?![_\w])")
 _LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+#: A bare PubMed id mention ("PMID 12345678") -> a clickable PubMed link, so a
+#: literature-grounded claim's citation is one click from the source.
+_PMID = re.compile(r"\bPMID:?\s*(\d{4,9})\b")
 
 #: Only these link schemes are allowed; anything else (javascript:, data:, …)
 #: is neutralised so model-authored prose can't emit a live dangerous link.
@@ -45,7 +50,7 @@ def _safe_href(url: str) -> str:
     lowered = url.strip().lower()
     if lowered.startswith(_SAFE_SCHEMES):
         return url
-    # Relative paths and same-page anchors carry no scheme — keep them.
+    # Relative paths and same-page anchors carry no scheme - keep them.
     if ":" not in lowered.split("/", 1)[0] and not lowered.startswith("//"):
         return url
     return "#"
@@ -54,10 +59,15 @@ def _safe_href(url: str) -> str:
 def _inline(text: str) -> str:
     """Escape, then re-introduce the small set of inline spans we support."""
     out = html.escape(text)
-    # Code first — its contents are literal (no further inline parsing).
+    # Code first - its contents are literal (no further inline parsing).
     out = _INLINE_CODE.sub(lambda m: f"<code>{m.group(1)}</code>", out)
     out = _LINK.sub(lambda m: f'<a href="{_safe_href(m.group(2))}">{m.group(1)}</a>', out)
+    out = _PMID.sub(
+        lambda m: f'<a href="https://pubmed.ncbi.nlm.nih.gov/{m.group(1)}/">PMID {m.group(1)}</a>',
+        out,
+    )
     out = _BOLD.sub(lambda m: f"<strong>{m.group(1)}</strong>", out)
+    out = _BOLD_US.sub(lambda m: f"<strong>{m.group(1)}</strong>", out)
     out = _ITALIC.sub(lambda m: f"<em>{m.group(1)}</em>", out)
     out = _ITALIC_US.sub(lambda m: f"<em>{m.group(1)}</em>", out)
     return out
@@ -78,43 +88,81 @@ def _is_table_divider(line: str) -> bool:
     return all(cell and set(cell) <= {"-", ":"} for cell in cells)
 
 
-def markdown_to_html(md: str) -> str:  # noqa: PLR0915 - a single sequential line scanner
-    """Render the fixed Markdown subset our wiki emits into safe HTML.
+_HR = re.compile(r"^(-{3,}|\*{3,}|_{3,})$")
+_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
+_BULLET = re.compile(r"^(\s*)[-*+]\s+(.*)$")
+_ORDERED = re.compile(r"^(\s*)\d+[.)]\s+(.*)$")
+_BLOCKQUOTE = re.compile(r"^\s*>\s?(.*)$")
+_FENCE = re.compile(r"^\s*(```|~~~)")
 
-    Supports: ATX headings, unordered lists (``-``) with one nesting level,
-    pipe tables, links, bold/italic/inline-code, and paragraphs. Anything else
-    is treated as paragraph text (and escaped).
+
+def markdown_to_html(md: str) -> str:  # noqa: PLR0912, PLR0915 - one sequential scanner
+    """Render Markdown into safe HTML with no third-party dependencies.
+
+    Supports ATX headings, ordered and unordered lists (one nesting level),
+    fenced code blocks, blockquotes, horizontal rules, pipe tables, links,
+    bold/italic/inline-code, and paragraphs. Everything is escaped first; only
+    the recognised constructs re-introduce markup.
     """
     lines = md.replace("\r\n", "\n").split("\n")
     out: list[str] = []
     i = 0
-    list_stack: list[int] = []  # indent widths of open <ul>s
+    n = len(lines)
+    # Each open list is (indent, tag) where tag is "ul" or "ol".
+    list_stack: list[tuple[int, str]] = []
 
     def close_lists(to_depth: int = 0) -> None:
         while len(list_stack) > to_depth:
-            out.append("</ul>")
-            list_stack.pop()
+            out.append(f"</{list_stack.pop()[1]}>")
 
-    n = len(lines)
+    def flush_para(buf: list[str]) -> None:
+        if buf:
+            out.append(f"<p>{'<br>'.join(_inline(s) for s in buf)}</p>")
+            buf.clear()
+
+    para: list[str] = []
     while i < n:
         line = lines[i]
         stripped = line.strip()
 
         if not stripped:
+            flush_para(para)
             close_lists()
             i += 1
             continue
 
-        heading = re.match(r"^(#{1,6})\s+(.*)$", stripped)
+        fence = _FENCE.match(line)
+        if fence:
+            flush_para(para)
+            close_lists()
+            marker = fence.group(1)
+            i += 1
+            code: list[str] = []
+            while i < n and not lines[i].strip().startswith(marker):
+                code.append(lines[i])
+                i += 1
+            i += 1  # consume the closing fence (or run off the end)
+            out.append(f"<pre><code>{html.escape(chr(10).join(code))}</code></pre>")
+            continue
+
+        if _HR.match(stripped):
+            flush_para(para)
+            close_lists()
+            out.append("<hr>")
+            i += 1
+            continue
+
+        heading = _HEADING.match(stripped)
         if heading:
+            flush_para(para)
             close_lists()
             level = len(heading.group(1))
             out.append(f"<h{level}>{_inline(heading.group(2))}</h{level}>")
             i += 1
             continue
 
-        # Table: a header row followed by a divider row.
         if "|" in line and i + 1 < n and _is_table_divider(lines[i + 1]):
+            flush_para(para)
             close_lists()
             out.append("<table>")
             out.append(f"<thead>{_table_row(line, header=True)}</thead>")
@@ -126,25 +174,40 @@ def markdown_to_html(md: str) -> str:  # noqa: PLR0915 - a single sequential lin
             out.append("</tbody></table>")
             continue
 
-        bullet = re.match(r"^(\s*)-\s+(.*)$", line)
-        if bullet:
-            indent = len(bullet.group(1))
-            if not list_stack or indent > list_stack[-1]:
-                out.append("<ul>")
-                list_stack.append(indent)
+        quote = _BLOCKQUOTE.match(line)
+        if quote:
+            flush_para(para)
+            close_lists()
+            block: list[str] = []
+            while i < n and (m := _BLOCKQUOTE.match(lines[i])):
+                block.append(m.group(1))
+                i += 1
+            inner = markdown_to_html("\n".join(block))
+            out.append(f"<blockquote>{inner}</blockquote>")
+            continue
+
+        bullet = _BULLET.match(line)
+        ordered = _ORDERED.match(line) if not bullet else None
+        match = bullet or ordered
+        if match is not None:
+            flush_para(para)
+            tag = "ul" if bullet else "ol"
+            indent = len(match.group(1))
+            if not list_stack or indent > list_stack[-1][0]:
+                out.append(f"<{tag}>")
+                list_stack.append((indent, tag))
             else:
-                while len(list_stack) > 1 and indent < list_stack[-1]:
-                    out.append("</ul>")
-                    list_stack.pop()
-            out.append(f"<li>{_inline(bullet.group(2))}</li>")
+                while len(list_stack) > 1 and indent < list_stack[-1][0]:
+                    out.append(f"</{list_stack.pop()[1]}>")
+            out.append(f"<li>{_inline(match.group(2))}</li>")
             i += 1
             continue
 
-        # Plain paragraph.
         close_lists()
-        out.append(f"<p>{_inline(stripped)}</p>")
+        para.append(stripped)
         i += 1
 
+    flush_para(para)
     close_lists()
     return "\n".join(out)
 
@@ -159,7 +222,7 @@ def _toml_str(value: str) -> str:
 def emit_toml(config: Config) -> str:
     """Serialize a Config to the flat TOML schema ``load_config`` accepts.
 
-    Comments are regenerated, not preserved — the panel writes the *current*
+    Comments are regenerated, not preserved - the panel writes the *current*
     state. Secrets are intentionally written as the empty strings they hold in
     a shared-safe config (the GUI never persists env-sourced secrets to disk).
     """
@@ -182,6 +245,7 @@ def emit_toml(config: Config) -> str:
         "[analysis]",
         f"target_low = {a.target_low}",
         f"target_high = {a.target_high}",
+        f"max_reasoning_steps = {a.max_reasoning_steps}",
         f"deep_analysis_window_days = {a.deep_analysis_window_days}",
         "",
         "[wiki]",

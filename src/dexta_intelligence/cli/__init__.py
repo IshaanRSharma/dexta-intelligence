@@ -1,4 +1,4 @@
-"""dexta CLI — init, doctor, sync, analyze, upload, wiki."""
+"""dexta CLI - init, doctor, sync, analyze, upload, wiki."""
 
 from __future__ import annotations
 
@@ -24,10 +24,12 @@ from dexta_intelligence.cli.data import cmd_sync as cmd_sync
 from dexta_intelligence.cli.data import cmd_upload as cmd_upload
 from dexta_intelligence.cli.intelligence import cmd_ask as cmd_ask
 from dexta_intelligence.cli.intelligence import cmd_brief as cmd_brief
+from dexta_intelligence.cli.intelligence import cmd_demo as cmd_demo
 from dexta_intelligence.cli.intelligence import cmd_goals as cmd_goals
 from dexta_intelligence.cli.intelligence import cmd_wiki as cmd_wiki
 from dexta_intelligence.cli.main import build_parser as build_parser
 from dexta_intelligence.cli.main import main as main
+from dexta_intelligence.cli.research import cmd_nof1 as cmd_nof1
 from dexta_intelligence.cli.serve import cmd_serve as cmd_serve
 
 __all__ = ["main"]

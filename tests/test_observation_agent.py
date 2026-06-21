@@ -1,4 +1,4 @@
-"""Tests for the Observation Agent (spec §7)."""
+"""Tests for the Observation Agent."""
 
 from __future__ import annotations
 

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}dexta · evals{% endblock %}
+{% block content %}
+{% from "_components.html" import chip %}
+{% set methodology = methodology|default([]) %}
+{% set safety = safety|default({}) %}
+{% set glucose = glucose|default(none) %}
+{% set model = model|default({}) %}
+
+<div class="page-head">
+  <h1>Evaluation</h1>
+  <p class="page-sub">How dexta is held to account: a reproducible eval suite, a hard safety invariant, and the determinism boundary. Every number a serious answer reports is traceable to a tool call; two rails (numeric faithfulness, treatment gate) bound output.</p>
+</div>
+
+<section class="findings-section">
+  <h2 class="section-title">Safety invariant</h2>
+  <div class="chips">
+    <span class="badge {{ 'ok' if safety.clean else 'bad' }}">{{ 'no dosing advice' if safety.clean else 'violation found' }}</span>
+    {{ chip("outputs scanned", safety.scanned) }}
+    {{ chip("violations", safety.violations) }}
+  </div>
+  <p class="muted small" style="margin-top:8px">Live scan of every persisted finding and investigation answer with the same detector the treatment rail uses. Target is zero, always. dexta never issues dosing, basal, carb-ratio, or correction instructions.</p>
+</section>
+
+{% if glucose %}
+<section class="findings-section">
+  <h2 class="section-title">Your consensus glycemic metrics</h2>
+  <div class="chips">
+    <span class="chip-kv {{ 'strength-strong' if glucose.tir_on_target else 'strength-weak' }}"><span class="chip-k">TIR 70-180</span><span class="chip-v">{{ glucose.tir_pct }}%</span></span>
+    <span class="chip-kv {{ 'strength-strong' if glucose.tbr_on_target else 'strength-weak' }}"><span class="chip-k">TBR &lt;70</span><span class="chip-v">{{ glucose.tbr_pct }}%</span></span>
+    {{ chip("TAR >180", glucose.tar_pct ~ "%") }}
+    <span class="chip-kv {{ 'strength-strong' if glucose.cv_on_target else 'strength-weak' }}"><span class="chip-k">CV</span><span class="chip-v">{{ glucose.cv_pct }}%</span></span>
+    {{ chip("GMI", glucose.gmi_pct ~ "%") }}
+    {{ chip("mean", glucose.mean ~ " mg/dL") }}
+    {{ chip("readings", glucose.n) }}
+  </div>
+  <p class="muted small" style="margin-top:8px">Computed with the consensus formulas validated by E_consensus. Targets (2019 international consensus): TIR &ge; 70%, TBR &lt; 4%, CV &le; 36%.</p>
+</section>
+{% endif %}
+
+<section class="findings-section">
+  <h2 class="section-title">Evaluation suite</h2>
+  <ul class="conn-list">
+    {% for e in methodology %}
+    <li class="conn-row" style="align-items:flex-start">
+      <span class="conn-label">{{ e.id }} · {{ e.name }}</span>
+      <span style="flex:1 1 320px">
+        <span class="muted small">{{ e.measures }}</span><br />
+        <code>{{ e.command }}</code>
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="findings-section">
+  <h2 class="section-title">Model &amp; boundary</h2>
+  <div class="chips">
+    {{ chip("provider", model.provider) }}
+    {{ chip("model", model.model) }}
+  </div>
+  <p class="muted small" style="margin-top:8px">Analytics compute facts deterministically; the model reasons over them; the faithfulness guard and treatment gate bound the output. The model never computes or accepts an unaudited number.</p>
+</section>
+{% endblock %}

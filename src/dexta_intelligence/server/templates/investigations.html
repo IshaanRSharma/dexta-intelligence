@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}dexta · investigations{% endblock %}
+{% block content %}
+{% set runs = runs|default([]) %}
+{% set open_invs = open_invs|default([]) %}
+
+<div class="page-head">
+  <h1>Investigations</h1>
+  <p class="page-sub">Every investigation dexta runs, with the plan it followed, the trace of what it did, and the findings it produced.</p>
+  <a class="btn btn-ghost" href="/log">+ Log context</a>
+</div>
+
+<form id="investigate-form" class="investigate-box" autocomplete="off">
+  <label for="investigate-q" class="investigate-label">Start an investigation</label>
+  <div class="investigate-row">
+    <input id="investigate-q" type="text" name="q"
+           placeholder="e.g. what caused my worst high yesterday?" />
+    <button type="submit">Investigate</button>
+    <button type="button" id="investigate-deep" class="btn-secondary" title="Run the multi-producer statistical sweep over the whole record">Run deep analysis</button>
+  </div>
+  <p class="muted small">Investigate drills your question tool by tool, narrating the trace live. Run deep analysis sweeps the whole record for statistical patterns. Pattern analysis only. Not a dosing recommendation.</p>
+</form>
+
+<div id="investigate-stream"></div>
+
+{% if open_invs %}
+<section class="findings-section">
+  <h2 class="section-title">Open investigations</h2>
+  <p class="muted small" style="margin:-8px 0 14px">Recurring patterns dexta is collecting more data on. Each runs a full investigation once it has enough evidence.</p>
+  <ul class="open-inv-list">
+    {% for o in open_invs %}
+    <li class="open-inv">
+      <div class="open-inv-head">
+        <span class="open-inv-q">{{ o.question }}</span>
+        <span class="badge {{ 'ok' if o.status == 'promoted' else 'neutral' }}">{{ o.status }}</span>
+      </div>
+      <div class="conf-bar"><span style="width: {{ o.pct }}%"></span></div>
+      <span class="muted small">{{ o.progress }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if runs %}
+<div class="cards">
+  {% for r in runs %}
+  <article class="card run-card">
+    <div class="card-head">
+      <h2>{{ r.question }}</h2>
+      <span class="badge {{ 'ok' if r.status == 'completed' else 'neutral' }}">{{ r.status }}</span>
+    </div>
+    <div class="meta">
+      <span class="chip">{{ r.kind }}</span>
+      <span class="mono">{{ r.window }}</span>
+      <span class="muted">{{ r.when }}</span>
+      <span class="muted">{{ r.n_findings }} finding(s)</span>
+      {% if r.coverage %}<span class="chip">coverage {{ r.coverage.label }}</span>{% endif %}
+    </div>
+
+    {% if r.coverage and r.coverage.limited %}
+    <p class="flash error" style="margin:10px 0">Limited analysis mode: sensor coverage is {{ r.coverage.label }}. Treat conclusions as provisional.</p>
+    {% endif %}
+
+    <div class="run-section">
+      <h3>Plan</h3>
+      <div class="run-plan">
+        {% for p in r.plan %}<span class="chip">{{ p }}</span>{% endfor %}
+      </div>
+    </div>
+
+    <div class="run-section">
+      <h3>Trace</h3>
+      <ol class="run-trace">
+        {% for line in r.trace %}<li>{{ line }}</li>{% endfor %}
+      </ol>
+    </div>
+
+    {% if r.tool_calls %}
+    <details class="run-section">
+      <summary>Tools called ({{ r.tool_calls|length }})</summary>
+      <ul class="run-tools">
+        {% for t in r.tool_calls %}
+        <li>
+          <span class="step-mark {{ 'step-ok' if t.ok else 'step-bad' if t.ok is false else 'step-pending' }}">{{ '✓' if t.ok else '✗' if t.ok is false else '·' }}</span>
+          <span class="mono">{{ t.name }}</span>{% if t.scope %} <span class="muted small">{{ t.scope }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+
+    {% if r.answer_html %}
+    <div class="run-section">
+      <h3>Evidence</h3>
+      <div class="prose">{{ r.answer_html|safe }}</div>
+      <p class="muted small">Pattern analysis only. Not a dosing recommendation.</p>
+    </div>
+    {% endif %}
+
+    {% if r.findings %}
+    <div class="run-section">
+      <h3>Findings</h3>
+      <ul class="run-findings">
+        {% for f in r.findings %}
+        <li>
+          <span class="run-finding-head">{{ f.headline }}</span>
+          <span class="meta">
+            <span class="mono">{{ f.kind }}</span>
+            <span class="chip">{{ f.confidence_pct }}%</span>
+            {% if f.status != 'active' %}<span class="badge neutral">{{ f.status }}</span>{% endif %}
+          </span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if r.evidence_items %}
+    <details class="run-section evidence-drawer">
+      <summary>Evidence ({{ r.evidence_items|length }})</summary>
+      <ul class="evidence-list">
+        {% for ev in r.evidence_items %}
+        <li>
+          <span class="run-finding-head">{{ ev.finding }}</span>
+          <div class="meta">
+            {% if ev.n is not none %}<span class="chip">n={{ ev.n }}</span>{% endif %}
+            {% if ev.effect_size is not none %}<span class="chip">effect {{ "%.2f"|format(ev.effect_size) }}</span>{% endif %}
+            {% for k, v in (ev.numbers or {}).items() %}<span class="mono">{{ k }}={{ v }}</span>{% endfor %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <p>No investigations yet.</p>
+  <p class="hint">Ask a question in the dashboard "Investigate a question" box, or run analyze, to start one.</p>
+  <a class="btn btn-secondary" href="/" style="margin-top:14px">Go to dashboard</a>
+</div>
+{% endif %}
+<script src="/static/investigate.js?v={{ static_version }}" defer></script>
+{% endblock %}

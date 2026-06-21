@@ -13,20 +13,22 @@ Design rules
    immutable raw store. No event exists without a source.
 2. Models are frozen. Mutation is a store operation, not an attribute write.
 3. All timestamps are timezone-aware UTC. Naive datetimes are rejected at
-   validation time — silent local-time bugs are endemic in CGM data and we
+   validation time - silent local-time bugs are endemic in CGM data and we
    refuse to inherit them.
 """
 
 from __future__ import annotations
 
 import enum
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 __all__ = [
     "ActivityEvent",
+    "ChatSession",
+    "ChatTurn",
     "CoverageStats",
     "DeviceEvent",
     "Finding",
@@ -41,13 +43,18 @@ __all__ = [
     "HypothesisStatus",
     "InsulinEvent",
     "InsulinKind",
+    "InvestigationRun",
+    "ManualEvent",
     "MealEvent",
+    "OpenInvestigation",
     "PredictionEvent",
     "RawEvent",
     "RecoveryEvent",
     "Rollup",
     "RollupPeriod",
+    "RunFinding",
     "SleepEvent",
+    "TherapyProfile",
 ]
 
 
@@ -58,12 +65,16 @@ def _require_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+def _require_utc_opt(value: datetime | None) -> datetime | None:
+    return None if value is None else _require_utc(value)
+
+
 class _FrozenModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 1 — raw store
+# Layer 1 - raw store
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -71,7 +82,7 @@ class RawEvent(_FrozenModel):
     """Immutable, verbatim provider record.
 
     ``(source, source_id)`` is the idempotency key: re-ingesting the same
-    provider record is a no-op. The payload is never interpreted here — only
+    provider record is a no-op. The payload is never interpreted here - only
     stored, so normalization can always be replayed.
     """
 
@@ -84,7 +95,7 @@ class RawEvent(_FrozenModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 2 — clinical timeline
+# Layer 2 - clinical timeline
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -125,6 +136,63 @@ class MealEvent(_FrozenModel):
     raw_event_id: int | None = None
 
     _utc = field_validator("ts")(_require_utc)
+
+
+class ManualEvent(_FrozenModel):
+    """User-reported context attached to the timeline.
+
+    Unlike connector-derived events, this is logged by the user to record
+    real-world context (meals, stress, site changes, illness, travel, free-form
+    notes). It can optionally link back to an :class:`InvestigationRun` or a
+    specific glucose event so the agent can correlate a report with what it saw.
+    """
+
+    event_type: str
+    """One of: meal, exercise, sleep, illness, stress, alcohol, site_change,
+    sensor_issue, pump_issue, medication, travel, note."""
+    event_ts: datetime
+    end_ts: datetime | None = None
+    title: str | None = None
+    description: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    intensity: str | None = None
+    confidence: str = "user_reported"
+    source: str = "manual"
+    linked_run_id: str | None = None
+    linked_glucose_event_id: int | None = None
+    created_at: datetime
+    id: int | None = None
+
+    _utc_event = field_validator("event_ts")(_require_utc)
+    _utc_created = field_validator("created_at")(_require_utc)
+    _utc_end = field_validator("end_ts")(_require_utc_opt)
+
+
+class TherapyProfile(_FrozenModel):
+    """A versioned snapshot of the user's insulin/therapy settings.
+
+    Devices report only the CURRENT profile, so dexta records a new version
+    whenever the content changes (``content_hash`` differs from the latest).
+    ``active_from`` is when this version was first seen; ``active_to`` is when
+    the next version superseded it (None for the live one). This is what lets an
+    investigation of a March event read the March profile, not today's.
+
+    ``content`` is the formatted profile payload (active profile name, segments,
+    DIA, etc.) as produced by the connector. Read-only clinical context, never
+    dosing advice.
+    """
+
+    source: str
+    name: str
+    content: dict[str, Any]
+    content_hash: str
+    active_from: datetime
+    active_to: datetime | None = None
+    created_at: datetime
+    id: int | None = None
+
+    _utc_from = field_validator("active_from", "created_at")(_require_utc)
+    _utc_to = field_validator("active_to")(_require_utc_opt)
 
 
 class ActivityEvent(_FrozenModel):
@@ -176,11 +244,11 @@ class PredictionEvent(_FrozenModel):
     ``openaps.suggested.predBGs``, Loop via ``loop.predicted`` in Nightscout
     ``devicestatus``). These curves are the logged ground truth of the
     algorithm's belief, which the Prediction Reconciliation agent compares
-    against realized CGM (spec §7.1).
+    against realized CGM.
     """
 
     ts: datetime
-    """Algorithm cycle time — the timestamp of ``values_mg_dl[0]``."""
+    """Algorithm cycle time - the timestamp of ``values_mg_dl[0]``."""
     source: str
     """Forecasting algorithm, e.g. ``"openaps"`` or ``"loop"``."""
     curve_kind: Literal["iob", "cob", "uam", "zt", "loop"]
@@ -194,7 +262,7 @@ class PredictionEvent(_FrozenModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 3 — rollups
+# Layer 3 - rollups
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -229,7 +297,7 @@ class Rollup(_FrozenModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Layer 4 — agent memory
+# Layer 4 - agent memory
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -238,6 +306,7 @@ class FindingStatus(enum.StrEnum):
     SUPERSEDED = "superseded"
     REJECTED = "rejected"
     DISMISSED = "dismissed"
+    STALE = "stale"
 
 
 class FindingStats(_FrozenModel):
@@ -260,9 +329,7 @@ class FindingStats(_FrozenModel):
 class Finding(_FrozenModel):
     """A single durable unit of agent knowledge.
 
-    The unification of what the donor codebase kept in four shapes
-    (``pod_insights`` rows, ``Insight``, ``CoachFinding``, clinical-brief
-    dicts). ``evidence`` holds every number the prose is allowed to cite.
+    ``evidence`` holds every number the prose is allowed to cite.
     """
 
     agent: str
@@ -279,6 +346,11 @@ class Finding(_FrozenModel):
     window_end: datetime | None = None
     id: int | None = None
     superseded_by: int | None = None
+    #: When this finding was last re-derived. Drives freshness: a finding not
+    #: re-confirmed within its TTL is retired to STALE. ``seen_count`` is how many
+    #: analyses have produced it (recurrence), which lengthens the TTL.
+    last_verified: datetime | None = None
+    seen_count: int = 1
 
 
 class HypothesisStatus(enum.StrEnum):
@@ -299,7 +371,7 @@ class Hypothesis(_FrozenModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Goals — user-stated objectives pursued by background agents
+# Goals - user-stated objectives pursued by background agents
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -353,12 +425,126 @@ class GoalCheckpoint(_FrozenModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Chat - durable GUI conversation history
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class ChatTurn(_FrozenModel):
+    """One persisted message in a GUI chat session.
+
+    Durable so a conversation survives a server restart; ``session_id`` scopes a
+    conversation, ``role`` is the speaker (e.g. ``"user"`` / ``"assistant"``).
+    """
+
+    session_id: str
+    role: str
+    content: str
+    ts: datetime
+    id: int | None = None
+
+    _utc = field_validator("ts")(_require_utc)
+
+
+class ChatSession(_FrozenModel):
+    """A summary of one chat conversation - for enumerating past threads.
+
+    ``last_ts`` is the most recent turn's timestamp, ``turn_count`` the number of
+    messages, ``preview`` the first user message (a label for the conversation).
+    """
+
+    session_id: str
+    last_ts: datetime
+    turn_count: int
+    preview: str
+
+    _utc = field_validator("last_ts")(_require_utc)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Investigation runs (the observable record of one investigation)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class RunFinding(_FrozenModel):
+    """A snapshot of one finding as it stood when an investigation produced it.
+
+    An investigation run is an immutable historical record, so it stores what it
+    found at the time rather than a live link that drifts as findings are
+    superseded.
+    """
+
+    headline: str
+    kind: str
+    confidence: float
+    status: str
+
+
+class InvestigationRun(_FrozenModel):
+    """A persisted record of one coordinator investigation.
+
+    Captures the observable process behind a set of findings: which producers
+    were planned, the step-by-step trace of what ran, the findings produced
+    (snapshotted in ``findings``), and the window inspected. This is what turns
+    isolated answers into an auditable investigation history.
+    """
+
+    run_id: str
+    kind: str
+    status: str
+    question: str | None
+    window_start: date
+    window_end: date
+    plan: list[str]
+    trace: list[str]
+    findings: list[RunFinding]
+    n_findings: int
+    started_at: datetime
+    finished_at: datetime
+    coverage_summary: dict[str, Any] | None = None
+    """Data-sufficiency snapshot at run time (glucose coverage, span, counts,
+    ``limited`` flag). Drives coverage-aware gating. None on legacy rows."""
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    """Instrument log: the tools the run called (name, scope, ok) for the
+    orchestrator drill, or one entry per producer for a deep-analysis run."""
+    evidence_items: list[dict[str, Any]] = Field(default_factory=list)
+    """The guard-audited numbers behind each finding (evidence-drawer source)."""
+    answer: str | None = None
+    """The drill's prose conclusion (orchestrator question runs). None for
+    deep-analysis runs, which produce findings rather than a single answer."""
+    id: int | None = None
+
+    _utc = field_validator("started_at", "finished_at")(_require_utc)
+
+
+class OpenInvestigation(_FrozenModel):
+    """An investigation that accrues across daemon cycles until it is sufficient.
+
+    Unlike ``InvestigationRun`` (a finished record), this is a standing intent:
+    each cycle updates ``current`` toward ``target`` and, once the deterministic
+    sufficiency condition is met, the investigation flips to ``ready`` and is
+    eventually promoted into a concrete run.
+    """
+
+    question: str
+    condition_type: str
+    subject: str
+    target: float
+    current: float
+    status: str
+    created_at: datetime
+    promoted_run_id: str | None = None
+    id: int | None = None
+
+    _utc = field_validator("created_at")(_require_utc)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Coverage (input to cold-start gating)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class CoverageStats(_FrozenModel):
-    """How much data exists — the single input to capability gating."""
+    """How much data exists - the single input to capability gating."""
 
     first_ts: datetime | None
     last_ts: datetime | None

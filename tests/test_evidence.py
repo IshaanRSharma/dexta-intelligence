@@ -1,4 +1,4 @@
-"""Evidence grounding tests — PubMed backend via MockTransport, hit shape, tool wiring.
+"""Evidence grounding tests - PubMed backend via MockTransport, hit shape, tool wiring.
 
 No live network: the PubMed backend runs against an ``httpx.MockTransport`` that
 emulates the NCBI E-utilities ``esearch`` + ``esummary`` JSON responses from
@@ -69,7 +69,7 @@ class TestEvidenceHit:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PubMed backend — mocked NCBI E-utilities transport
+# PubMed backend - mocked NCBI E-utilities transport
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -148,9 +148,42 @@ class TestPubMedBackend:
         esearch_req = next(r for r in server.requests if "esearch" in r.url.path)
         assert "email" not in esearch_req.url.params
 
+    def test_api_key_sent_when_env_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NCBI_API_KEY", "k-789")
+        server = _PubMedServer()
+        _backend(server).search("glucose")
+        esearch_req = next(r for r in server.requests if "esearch" in r.url.path)
+        assert esearch_req.url.params.get("api_key") == "k-789"
+
+    def test_api_key_absent_when_env_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("NCBI_API_KEY", raising=False)
+        server = _PubMedServer()
+        _backend(server).search("glucose")
+        esearch_req = next(r for r in server.requests if "esearch" in r.url.path)
+        assert "api_key" not in esearch_req.url.params
+
+    def test_retries_once_on_rate_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("dexta_intelligence.evidence.pubmed._RATE_LIMIT_BACKOFF_S", 0.0)
+        calls = {"esearch": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/esearch.fcgi"):
+                calls["esearch"] += 1
+                if calls["esearch"] == 1:
+                    return httpx.Response(429, json={"error": "rate"})
+                return httpx.Response(200, json=ESEARCH)
+            if request.url.path.endswith("/esummary.fcgi"):
+                return httpx.Response(200, json=ESUMMARY)
+            return httpx.Response(404)
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        hits = PubMedBackend(client=client).search("exercise glucose")
+        assert len(hits) == 2  # succeeded on the retry
+        assert calls["esearch"] == 2  # throttled once, then retried
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# OpenEvidence backend — missing-key gate
+# OpenEvidence backend - missing-key gate
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -179,7 +212,7 @@ class TestOpenEvidenceBackend:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# search_evidence tool spec — wiring + guard-facing numbers
+# search_evidence tool spec - wiring + guard-facing numbers
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -194,7 +227,7 @@ class _StubBackend:
 
 
 def test_tool_specs_includes_search_evidence() -> None:
-    import dexta_intelligence.agents.discovery_tools as dt  # noqa: PLC0415
+    import dexta_intelligence.agents.tools.toolkit as dt  # noqa: PLC0415
 
     spec = next(
         s for s in _all_specs(dt) if s.name == "search_evidence"
@@ -234,7 +267,7 @@ def _all_specs(dt: Any) -> list[Any]:
 def test_search_evidence_fn_returns_hits_and_pmid_numbers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import dexta_intelligence.agents.discovery_tools as dt  # noqa: PLC0415
+    import dexta_intelligence.agents.tools.toolkit as dt  # noqa: PLC0415
 
     stub = _StubBackend(
         [
@@ -267,7 +300,7 @@ def test_search_evidence_fn_returns_hits_and_pmid_numbers(
 
 
 def test_search_evidence_fn_empty_query(monkeypatch: pytest.MonkeyPatch) -> None:
-    import dexta_intelligence.agents.discovery_tools as dt  # noqa: PLC0415
+    import dexta_intelligence.agents.tools.toolkit as dt  # noqa: PLC0415
 
     monkeypatch.setattr(dt, "evidence_backend", lambda: _StubBackend([]))
     public, numbers = dt._search_evidence({"query": "  "})
@@ -276,7 +309,7 @@ def test_search_evidence_fn_empty_query(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_search_evidence_fn_backend_failure_noted(monkeypatch: pytest.MonkeyPatch) -> None:
-    import dexta_intelligence.agents.discovery_tools as dt  # noqa: PLC0415
+    import dexta_intelligence.agents.tools.toolkit as dt  # noqa: PLC0415
 
     def boom() -> Any:
         raise RuntimeError("no backend")
@@ -288,9 +321,84 @@ def test_search_evidence_fn_backend_failure_noted(monkeypatch: pytest.MonkeyPatc
 
 
 def test_search_evidence_fn_clamps_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    import dexta_intelligence.agents.discovery_tools as dt  # noqa: PLC0415
+    import dexta_intelligence.agents.tools.toolkit as dt  # noqa: PLC0415
 
     stub = _StubBackend([])
     monkeypatch.setattr(dt, "evidence_backend", lambda: stub)
     dt._search_evidence({"query": "glucose", "limit": 99})
     assert stub.calls == [("glucose", 8)]
+
+
+def test_markdown_linkifies_pmids() -> None:
+    """A cited PMID renders as a clickable PubMed link."""
+    from dexta_intelligence.server.render import markdown_to_html  # noqa: PLC0415
+
+    html = markdown_to_html("Prebolusing cuts the post-meal rise (PMID 25188375).")
+    assert 'href="https://pubmed.ncbi.nlm.nih.gov/25188375/"' in html
+    assert ">PMID 25188375</a>" in html
+
+
+def test_markdown_linkifies_pmid_with_colon() -> None:
+    from dexta_intelligence.server.render import markdown_to_html  # noqa: PLC0415
+
+    html = markdown_to_html("See PMID: 30100000 for the trial.")
+    assert "https://pubmed.ncbi.nlm.nih.gov/30100000/" in html
+
+
+# ── caching backend ───────────────────────────────────────────────────────────
+
+
+def _one_hit() -> list[EvidenceHit]:
+    return [EvidenceHit(title="T", source="pubmed", id="123", snippet="T")]
+
+
+def test_cache_serves_repeat_lookup_without_hitting_inner() -> None:
+    from dexta_intelligence.evidence.cache import (  # noqa: PLC0415
+        CachingEvidenceBackend,
+        reset_cache,
+    )
+
+    reset_cache()
+    clock = [0.0]
+    inner = _StubBackend(_one_hit())
+    cached = CachingEvidenceBackend(inner, ttl_seconds=60, clock=lambda: clock[0])
+
+    first = cached.search("overnight lows", limit=2)
+    clock[0] = 30.0
+    second = cached.search("overnight lows", limit=2)
+
+    assert first == second == _one_hit()
+    assert inner.calls == [("overnight lows", 2)]  # inner hit exactly once
+
+
+def test_cache_expires_after_ttl() -> None:
+    from dexta_intelligence.evidence.cache import (  # noqa: PLC0415
+        CachingEvidenceBackend,
+        reset_cache,
+    )
+
+    reset_cache()
+    clock = [0.0]
+    inner = _StubBackend(_one_hit())
+    cached = CachingEvidenceBackend(inner, ttl_seconds=60, clock=lambda: clock[0])
+
+    cached.search("q", limit=2)
+    clock[0] = 61.0  # past the TTL
+    cached.search("q", limit=2)
+
+    assert len(inner.calls) == 2  # re-fetched after expiry
+
+
+def test_cache_does_not_pin_empty_result() -> None:
+    from dexta_intelligence.evidence.cache import (  # noqa: PLC0415
+        CachingEvidenceBackend,
+        reset_cache,
+    )
+
+    reset_cache()
+    inner = _StubBackend([])  # empty == "no results" or a transient failure
+    cached = CachingEvidenceBackend(inner, ttl_seconds=600)
+
+    assert cached.search("q") == []
+    assert cached.search("q") == []
+    assert len(inner.calls) == 2  # empty never cached, so it re-checks

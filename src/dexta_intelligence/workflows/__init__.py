@@ -1,4 +1,4 @@
-"""Workflows — orchestration over connectors, the store, and analytics."""
+"""Workflows - orchestration over connectors, the store, and analytics."""
 
 from dexta_intelligence.workflows.deep_analysis import DeepAnalysisReport, run_deep_analysis
 from dexta_intelligence.workflows.goals import (

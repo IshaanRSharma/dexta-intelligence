@@ -1,25 +1,23 @@
-"""Clinical Brief Agent — the physician-visit brief.
+"""Clinical Brief Agent - the physician-visit brief.
 
-A port of the donor codebase's clinical brief (which ran against real
-endocrinologist review): the model ranks the active findings and explains
-them in prose, every number is audited against the deterministic evidence
-pool, and any unfaithful or unsafe section falls back to a deterministic
-render. The brief is observation only — it summarizes what the data shows,
-never what to do about it (spec §A4, donor row "Clinical Brief Agent").
+The model ranks the active findings and explains them in prose, every number is
+audited against the deterministic evidence pool, and any unfaithful or unsafe
+section falls back to a deterministic render. The brief is observation only - it
+summarizes what the data shows, never what to do about it.
 
 Two safety layers, both enforced in pure code (no model is trusted to
 self-police):
 
-- **Faithfulness** — :func:`guard.faithfulness.audit` rejects any summary or
+- **Faithfulness** - :func:`guard.faithfulness.audit` rejects any summary or
   section body citing a number absent from the involved findings' evidence +
   stats; the section falls back to its deterministic render.
-- **No treatment advice** — a hard regex refuses any section body that reads
+- **No treatment advice** - a hard regex refuses any section body that reads
   as dosing/titration guidance ("increase basal", "take 2 units"); the
   section falls back to its deterministic render. The model prompt forbids it
   too, but the prompt is advisory and the regex is the gate.
 
 This module makes no LLM call when ``model is None`` and never calls
-``datetime.now`` — the caller passes ``today`` so the output is pure and
+``datetime.now`` - the caller passes ``today`` so the output is pure and
 testable. A brief is never empty when findings exist; with no findings it
 renders a graceful "insufficient data" brief.
 """
@@ -51,11 +49,11 @@ __all__ = [
     "render_markdown",
 ]
 
-#: Top findings carried into the brief — an endo visit is minutes long.
+#: Top findings carried into the brief - an endo visit is minutes long.
 _MAX_SECTIONS = 5
 
 #: Treatment-advice gate. Matches an action verb followed (within a short
-#: window) by a dosing noun — "increase basal", "take 2 units", "adjust the
+#: window) by a dosing noun - "increase basal", "take 2 units", "adjust the
 #: bolus". The brief is observation only, so any match is refused and the
 #: deterministic section is rendered instead. The model prompt forbids this
 #: too; this regex is the enforcement, not the request.
@@ -66,7 +64,7 @@ _ADVICE_RE = re.compile(
 
 @dataclass(frozen=True, slots=True)
 class BriefSection:
-    """One titled section of the brief — a finding rendered for a clinician.
+    """One titled section of the brief - a finding rendered for a clinician.
 
     ``evidence`` is the number pool the body was audited against (the union of
     the involved findings' evidence + stats), kept so a reviewer can trace any
@@ -82,9 +80,9 @@ class BriefSection:
 class ClinicalBrief:
     """A physician-visit summary of the active findings.
 
-    ``provenance`` records how the brief was produced — the model id or
+    ``provenance`` records how the brief was produced - the model id or
     ``"deterministic"``, the count of findings considered, and the generation
-    date supplied by the caller — so the brief is self-describing for review.
+    date supplied by the caller - so the brief is self-describing for review.
     Never empty when findings exist; an "insufficient data" brief otherwise.
     """
 
@@ -107,7 +105,7 @@ def build_brief(
     recurrence (desc), keeping the top five. With a model, one JSON LLM call
     ranks and explains them; each section body and the summary are audited
     against the involved findings' evidence pool and refused if they read as
-    treatment advice — failures fall back to the deterministic render of that
+    treatment advice - failures fall back to the deterministic render of that
     finding. Without a model (or on total model failure), the whole brief is
     deterministic. The brief is never empty when findings exist; with none, a
     graceful "insufficient data" brief is returned.
@@ -171,11 +169,11 @@ def _rank(findings: Sequence[Finding]) -> list[Finding]:
 
 
 def _deterministic_summary(top: Sequence[Finding], total: int) -> str:
-    """A counts line — the safe headline when no model authored one."""
+    """A counts line - the safe headline when no model authored one."""
     shown = len(top)
     return (
         f"{total} active finding(s); top {shown} summarized below. "
-        "Observation only — no treatment recommendations."
+        "Observation only - no treatment recommendations."
     )
 
 
@@ -232,7 +230,7 @@ def _evidence_numbers_line(finding: Finding) -> str:
 _SYSTEM = (
     "You are the clinical brief layer for a Type-1 diabetes review. You rank "
     "already-established findings and explain each for an endocrinologist. "
-    "Observation only — NEVER dosing, basal, bolus, titration, or any treatment "
+    "Observation only - NEVER dosing, basal, bolus, titration, or any treatment "
     "advice. Cite ONLY numbers that appear in the findings given to you; invent "
     "no figures. Respond with ONE JSON object only, no prose."
 )
@@ -256,7 +254,7 @@ def _compose_with_model(
 
     Returns ``None`` only on total model failure (so the caller falls fully
     deterministic). Otherwise returns the audited summary and one section per
-    top finding — each section is the model's prose if it is faithful and free
+    top finding - each section is the model's prose if it is faithful and free
     of treatment advice, else that finding's deterministic render.
     """
     data = _invoke(top, model)
@@ -374,7 +372,7 @@ def _section_for(item: dict[str, Any] | None, finding: Finding) -> BriefSection:
 
 
 def _evidence_pool(findings: Sequence[Finding]) -> dict[str, Any]:
-    """Union of the involved findings' evidence + stats — the guard's pool.
+    """Union of the involved findings' evidence + stats - the guard's pool.
 
     A dict (vs. synthesis's list) so it doubles as the section's traceable
     ``evidence`` payload; the guard walks either shape identically.

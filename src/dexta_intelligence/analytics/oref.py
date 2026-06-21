@@ -5,11 +5,11 @@ Provenance
 This module is an analytical port of the documented, MIT-licensed math from the
 OpenAPS **oref0** reference implementation (https://github.com/openaps/oref0):
 
-- ``lib/iob/calculate.js`` — exponential and bilinear insulin activity/IOB curves.
-- ``lib/iob/total.js`` — DIA/peak clamping rules and IOB/activity summation.
-- ``lib/determine-basal/cob.js`` — deviation calculation and carb-absorption detection.
-- ``lib/meal/total.js`` — COB accounting (clamping at 0, ``maxCOB`` cap).
-- ``lib/determine-basal/determine-basal.js`` — BGI, eventual BG, and the
+- ``lib/iob/calculate.js`` - exponential and bilinear insulin activity/IOB curves.
+- ``lib/iob/total.js`` - DIA/peak clamping rules and IOB/activity summation.
+- ``lib/determine-basal/cob.js`` - deviation calculation and carb-absorption detection.
+- ``lib/meal/total.js`` - COB accounting (clamping at 0, ``maxCOB`` cap).
+- ``lib/determine-basal/determine-basal.js`` - BGI, eventual BG, and the
   IOB/ZT/COB/UAM prediction curves.
 - Docs: https://openaps.readthedocs.io/en/master/docs/While%20You%20Wait%20For%20Gear/Understand-determine-basal.html
 
@@ -369,7 +369,7 @@ def deviation_series(
     From cob.js: for each glucose point, ``deviation = delta - BGI`` where
     ``delta`` is the observed change since the previous point and BGI is
     computed from total insulin activity *at the newer point*. A positive
-    deviation means BG rose more (or fell less) than insulin alone explains —
+    deviation means BG rose more (or fell less) than insulin alone explains -
     the signal used to detect carb absorption.
 
     ``glucose`` must be sorted oldest-to-newest at (roughly) 5-minute spacing;
@@ -431,7 +431,7 @@ def carbs_on_board(
 
     Simplifications vs. the JS (documented in the module docstring): no raw-CGM
     bucketing/interpolation, and the ``currentDeviation/2`` term in cob.js's
-    ``ci`` is omitted. The floor applies to *announced* (entered) carbs only —
+    ``ci`` is omitted. The floor applies to *announced* (entered) carbs only -
     callers tracking unannounced meals should rely on the UAM prediction curve
     instead.
     """
@@ -544,7 +544,7 @@ def predict_glucose(
       curves as they come due.
     - ``zt_basal_u_hr``: scheduled basal rate for the zero-temp curve. The ZT
       curve uses only doses at/before ``at`` plus, if this is > 0, negative
-      deltas modeling a zero temp (no basal) over the whole horizon — oref0's
+      deltas modeling a zero temp (no basal) over the whole horizon - oref0's
       ``iobWithZeroTemp`` worst case. With the default 0, ZT is simply
       "existing IOB only, no future insulin".
     - ``deviation_5m``: current deviation in mg/dL per 5 min. Default 0 gives a

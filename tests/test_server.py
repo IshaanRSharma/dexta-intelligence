@@ -1,4 +1,4 @@
-"""GUI tests — gated on the optional [gui] extra.
+"""GUI tests - gated on the optional [gui] extra.
 
 Drive the FastAPI app through TestClient against a seeded SQLiteStore injected
 via the ``store_opener`` seam. Skipped wholesale when fastapi is absent.
@@ -7,7 +7,7 @@ via the ``store_opener`` seam. Skipped wholesale when fastapi is absent.
 from __future__ import annotations
 
 import io
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +27,9 @@ from dexta_intelligence.models import (
     Goal,
     GoalCheckpoint,
     GoalMetric,
+    InvestigationRun,
+    OpenInvestigation,
+    RunFinding,
 )
 from dexta_intelligence.server import create_app
 from dexta_intelligence.server.render import emit_toml, markdown_to_html, sparkline_svg
@@ -99,8 +102,9 @@ def test_dashboard_lists_active_finding(tmp_path: Path) -> None:
     assert resp.status_code == 200
     body = resp.text
     assert "Overnight lows cluster after evening exercise" in body
-    assert "✓ survived" in body
-    assert "82%" in body  # confidence
+    # confidence 0.82 + n=24 + survived -> strong evidence; seen once -> supported
+    assert "strong evidence" in body
+    assert "supported" in body
     store.close()
 
 
@@ -148,9 +152,11 @@ def test_wiki_page_renders_markdown(tmp_path: Path) -> None:
     )
     config = Config.model_validate({"wiki": {"path": str(wiki_root)}})
     body = _client(store, config).get("/wiki").text
+    assert "wiki-shell" in body
+    assert "wiki-nav" in body
     assert "<h1>dexta wiki</h1>" in body
     assert "<strong>10 days</strong>" in body
-    assert "<table>" in body
+    assert "wiki-table-wrap" in body
     assert 'href="/wiki/topics/lows"' in body
     store.close()
 
@@ -159,7 +165,7 @@ def test_wiki_missing_page_empty_state(tmp_path: Path) -> None:
     store = _store(tmp_path)
     config = Config.model_validate({"wiki": {"path": str(tmp_path / "nope")}})
     body = _client(store, config).get("/wiki/topics/ghost").text
-    assert "dexta wiki" in body  # install hint mentions the command
+    assert "dexta wiki" in body
     store.close()
 
 
@@ -187,7 +193,7 @@ def test_goals_page_shows_svg_arc(tmp_path: Path) -> None:
     body = _client(store).get("/goals").text
     assert "Reduce overnight lows" in body
     assert "<svg" in body and "<polyline" in body
-    assert "tick 2" in body  # latest note
+    assert "tick 2" in body  # only the latest note is surfaced
     store.close()
 
 
@@ -195,7 +201,69 @@ def test_goals_empty_state(tmp_path: Path) -> None:
     store = _store(tmp_path)
     body = _client(store).get("/goals").text
     assert "No goals yet" in body
-    assert "dexta goals add" in body
+    assert "Add goal" in body
+    assert 'name="statement"' in body
+    store.close()
+
+
+def test_goals_post_creates_goal(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    resp = client.post(
+        "/goals",
+        data={"statement": "Reduce overnight lows", "target": "5"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/goals?saved=1"
+    body = client.get("/goals?saved=1").text
+    assert "Goal added." in body
+    assert "Reduce overnight lows" in body
+    assert store.get_goals()[0].target == 5.0
+    store.close()
+
+
+def test_goals_post_rejects_empty_statement(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).post("/goals", data={"statement": "   "})
+    assert resp.status_code == 200
+    assert "Describe what you want to improve" in resp.text
+    assert not store.get_goals()
+    store.close()
+
+
+def test_goals_post_rejects_duplicate_active_statement(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    assert (
+        client.post(
+            "/goals",
+            data={"statement": "Increase time in range"},
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
+    resp = client.post("/goals", data={"statement": "increase time in range"})
+    assert resp.status_code == 200
+    assert "already have an active goal" in resp.text
+    assert len(store.get_goals()) == 1
+    store.close()
+
+
+def test_goals_abandon_hides_from_page(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    goal_id = store.insert_goal(
+        Goal(
+            statement="Reduce overnight lows",
+            metric=GoalMetric.NOCTURNAL_TBR,
+            direction="decrease",
+        )
+    )
+    client = _client(store)
+    resp = client.post(f"/goals/{goal_id}/abandon", follow_redirects=False)
+    assert resp.status_code == 303
+    body = client.get("/goals").text
+    assert "Reduce overnight lows" not in body
     store.close()
 
 
@@ -220,7 +288,6 @@ class _FakeAgent:
 def test_api_ask_with_fake_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = _store(tmp_path)
     _seed_glucose(store)
-    # Inject a fake model + fake ChatAgent so no real LLM is needed.
     monkeypatch.setattr(
         "dexta_intelligence.server.app.discovery_model", lambda _cfg: object()
     )
@@ -240,6 +307,19 @@ def test_chat_empty_state_without_model(tmp_path: Path, monkeypatch: pytest.Monk
     body = _client(store).get("/chat").text
     assert "Chat needs a language model" in body
     assert "Open Settings" in body
+    store.close()
+
+
+def test_chat_with_model_shows_history_rail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    monkeypatch.setattr(
+        "dexta_intelligence.server.app.discovery_model", lambda _cfg: object()
+    )
+    body = _client(store).get("/chat").text
+    assert 'id="new-chat-btn"' in body
+    assert 'id="session-list"' in body
     store.close()
 
 
@@ -263,6 +343,7 @@ def _settings_form(**overrides: str) -> dict[str, str]:
     data = {
         "target_low": "70",
         "target_high": "180",
+        "max_reasoning_steps": "20",
         "deep_analysis_window_days": "90",
         "path": "/tmp/wiki",
         "git": "off",
@@ -315,7 +396,7 @@ def test_markdown_escapes_and_renders() -> None:
     assert "<h2>Heading</h2>" in html
     assert "<strong>bold</strong>" in html
     assert "<code>code</code>" in html
-    assert "<script>" not in html  # escaped
+    assert "<script>" not in html
 
 
 def test_emit_toml_is_loadable(tmp_path: Path) -> None:
@@ -353,7 +434,7 @@ def test_wiki_blocks_sibling_prefix_traversal(tmp_path: Path) -> None:
 
     client = _client(store, _wiki_config(wiki_root))
     resp = client.get("/wiki/../wiki_evil/pwn", follow_redirects=False)
-    # Either rejected outright (3xx/404) or rendered as the empty state — never leaked.
+    # Either rejected outright (3xx/404) or rendered as the empty state - never leaked.
     assert "SIBLING-PREFIX-LEAK" not in resp.text
     store.close()
 
@@ -429,6 +510,8 @@ def test_settings_rejects_invalid_targets(
         {"target_low": "abc"},
         {"target_low": "-50"},
         {"target_low": "200", "target_high": "180"},
+        {"max_reasoning_steps": "3"},
+        {"max_reasoning_steps": "99"},
     ):
         resp = _post_settings(client, **overrides)
         assert resp.status_code == 400, overrides
@@ -443,7 +526,7 @@ def test_markdown_sanitizes_javascript_link() -> None:
     html = markdown_to_html("[click me](javascript:alert(1))")
     assert "javascript:alert" not in html
     assert 'href="#"' in html
-    assert "click me" in html  # text preserved
+    assert "click me" in html  # link text preserved, only the scheme is stripped
 
 
 def test_markdown_keeps_safe_link_schemes() -> None:
@@ -472,3 +555,407 @@ def test_serve_no_warning_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
     out = io.StringIO()
     cmd_serve(config=Config(), db_path=None, out=out, host="127.0.0.1", port=8787)
     assert "WARNING" not in out.getvalue()
+
+
+# ── CSV upload ────────────────────────────────────────────────────────────────
+
+
+def test_upload_csv_ingests_glucose(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    fixture = Path(__file__).parent / "fixtures" / "clarity_sample.csv"
+    with fixture.open("rb") as fh:
+        resp = client.post(
+            "/actions/upload",
+            files={"file": ("clarity_sample.csv", fh, "text/csv")},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303
+    assert "upload_ok" in resp.headers["location"]
+    assert store.coverage().n_glucose > 0
+    store.close()
+
+
+def test_upload_empty_file_flashes(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).post(
+        "/actions/upload",
+        files={"file": ("empty.csv", b"", "text/csv")},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "upload_empty" in resp.headers["location"]
+
+
+# ── investigate + lens picker ──────────────────────────────────────────────────
+
+
+class _FakeCoordinator:
+    """Coordinator stand-in - echoes the goal as one finding, no model needed."""
+
+    def __init__(self, *_a: object, **_kw: object) -> None:
+        pass
+
+    def investigate(self, _ctx: object, goal: str | None = None) -> list[Finding]:
+        return [
+            Finding(
+                agent="coordinator",
+                kind="overnight-lows",
+                scope="global",
+                headline=f"Investigated: {goal}",
+                confidence=0.7,
+                status=FindingStatus.ACTIVE,
+            )
+        ]
+
+
+def test_investigate_persists_findings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    _seed_glucose(store)  # 10 days → above the hard floor
+    monkeypatch.setattr(
+        "dexta_intelligence.agents.coordinator.CoordinatorAgent", _FakeCoordinator
+    )
+    monkeypatch.setattr(
+        "dexta_intelligence.server.app.discovery_model", lambda _cfg: object()
+    )
+    resp = _client(store).post(
+        "/actions/investigate",
+        data={"question": "what drives my overnight lows?"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "investigate_ok:1" in resp.headers["location"]
+    headlines = [f.headline for f in store.get_findings(status=None, limit=100)]
+    assert "Investigated: what drives my overnight lows?" in headlines
+    store.close()
+
+
+def test_investigate_below_floor_skips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    _seed_glucose(store, days=1.0)  # below the 3-day hard floor
+    monkeypatch.setattr(
+        "dexta_intelligence.server.app.discovery_model", lambda _cfg: object()
+    )
+    resp = _client(store).post(
+        "/actions/investigate",
+        data={"question": "anything"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "investigate_skip" in resp.headers["location"]
+    assert store.get_findings(status=None, limit=100) == []
+    store.close()
+
+
+def test_investigate_empty_question_flashes(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_glucose(store)
+    resp = _client(store).post(
+        "/actions/investigate",
+        data={"question": "   "},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "investigate_empty" in resp.headers["location"]
+    store.close()
+
+
+def _seed_run(store: SQLiteStore, *, question: str = "what drives overnight lows?") -> None:
+    store.insert_investigation_run(
+        InvestigationRun(
+            run_id="r1",
+            kind="question",
+            status="completed",
+            question=question,
+            window_start=date(2025, 6, 1),
+            window_end=date(2025, 6, 10),
+            plan=["observation", "pattern"],
+            trace=[
+                "Planned: observation, pattern",
+                "Round 1: ran observation, pattern -> 1 finding(s)",
+            ],
+            findings=[
+                RunFinding(
+                    headline="Overnight lows cluster after evening exercise",
+                    kind="overnight-lows",
+                    confidence=0.8,
+                    status="active",
+                )
+            ],
+            n_findings=1,
+            started_at=FIXED_NOW,
+            finished_at=FIXED_NOW,
+        )
+    )
+
+
+def test_investigations_page_lists_runs(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_run(store)
+    body = _client(store).get("/investigations").text
+    assert "what drives overnight lows?" in body
+    assert "Overnight lows cluster after evening exercise" in body
+    assert "observation" in body
+    assert "Round 1: ran observation, pattern" in body
+    store.close()
+
+
+def test_investigations_empty_state(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    body = _client(store).get("/investigations").text
+    assert "No investigations yet" in body
+    store.close()
+
+
+def test_investigations_page_shows_open_queue(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.insert_open_investigation(
+        OpenInvestigation(
+            question="Why does severe high keep happening?",
+            condition_type="event_count",
+            subject="severe_high",
+            target=3.0,
+            current=1.0,
+            status="collecting",
+            created_at=FIXED_NOW,
+        )
+    )
+    body = _client(store).get("/investigations").text
+    assert "Open investigations" in body
+    assert "Why does severe high keep happening?" in body
+    assert "1/3 seen" in body
+    store.close()
+
+
+def test_findings_page_renders_tabs_and_cards(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_glucose(store)
+    store.insert_finding(
+        Finding(
+            agent="pattern",
+            kind="overnight-lows",
+            scope="global",
+            headline="Overnight lows after evening exercise",
+            confidence=0.82,
+            stats=FindingStats(n=24, effect_size=0.6),
+            status=FindingStatus.ACTIVE,
+        )
+    )
+    _seed_run(store)
+    body = _client(store).get("/findings").text
+    assert "Active findings" in body
+    assert "Overnight lows after evening exercise" in body
+    assert "Open hypotheses" in body
+    assert "Investigation log" in body
+    assert "evidence" in body
+    store.close()
+
+
+def test_goals_page_shows_progress_and_checkpoints(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    goal_id = store.insert_goal(
+        Goal(
+            statement="increase time in range",
+            metric=GoalMetric.TIR,
+            direction="increase",
+            target=70.0,
+        )
+    )
+    for i, val in enumerate((31.6, 45.0, 58.0)):
+        store.insert_goal_checkpoint(
+            GoalCheckpoint(
+                goal_id=goal_id,
+                ts=FIXED_NOW + timedelta(days=i),
+                metric_value=val,
+                note=f"tick {i}",
+            )
+        )
+    body = _client(store).get("/goals").text
+    assert "increase time in range" in body
+    assert "baseline" in body
+    assert "target" in body
+    assert "58.0" in body  # the current (latest) value, not the baseline
+    assert "checkpoint(s)" in body
+    store.close()
+
+
+def test_goal_cadence_is_configurable(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).post(
+        "/goals",
+        data={"statement": "reduce overnight lows", "cadence": "14"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert store.get_goals()[0].cadence_days == 14
+    store.close()
+
+
+def test_goal_cadence_rejects_non_positive(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).post("/goals", data={"statement": "x", "cadence": "0"})
+    assert resp.status_code == 200
+    assert "at least 1 day" in resp.text
+    assert not store.get_goals()
+    store.close()
+
+
+def test_goals_tick_action_invokes_cmd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    called: dict[str, Any] = {}
+
+    def _fake_cmd_goals(*, action: str, **_kw: Any) -> int:
+        called["action"] = action
+        return 0
+
+    monkeypatch.setattr(
+        "dexta_intelligence.cli.intelligence.cmd_goals", _fake_cmd_goals
+    )
+    resp = _client(store).post("/actions/goals/tick", follow_redirects=False)
+    assert resp.status_code == 303
+    assert "flash=ticked_ok" in resp.headers["location"]
+    assert called["action"] == "tick"
+    store.close()
+
+
+def test_wiki_rebuild_action_invokes_cmd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+
+    def _fake_cmd_wiki(**_kw: Any) -> int:
+        return 0
+
+    monkeypatch.setattr(
+        "dexta_intelligence.cli.intelligence.cmd_wiki", _fake_cmd_wiki
+    )
+    resp = _client(store).post("/actions/wiki", follow_redirects=False)
+    assert resp.status_code == 303
+    assert "flash=wiki_ok" in resp.headers["location"]
+    store.close()
+
+
+# ── connectors page ─────────────────────────────────────────────────────────
+
+
+def test_connectors_page_lists_all_sources(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    body = _client(store).get("/connectors").text
+    assert "Connectors" in body
+    assert "Continuous sync" in body
+    assert "Nightscout" in body
+    assert "read-only" in body
+    assert "not configured" in body
+    store.close()
+
+
+def test_connectors_sync_requires_a_selection(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).post(
+        "/actions/connectors/sync",
+        data={"scope": "selected"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "flash=sync_none" in resp.headers["location"]
+    store.close()
+
+
+def test_connectors_autosync_sets_interval_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    toml_path = tmp_path / "dexta.toml"
+    monkeypatch.setattr(
+        "dexta_intelligence.cli._common.resolve_config_path", lambda _explicit: toml_path
+    )
+    client = _client(store)
+    resp = client.post(
+        "/actions/connectors/autosync",
+        data={"interval": "15"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "flash=autosync_ok" in resp.headers["location"]
+    # The live controller was retuned without a restart.
+    assert client.app.state.autosync.status().interval_min == 15
+    client.app.state.autosync.stop()
+    store.close()
+
+
+def test_connectors_autosync_htmx_returns_panel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    toml_path = tmp_path / "dexta.toml"
+    monkeypatch.setattr(
+        "dexta_intelligence.cli._common.resolve_config_path", lambda _explicit: toml_path
+    )
+    client = _client(store)
+    resp = client.post(
+        "/actions/connectors/autosync",
+        data={"interval": "30"},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    assert 'id="autosync-panel"' in resp.text
+    assert "Continuous sync updated." in resp.text
+    assert client.app.state.autosync.status().interval_min == 30
+    client.app.state.autosync.stop()
+    store.close()
+
+
+def test_dashboard_shows_lens_picker(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_glucose(store)
+    body = _client(store).get("/").text
+    assert 'name="lens"' in body
+    assert ">analyze</option>" in body
+    assert ">watch</option>" in body
+    store.close()
+
+
+def test_analyze_passes_selected_lens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    _seed_glucose(store)
+    captured: dict[str, str] = {}
+
+    def _fake_cmd_analyze(
+        *, config: Config, db_path: Path | None, out: Any, lens: str = "analyze"
+    ) -> int:
+        captured["lens"] = lens
+        return 0
+
+    monkeypatch.setattr(
+        "dexta_intelligence.cli.analysis.cmd_analyze", _fake_cmd_analyze
+    )
+    resp = _client(store).post(
+        "/actions/analyze",
+        data={"lens": "watch"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert captured["lens"] == "watch"
+    store.close()
+    store.close()
+
+
+def test_mask_dsn_hides_password() -> None:
+    from dexta_intelligence.server.app import _mask_dsn  # noqa: PLC0415
+
+    masked = _mask_dsn("postgresql://user:secret@db.example.com:5432/dexta")
+    assert "secret" not in masked
+    assert "***" in masked
+    assert "user" in masked
+    assert "db.example.com:5432/dexta" in masked
+    # no password -> unchanged; empty -> empty
+    assert _mask_dsn("postgresql://db.example.com/dexta") == "postgresql://db.example.com/dexta"
+    assert _mask_dsn("") == ""

@@ -16,6 +16,7 @@
   </div>
 
   {% if card.saved %}<div class="flash card-flash">Saved.</div>{% endif %}
+  {% if card.sync_msg %}<div class="flash card-flash {{ 'ok' if card.sync_ok else 'error' }}">{{ card.sync_msg }}</div>{% endif %}
   {% if card.error %}<div class="flash error card-flash">{{ card.error }}</div>{% endif %}
 
   {% set setup_flows = card.setup_flows %}
@@ -23,7 +24,7 @@
   {% include "_settings_setup.html" %}
 
   <div class="card-body">
-    <form hx-post="/settings/{{ card.key }}" hx-target="#card-{{ card.key }}" hx-swap="outerHTML" class="settings-form">
+    <form hx-post="/settings/{{ card.key }}" hx-target="#card-{{ card.key }}" hx-swap="outerHTML settle:0 swap:0" class="settings-form">
       <div class="fields">
         {% for f in card.fields %}
           {% set prefix = card.key %}
@@ -33,14 +34,22 @@
 
       {% if card.env_keys %}
       <div class="env-keys">
-        <p class="field-label env-keys-head">Environment keys</p>
-        <p class="field-hint env-keys-sub">Secrets for this panel — never written to the config file.</p>
+        <p class="field-label env-keys-head">API keys</p>
+        <p class="field-hint env-keys-sub">Saved to <code>~/.dexta/secrets.env</code> - never written to dexta.toml.</p>
         {% for ev in card.env_keys %}
-        <p class="env-row">
-          <span class="dot {{ 'set' if ev.set else 'unset' }}"></span>
-          <code>{{ ev.name }}</code>
-          <span class="muted">{{ ev.label }} · {{ 'set' if ev.set else 'not set' }}</span>
-        </p>
+        <div class="field env-field">
+          <label class="field-label" for="{{ card.key }}-env-{{ ev.name }}">{{ ev.label }}</label>
+          <p class="env-row">
+            <span class="dot {{ 'set' if ev.set else 'unset' }}"></span>
+            <code class="mono">{{ ev.name }}</code>
+            <span class="muted">{{ 'set' if ev.set else 'not set' }}</span>
+          </p>
+          <input type="password"
+                 id="{{ card.key }}-env-{{ ev.name }}"
+                 name="env__{{ ev.name }}"
+                 placeholder="{{ ev.placeholder }}"
+                 autocomplete="off" />
+        </div>
         {% endfor %}
       </div>
       {% endif %}
@@ -51,7 +60,13 @@
         <button type="button" class="btn-secondary btn-sm"
                 hx-post="/settings/{{ card.key }}/test"
                 hx-target="#test-{{ card.key }}"
-                hx-swap="innerHTML">Test connection</button>
+                hx-swap="innerHTML"
+                hx-on:click="document.getElementById('test-{{ card.key }}').innerHTML='&lt;p class=&quot;test-msg test-neutral&quot;&gt;Testing connection…&lt;/p&gt;'">Test connection</button>
+        <button type="button" class="btn-secondary btn-sm"
+                hx-post="/settings/{{ card.key }}/sync"
+                hx-target="#card-{{ card.key }}"
+                hx-swap="outerHTML settle:0 swap:0"
+                hx-on:click="document.getElementById('test-{{ card.key }}').innerHTML='&lt;p class=&quot;test-msg test-neutral&quot;&gt;Syncing…&lt;/p&gt;'">Sync now</button>
         {% endif %}
       </div>
     </form>

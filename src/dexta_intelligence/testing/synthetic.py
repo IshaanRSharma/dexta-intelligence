@@ -1,6 +1,6 @@
 """Deterministic synthetic CGM generator with planted, ground-truth effects.
 
-The evaluation framework (spec §14, E4/E5) scores discovery agents on whether
+The evaluation framework scores discovery agents on whether
 they recover *planted* patterns and, crucially, find *nothing* in null data.
 That only works if the ground truth is non-LLM and exactly known. This module
 is that ground truth.
@@ -71,7 +71,7 @@ __all__ = [
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: Seconds per CGM slot — Dexcom/Libre native cadence is 5 minutes.
+#: Seconds per CGM slot - Dexcom/Libre native cadence is 5 minutes.
 SLOT_SECONDS = 300
 #: Slots per 24h day.
 SLOTS_PER_DAY = 288
@@ -134,7 +134,7 @@ class PlantedEffect(_FrozenModel):
 class ScenarioManifest(_FrozenModel):
     """Ground-truth description of a generated scenario.
 
-    A null scenario carries an empty ``effects`` list — the assertion an eval
+    A null scenario carries an empty ``effects`` list - the assertion an eval
     harness scores against is "find nothing here".
     """
 

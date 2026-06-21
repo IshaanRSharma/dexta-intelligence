@@ -1,10 +1,10 @@
-"""Golden datasets — planted ground truth for Wave 5 spike explanation (WAVE5 §6).
+"""Golden datasets - planted ground truth for spike explanation.
 
 Five deterministic builders, each planting a known contributor (or none) into a
 synthetic timeline. The manifest records the planted numbers so tests and evals
 assert against ground truth, never against model output. The canonical plant:
 dinner on 2026-03-14 at 20:00, bolus 22 min late, spike peaking at exactly
-246 mg/dL at 20:42 — recurring across 14 of 18 dinners.
+246 mg/dL at 20:42 - recurring across 14 of 18 dinners.
 """
 
 from __future__ import annotations

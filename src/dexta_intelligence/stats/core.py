@@ -1,33 +1,19 @@
-"""Deterministic statistics core — pure functions, stdlib only, never NaN.
+"""Deterministic statistics core - pure functions, stdlib only, never NaN.
 
 This module is the numeric foundation every agent builds on. The LLM never
 computes statistics; it picks which of these functions to call. That is the
-whole point — models hallucinate means, this module does not.
-
-Ported and hardened from the donor codebase:
-
-- ``agents/coach/correlators/_stats.py`` → :func:`mean`, :func:`stdev`,
-  :func:`cohen_d`, :func:`confidence_from_n_and_d`,
-  :func:`strength_from_effect`.
-- ``agents/researcher/tools.py`` → :func:`pearson_r` and the z-score
-  baseline logic behind anomaly detection (:func:`zscores`), with all DB /
-  Supabase / LLM-context plumbing stripped.
-
-New for the OSS core (spec §8): :func:`spearman_rho`, :func:`welch_t_test`,
-:func:`mann_whitney_u`, :func:`cliffs_delta`, :func:`hedges_g`,
-:func:`bootstrap_mean_ci`, :func:`bootstrap_diff_ci`, :func:`summarize`.
+whole point - models hallucinate means, this module does not.
 
 Design rules
 ------------
-1. **Stdlib only.** ``math`` + ``statistics`` + ``random``. No numpy/scipy —
+1. **Stdlib only.** ``math`` + ``statistics`` + ``random``. No numpy/scipy -
    self-hosters get a zero-dependency install and auditable math.
 2. **Primitives raise, analyses return ``None``.** :func:`mean`,
    :func:`median`, :func:`stdev` raise :class:`ValueError` on degenerate
    input, like ``statistics`` does. Everything higher-level (correlations,
    tests, effect sizes, bootstraps) returns ``None`` when the statistic is
-   mathematically undefined. The donor returned ``0.0`` in those cases,
-   which silently conflates "no effect" with "cannot compute" — that
-   convention is deliberately not inherited.
+   mathematically undefined, rather than ``0.0``, which would silently
+   conflate "no effect" with "cannot compute".
 3. **Never NaN, never infinity.** Every float that comes out of this module
    is finite. Undefined is spelled ``None``, not ``nan``.
 4. **Determinism.** Bootstrap functions take an explicit ``seed`` and are
@@ -82,7 +68,7 @@ class SummaryStats:
     """Descriptive summary of one series. Fields are ``None`` when undefined.
 
     ``sd`` needs n ≥ 2; ``cv_pct`` (coefficient of variation, %) additionally
-    needs a nonzero mean. CV is a first-class CGM metric — the consensus
+    needs a nonzero mean. CV is a first-class CGM metric - the consensus
     glycemic-variability target is CV ≤ 36%.
     """
 
@@ -149,8 +135,8 @@ def mean(xs: Sequence[float]) -> float:
     """Arithmetic mean.
 
     Raises:
-        ValueError: on empty input. The donor returned ``0.0`` here, which
-            silently poisoned downstream deltas; that behavior is gone.
+        ValueError: on empty input (rather than returning ``0.0``, which
+            would silently poison downstream deltas).
     """
     if not xs:
         raise ValueError("mean() requires at least one value")
@@ -172,8 +158,8 @@ def stdev(xs: Sequence[float]) -> float:
     """Sample standard deviation (n - 1 denominator).
 
     Raises:
-        ValueError: if n < 2 — one observation has no spread. (The donor
-            returned ``0.0``, conflating "constant" with "unknown".)
+        ValueError: if n < 2 - one observation has no spread (rather than
+            returning ``0.0``, which would conflate "constant" with "unknown").
     """
     if len(xs) < 2:
         raise ValueError("stdev() requires at least two values")
@@ -183,8 +169,8 @@ def stdev(xs: Sequence[float]) -> float:
 def summarize(xs: Sequence[float]) -> SummaryStats:
     """Descriptive summary that is total: any input, including empty, works.
 
-    This is the safe agent-facing entry point — fields the data cannot
-    support are ``None`` rather than fabricated.
+    The safe agent-facing entry point: fields the data cannot support are
+    ``None`` rather than fabricated.
     """
     n = len(xs)
     if n == 0:
@@ -208,11 +194,10 @@ def summarize(xs: Sequence[float]) -> SummaryStats:
 def zscores(xs: Sequence[float]) -> list[float] | None:
     """Standard scores ``(x - mean) / sd`` for every element.
 
-    This is the baseline-deviation primitive behind the donor's
-    ``anomaly_days`` tool. Returns ``None`` when standardization is
-    undefined: n < 2 or a constant series (sd = 0). The donor patched
-    constant series with ``stdev or 1.0``, which manufactured fake z-scores;
-    that hack is not ported.
+    The baseline-deviation primitive behind anomaly detection. Returns
+    ``None`` when standardization is undefined: n < 2 or a constant series
+    (sd = 0). Patching a constant series with ``stdev or 1.0`` would
+    manufacture fake z-scores, so it is deliberately avoided.
     """
     if len(xs) < 2:
         return None
@@ -235,9 +220,8 @@ def pearson_r(xs: Sequence[float], ys: Sequence[float]) -> float | None:
     :func:`spearman_rho` for skewed lifestyle signals (workout strain,
     sleep debt) or whenever only monotonicity matters.
 
-    Returns ``None`` when undefined: n < 2 or either series is constant.
-    (The donor returned ``0.0`` for those *and* for mismatched lengths;
-    a length mismatch is a caller bug and now raises.)
+    Returns ``None`` when undefined: n < 2 or either series is constant. A
+    length mismatch is a caller bug and raises.
 
     Raises:
         ValueError: if the series have different lengths.
@@ -262,7 +246,7 @@ def spearman_rho(xs: Sequence[float], ys: Sequence[float]) -> float | None:
     """Spearman rank correlation: Pearson on average ranks (ties shared).
 
     Captures any monotonic relationship, linear or not, and is robust to
-    outliers — the right default for ordinal scores (recovery 0-100) and
+    outliers - the right default for ordinal scores (recovery 0-100) and
     heavy-tailed daily metrics.
 
     Returns ``None`` when undefined (n < 2 or a constant series).
@@ -309,8 +293,7 @@ def cohen_d(a: Sequence[float], b: Sequence[float]) -> float | None:
     :func:`hedges_g`, which corrects d's upward bias.
 
     Returns ``None`` when undefined: either group has n < 2, or both groups
-    are constant (pooled sd = 0). The donor returned ``0.0`` and carried a
-    dead ``max(1, …)`` guard on the df denominator; both are fixed.
+    are constant (pooled sd = 0).
     """
     n_a, n_b = len(a), len(b)
     if n_a < 2 or n_b < 2:
@@ -346,7 +329,7 @@ def cliffs_delta(a: Sequence[float], b: Sequence[float]) -> float | None:
     negligible, < 0.33 small, < 0.474 medium, else large. Use when normality
     is implausible or outliers would distort :func:`cohen_d`.
 
-    O(n_a · n_b) — fine for day-level series. Returns ``None`` if either
+    O(n_a · n_b) - fine for day-level series. Returns ``None`` if either
     group is empty.
     """
     if not a or not b:
@@ -371,13 +354,13 @@ def welch_t_test(a: Sequence[float], b: Sequence[float]) -> WelchTTestResult | N
     """Welch's unequal-variance t-test for a difference in group means.
 
     Preferred over Student's pooled t because it does not assume equal
-    variances — "workout days" and "rest days" rarely share a variance.
+    variances - "workout days" and "rest days" rarely share a variance.
     Appropriate when group means are the quantity of interest and the data
     are roughly symmetric or n is moderate (CLT); otherwise reach for
     :func:`mann_whitney_u`.
 
     Returns ``None`` when undefined: either group has n < 2, or both groups
-    are constant (zero standard error — no sampling noise to test against).
+    are constant (zero standard error - no sampling noise to test against).
     """
     n_a, n_b = len(a), len(b)
     if n_a < 2 or n_b < 2:
@@ -405,7 +388,7 @@ def welch_t_test(a: Sequence[float], b: Sequence[float]) -> WelchTTestResult | N
 def mann_whitney_u(a: Sequence[float], b: Sequence[float]) -> MannWhitneyResult | None:
     """Mann-Whitney U test: do values from *a* tend to exceed values from *b*?
 
-    Distribution-free alternative to :func:`welch_t_test` — compares the
+    Distribution-free alternative to :func:`welch_t_test` - compares the
     whole distributions via ranks, so outliers and skew (post-meal spikes,
     hypo tails) cannot dominate. Uses the normal approximation with tie
     correction and a 0.5 continuity correction; treat p-values as
@@ -443,7 +426,7 @@ def mann_whitney_u(a: Sequence[float], b: Sequence[float]) -> MannWhitneyResult 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Distribution tails (stdlib implementations — no scipy)
+# Distribution tails (stdlib implementations - no scipy)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -462,7 +445,7 @@ def student_t_two_sided_p(t: float, df: float) -> float:
     """Two-sided Student-t p-value: ``P(|T_df| ≥ |t|)``.
 
     Computed as the regularized incomplete beta ``I_x(df/2, 1/2)`` with
-    ``x = df/(df + t²)`` — the standard closed form — using a Lentz
+    ``x = df/(df + t²)`` - the standard closed form - using a Lentz
     continued-fraction evaluation accurate to ~1e-12. Valid for any real
     ``df > 0`` (Welch df is fractional).
 
@@ -559,7 +542,7 @@ def bootstrap_mean_ci(
     Resamples with replacement ``n_resamples`` times and takes the
     ``(1 - confidence)/2`` and ``(1 + confidence)/2`` empirical quantiles.
     Distribution-free and honest about skew, but anti-conservative for very
-    small n (≲ 10) — pair with a minimum-n gate upstream. Deterministic for
+    small n (≲ 10) - pair with a minimum-n gate upstream. Deterministic for
     a fixed ``seed``.
 
     Returns ``None`` on empty input.
@@ -595,7 +578,7 @@ def bootstrap_diff_ci(
     """Percentile-bootstrap CI for ``mean(a) - mean(b)`` (independent groups).
 
     Each group is resampled independently. A CI excluding zero is bootstrap
-    evidence of a real mean difference — the natural companion to
+    evidence of a real mean difference - the natural companion to
     :func:`cohen_d` when distributional assumptions are shaky.
 
     Returns ``None`` if either group is empty.
@@ -642,7 +625,7 @@ def _percentile(sorted_vals: Sequence[float], q: float) -> float:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Donor heuristics (observation language, not inference)
+# Heuristics (observation language, not inference)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -651,14 +634,13 @@ def confidence_from_n_and_d(n: int, d: float) -> float:
 
     Geometric mean of a sample-size score (saturates at n = 30) and an
     effect-size score (saturates at |d| = 0.8), so a weak n or a weak d
-    cannot be averaged away by the other. Donor port; the donor's docstring
-    examples were wrong and are corrected here:
+    cannot be averaged away by the other:
 
     - n=8,  |d|=0.3 → 0.316
     - n=20, |d|=0.5 → 0.645
     - n=40, |d|=0.8 → 1.0
 
-    Rounded to 3 decimals, matching the donor's presentation contract.
+    Rounded to 3 decimals.
     """
     n_score = min(1.0, max(0, n) / 30.0)
     d_score = min(1.0, abs(d) / 0.8)
@@ -669,11 +651,9 @@ def strength_from_effect(value: float, *, scale: float) -> float:
     """Normalize an effect magnitude to [0, 1] with a saturating curve.
 
     ``1 - exp(-|value|/scale)``: ``scale`` is the magnitude that reads as
-    "strong" (≈ 0.632). Donor convention: scale=10 for TIR percentage-point
+    "strong" (≈ 0.632). Convention: scale=10 for TIR percentage-point
     deltas, scale=15 for mg/dL mean deltas. Returns 0.0 for ``scale <= 0``.
-
-    Hardened: the donor used a hand-typed ``2.718281828`` for *e*; this uses
-    :func:`math.exp`. Rounded to 3 decimals, matching the donor.
+    Rounded to 3 decimals.
     """
     if scale <= 0:
         return 0.0

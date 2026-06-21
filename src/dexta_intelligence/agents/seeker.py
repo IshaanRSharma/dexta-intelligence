@@ -1,4 +1,4 @@
-"""Goal-seeking replanning loop — the agent reflects on whether it answered.
+"""Goal-seeking replanning loop - the agent reflects on whether it answered.
 
 ``run_reasoning_loop`` stops on the first turn with no tool calls or at
 ``max_steps``; it never asks *"did I actually answer the goal?"*. The
@@ -7,13 +7,13 @@
 if unmet, feeds the gap forward as a hint into the next round.
 
 It sits *on top of* the time-traversal seam. One :class:`DiscoveryToolkit` is
-built once and reused across rounds, so the active sub-window — the agent's
-working memory of *where it is in time* — carries forward: a round-1 "narrow to
+built once and reused across rounds, so the active sub-window - the agent's
+working memory of *where it is in time* - carries forward: a round-1 "narrow to
 March" persists into round 2 unless the model re-scopes again.
 
 Guard contract: evidence is accumulated across *all* rounds (every round's
 ``ReasoningResult.evidence`` is merged) and the final answer is audited against
-that merged pool via :func:`agents.chat._finish` — so a number computed in
+that merged pool via :func:`agents.chat._finish` - so a number computed in
 round 1 and cited in the round-3 answer is still traceable, never false-rejected.
 The final ``ChatAnswer.tools_used`` reflects the union of tool calls. The guard
 is never bypassed; no dosing/treatment content (chat's system prompt forbids it
@@ -28,8 +28,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.chat import _SYSTEM, ChatAnswer, _finish
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit, tool_specs
+from dexta_intelligence.agents.orchestrator import INVESTIGATION_DOCTRINE, workflow_tool_specs
 from dexta_intelligence.agents.reason import ReasoningResult, ToolCall, run_reasoning_loop
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
@@ -69,14 +70,14 @@ class Reflection:
 
 @dataclass
 class GoalSeekingAgent:
-    """Constrained goal-seeking (WAVE5 §5) — never an open-ended loop.
+    """Constrained goal-seeking - never an open-ended loop.
 
     Hard limits, all enforced in code: ``max_rounds`` defaults to 2; the loop
     also stops when a round calls no tool not already called, when the evidence
     pool did not grow, when the round repeats the prior round's tool sequence,
     or when the reflection cannot name a real exposed tool."""
 
-    model: BaseChatModel
+    model: BaseChatModel | None
     max_rounds: int = 2
     max_steps: int = 6
     target_low: int = 70
@@ -96,7 +97,12 @@ class GoalSeekingAgent:
             return _finish(ReasoningResult(answer="", stopped_reason="model_error"))
 
         toolkit = DiscoveryToolkit(ctx, target_low=self.target_low, target_high=self.target_high)
-        specs = tool_specs(ctx, toolkit)
+        # Goal pursuit gets the same belt as the orchestrator - instruments PLUS
+        # investigation shortcuts - so a goal can compose investigations, not just
+        # read a metric.
+        specs = tool_specs(ctx, toolkit) + workflow_tool_specs(
+            ctx, target_low=self.target_low, target_high=self.target_high
+        )
         spec_names = {spec.name for spec in specs}
 
         merged_evidence: dict[str, Any] = {}
@@ -174,7 +180,7 @@ class GoalSeekingAgent:
         )
 
 
-# ── hard stop conditions (WAVE5 §5 — bounded agency) ─────────────────────────
+# ── hard stop conditions (bounded agency) ─────────────────────────
 
 
 def _must_stop(
@@ -187,20 +193,20 @@ def _must_stop(
     reflection: Reflection,
     spec_names: set[str],
 ) -> bool:
-    """True when continuing cannot help. All checks are plain code — the model
+    """True when continuing cannot help. All checks are plain code - the model
     never gets to argue for another round."""
     if round_idx > 0 and not (set(round_names) - seen_names):
-        logger.info("seeker: stop — no new tool was called")
+        logger.info("seeker: stop - no new tool was called")
         return True
     if round_idx > 0 and not evidence_grew:
-        logger.info("seeker: stop — evidence did not increase")
+        logger.info("seeker: stop - evidence did not increase")
         return True
     if prev_sequence is not None and round_names == prev_sequence:
-        logger.info("seeker: stop — same tool sequence repeated")
+        logger.info("seeker: stop - same tool sequence repeated")
         return True
     hint = f"{reflection.missing} {reflection.next_hint}"
     if not any(name in hint for name in spec_names):
-        logger.info("seeker: stop — reflection names no available tool")
+        logger.info("seeker: stop - reflection names no available tool")
         return True
     return False
 
@@ -208,19 +214,31 @@ def _must_stop(
 # ── round prompt shaping ─────────────────────────────────────────────────────
 
 
+#: Goal pursuit = composing investigations across rounds toward a conclusion
+#: about the goal, layered on the shared chat rails + investigation doctrine.
+_GOAL_SYSTEM = (
+    _SYSTEM
+    + "\n\n"
+    + INVESTIGATION_DOCTRINE
+    + "\n\nYou are pursuing a STANDING GOAL across rounds. Each round, compose or extend an "
+    "investigation that moves toward a conclusion about the goal - not just a metric reading. "
+    "After each round you reflect on whether the goal is answered; if not, pursue the specific "
+    "angle still missing."
+)
+
+
 def _round_system(trace_summary: str, hint: str) -> str:
     if not trace_summary and not hint:
-        return _SYSTEM
+        return _GOAL_SYSTEM
     addendum = ["", "PRIOR ROUND:"]
     if trace_summary:
         addendum.append(trace_summary)
     if hint:
         addendum.append(
             f"You did not fully answer yet. Still missing: {hint} "
-            "Use the time-traversal tools (set_window, zoom_event, daily_series) "
-            "to close this gap before answering."
+            "Compose or extend an investigation to close this gap before answering."
         )
-    return _SYSTEM + "\n".join(addendum)
+    return _GOAL_SYSTEM + "\n".join(addendum)
 
 
 def _round_user(goal: str, hint: str) -> str:
@@ -231,7 +249,7 @@ def _round_user(goal: str, hint: str) -> str:
 
 def _next_hint(reflection: Reflection) -> str:
     parts = [p for p in (reflection.missing, reflection.next_hint) if p]
-    return " — ".join(parts)
+    return " - ".join(parts)
 
 
 def _trace_summary(result: ReasoningResult) -> str:
@@ -253,7 +271,7 @@ def _merge_round(
     """Fold one round's evidence and steps into the running totals.
 
     Evidence keys are namespaced by round so a round-2 call cannot clobber a
-    round-1 number of the same name — both stay in the merged pool the guard
+    round-1 number of the same name - both stay in the merged pool the guard
     audits the final answer against.
     """
     for key, value in result.evidence.items():

@@ -1,4 +1,4 @@
-"""Tests for the Skeptic Agent (spec §8)."""
+"""Tests for the Skeptic Agent."""
 
 from __future__ import annotations
 
@@ -120,7 +120,7 @@ def test_rejects_quantitative_without_p_value(store: SQLiteStore) -> None:
 
 
 def test_confound_flag_lowers_confidence(store: SQLiteStore) -> None:
-    # Two distinct groups with real separation — should pass rigor on both seeds
+    # Two distinct groups with real separation: should pass rigor on both seeds.
     high_a = [200.0] * 12
     low_b = [120.0] * 12
     f1 = _quantitative_finding(
@@ -188,7 +188,7 @@ def test_confound_hypotheses_one_per_pair(store: SQLiteStore) -> None:
     assert len(hypotheses) == 1
     statement = hypotheses[0].statement
     assert statement.startswith("Disentangle pattern_sleep_glucose vs pattern_weekday_weekend:")
-    assert statement.endswith("— stratify when more data allows [skeptic]")
+    assert statement.endswith("- stratify when more data allows [skeptic]")
 
 
 def test_confound_hypotheses_none_without_flag(store: SQLiteStore) -> None:

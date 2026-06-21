@@ -1,4 +1,4 @@
-"""Statistical rigor layer — the gate every discovery must clear.
+"""Statistical rigor layer - the gate every discovery must clear.
 
 A discovery engine mining months of CGM data across dozens of dimensions is a
 p-hacking machine unless every candidate finding is forced through the same
@@ -32,7 +32,7 @@ The four checks
 :class:`RigorVerdict` for one candidate finding.
 
 Dependencies: Python stdlib + pydantic only. This module is self-contained
-by design — it must never import from sibling analytics modules.
+by design - it must never import from sibling analytics modules.
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def mean_difference(group_a: Sequence[float], group_b: Sequence[float]) -> float
     """Difference of group means, ``mean(group_a) - mean(group_b)``.
 
     The default effect statistic for the rigor pipeline: positive values mean
-    group A runs higher. It is deliberately unstandardized — prose layers
+    group A runs higher. It is deliberately unstandardized - prose layers
     report it in the metric's native units (mg/dL, %TIR, ...).
 
     :raises statistics.StatisticsError: if either group is empty.
@@ -114,8 +114,8 @@ def permutation_pvalue(
         p = (count_at_least_as_extreme + 1) / (n_permutations + 1)
 
     which treats the observed labeling as one more (valid) permutation. This
-    guarantees ``p > 0`` — a Monte Carlo test can never honestly report
-    ``p == 0`` — and keeps the test exact-or-conservative regardless of how
+    guarantees ``p > 0`` - a Monte Carlo test can never honestly report
+    ``p == 0`` - and keeps the test exact-or-conservative regardless of how
     few permutations were run.
 
     No distributional assumptions are made; this works for any statistic the
@@ -170,8 +170,8 @@ def benjamini_hochberg(pvalues: Sequence[float], alpha: float = 0.10) -> BHResul
     """Benjamini-Hochberg step-up FDR correction (BH 1995).
 
     Applied once per Deep-Analysis run across *all* hypotheses tested in that
-    run. Controls the false discovery rate — the expected fraction of false
-    positives among the rejected hypotheses — at level ``alpha``, assuming
+    run. Controls the false discovery rate - the expected fraction of false
+    positives among the rejected hypotheses - at level ``alpha``, assuming
     independent (or positively dependent, PRDS) tests.
 
     Procedure: sort the m p-values ascending, find the largest rank ``k``
@@ -184,7 +184,7 @@ def benjamini_hochberg(pvalues: Sequence[float], alpha: float = 0.10) -> BHResul
     input order, so callers can zip results back onto their findings.
 
     :param pvalues: raw p-values, one per hypothesis tested in the run.
-    :param alpha: target FDR level (project default 0.10 — the surfacing
+    :param alpha: target FDR level (project default 0.10 - the surfacing
         threshold for discoveries).
     :returns: :class:`BHResult` with q-values and reject flags in input order.
     :raises ValueError: if alpha is outside ``(0, 1)`` or any p-value is
@@ -333,7 +333,7 @@ def power_gate(
     if not group_sizes:
         return PowerGateResult(
             passed=False,
-            reason="no comparison groups present — collecting more data",
+            reason="no comparison groups present - collecting more data",
         )
     smallest = min(group_sizes)
     total = sum(group_sizes)
@@ -342,7 +342,7 @@ def power_gate(
             passed=False,
             reason=(
                 f"underpowered: smallest group has {smallest} of {min_per_group} "
-                f"required samples — collecting more data"
+                f"required samples - collecting more data"
             ),
         )
     if total < min_total:
@@ -350,7 +350,7 @@ def power_gate(
             passed=False,
             reason=(
                 f"underpowered: {total} total samples of {min_total} required "
-                f"— collecting more data"
+                f"- collecting more data"
             ),
         )
     return PowerGateResult(
@@ -374,11 +374,11 @@ class RigorVerdict(_FrozenModel):
     (``p`` → ``p_perm``, ``q`` → ``q_fdr``, ``replicated`` → ``replicated``).
     Verdict semantics:
 
-    - ``"pass"`` — powered, q-significant, and replicated: may be surfaced
+    - ``"pass"`` - powered, q-significant, and replicated: may be surfaced
       as a discovery.
-    - ``"weak"`` — powered and q-significant but **not** replicated: demote
+    - ``"weak"`` - powered and q-significant but **not** replicated: demote
       to a :class:`~dexta_intelligence.models.Hypothesis` (status ``open``).
-    - ``"fail"`` — underpowered, or not significant after FDR correction:
+    - ``"fail"`` - underpowered, or not significant after FDR correction:
       must not be surfaced as an effect claim.
     """
 
@@ -413,11 +413,11 @@ def assess(
     Pipeline order (matching the Deep-Analysis contract):
 
     1. :func:`power_gate` on the group sizes. If it fails, nothing else is
-       computed — testing thin data would only manufacture false confidence —
+       computed - testing thin data would only manufacture false confidence -
        and the verdict is ``"fail"`` with a cold-start reason.
     2. :func:`permutation_pvalue` on ``statistic(group_a, group_b)``.
     3. :func:`benjamini_hochberg` over this p-value **plus**
-       ``sibling_pvalues`` — the raw p-values of every other hypothesis
+       ``sibling_pvalues`` - the raw p-values of every other hypothesis
        tested in the same analysis run. FDR correction is only honest at the
        run level; a finding assessed alone (no siblings) has ``q == p``.
     4. :func:`split_half_replication` on temporally ordered groups.
@@ -483,7 +483,7 @@ def assess(
     elif not split.replicated:
         verdict = "weak"
         reasons.append(
-            f"significant (q={q:.4g}) but not replicated — demote to hypothesis"
+            f"significant (q={q:.4g}) but not replicated - demote to hypothesis"
         )
     else:
         verdict = "pass"

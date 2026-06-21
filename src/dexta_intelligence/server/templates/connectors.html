@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}dexta · connectors{% endblock %}
+{% block content %}
+{% from "_components.html" import chip %}
+{% set sources = sources|default([]) %}
+{% set autosync = autosync|default({"enabled": False, "interval_min": 0, "last_run": "", "last_error": None}) %}
+
+<div class="page-head">
+  <h1>Connectors</h1>
+  <p class="page-sub">Your data sources. Sync all or a subset on demand, and keep them fresh automatically.</p>
+</div>
+
+<div id="connectors-flash">
+  {% include "_connectors_flash.html" %}
+</div>
+
+{% include "_connectors_autosync_panel.html" %}
+
+{% if sources %}
+<form method="post" action="/actions/connectors/sync" class="card conn-card">
+  <div class="conn-actions">
+    <button type="submit" name="scope" value="selected">Sync selected</button>
+    <button type="submit" name="scope" value="all" class="btn-secondary">Sync all</button>
+    <button type="button" class="btn-ghost btn-sm" id="conn-select-all">Select all / none</button>
+  </div>
+  <ul class="conn-list">
+    {% for s in sources %}
+    <li class="conn-row">
+      <label class="conn-pick">
+        <input type="checkbox" name="sources" value="{{ s.key }}" {% if not s.configured %}disabled{% endif %} />
+        <span class="conn-label">{{ s.label }}</span>
+      </label>
+      <span class="chips">
+        {% if s.configured %}<span class="badge ok">connected</span>{% else %}<span class="badge neutral">not configured</span>{% endif %}
+        {% if s.last_sync %}{{ chip("last sync", s.last_sync) }}{% endif %}
+        {{ chip("events", s.events) }}
+        <span class="badge neutral">read-only</span>
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+</form>
+<script>
+(function () {
+  var btn = document.getElementById("conn-select-all");
+  if (!btn) return;
+  btn.addEventListener("click", function () {
+    var boxes = document.querySelectorAll(".conn-list input[type=checkbox]:not(:disabled)");
+    var anyUnchecked = Array.prototype.some.call(boxes, function (b) { return !b.checked; });
+    boxes.forEach(function (b) { b.checked = anyUnchecked; });
+  });
+})();
+</script>
+{% else %}
+<div class="empty">
+  <p>No connector-backed sources available.</p>
+  <p class="hint">Configure a source in Settings to sync it here.</p>
+  <a class="btn btn-secondary" href="/settings" style="margin-top:14px">Open Settings</a>
+</div>
+{% endif %}
+{% endblock %}

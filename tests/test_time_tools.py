@@ -1,10 +1,10 @@
-"""Tests for the Wave 4 time-traversal tools on DiscoveryToolkit.
+"""Tests for the time-traversal tools on DiscoveryToolkit.
 
 These prove the reasoning agent can re-scope the active window itself: set_window
 clamps and re-scopes (a tod_compare after narrowing to March only sees March
 data), list_segments returns coarse month rows, zoom_event drills a planted spike
 to a tight trace, and daily_series returns per-day values over the active window.
-Bad args never raise — they come back as error-style dicts.
+Bad args never raise - they come back as error-style dicts.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from dexta_intelligence.agents.base import AgentContext
-from dexta_intelligence.agents.discovery_tools import DiscoveryToolkit
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit
 from dexta_intelligence.coldstart import ColdStartReport
 from dexta_intelligence.models import GlucoseEvent
 from dexta_intelligence.store import SQLiteStore
@@ -60,7 +60,7 @@ def test_set_window_rescopes_tod_compare_to_march_only() -> None:
     full = tk._tod_compare((0, 6), (12, 18))
     assert full.ok
     # Narrow to March (base 200) and re-run: every day-mean must be ~200, never
-    # April's 100 — proving the analysis tool honors the active sub-window.
+    # April's 100 - proving the analysis tool honors the active sub-window.
     sel = tk.set_window("2026-03-01", "2026-03-31")
     assert sel["active_start"] == "2026-03-01"
     assert sel["active_end"] == "2026-03-31"

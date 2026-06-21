@@ -1,4 +1,4 @@
-"""SQLiteStore — the zero-setup on-ramp backend for :class:`StoragePort`.
+"""SQLiteStore - the zero-setup on-ramp backend for :class:`StoragePort`.
 
 stdlib ``sqlite3`` only. Design decisions (the parts the protocol leaves open):
 
@@ -8,14 +8,14 @@ stdlib ``sqlite3`` only. Design decisions (the parts the protocol leaves open):
   correct.
 - **Window queries** are half-open: ``start <= ts < end``, ordered by timestamp
   ascending. Sleep events are windowed and ordered on ``ts_start``.
-- **Dedupe keys** (mirrors the raw-store idempotency philosophy — re-running a
+- **Dedupe keys** (mirrors the raw-store idempotency philosophy - re-running a
   connector or normalizer never double-inserts):
 
   ====================  =======================================
   table                 natural identity (UNIQUE index)
   ====================  =======================================
   raw_events            ``(source, source_id)`` (per the port contract)
-  glucose_events        ``ts`` — one CGM reading per instant
+  glucose_events        ``ts`` - one CGM reading per instant
   insulin_events        ``(ts, kind)``
   meal_events           ``ts``
   activity_events       ``(ts, kind)``
@@ -39,12 +39,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.models import (
     ActivityEvent,
+    ChatSession,
+    ChatTurn,
     CoverageStats,
     Finding,
     FindingStats,
@@ -58,20 +60,26 @@ from dexta_intelligence.models import (
     HypothesisStatus,
     InsulinEvent,
     InsulinKind,
+    InvestigationRun,
+    ManualEvent,
     MealEvent,
+    OpenInvestigation,
     PredictionEvent,
+    RawEvent,
     RecoveryEvent,
     Rollup,
     RollupPeriod,
+    RunFinding,
     SleepEvent,
+    TherapyProfile,
 )
 
 if TYPE_CHECKING:
-    from dexta_intelligence.models import DeviceEvent, RawEvent
+    from dexta_intelligence.models import DeviceEvent
 
 __all__ = ["SQLiteStore"]
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 9
 
 _SECONDS_PER_DAY = 86400.0
 _CGM_SLOT_SECONDS = 300.0  # expected 5-minute CGM cadence
@@ -205,7 +213,9 @@ CREATE TABLE IF NOT EXISTS findings (
     skeptic_notes TEXT,
     window_start TEXT,
     window_end TEXT,
-    superseded_by INTEGER
+    superseded_by INTEGER,
+    last_verified TEXT,
+    seen_count INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_findings_agent_kind_status ON findings (agent, kind, status);
 
@@ -237,6 +247,78 @@ CREATE TABLE IF NOT EXISTS goal_checkpoints (
     note TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_goal_checkpoints_goal ON goal_checkpoints (goal_id, ts);
+
+CREATE TABLE IF NOT EXISTS chat_turns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    ts TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns (session_id, id);
+
+CREATE TABLE IF NOT EXISTS investigation_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    question TEXT,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    plan TEXT NOT NULL,
+    trace TEXT NOT NULL,
+    findings TEXT NOT NULL,
+    n_findings INTEGER NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    coverage_summary TEXT,
+    tool_calls TEXT,
+    evidence_items TEXT,
+    answer TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_investigation_runs_finished ON investigation_runs (id);
+
+CREATE TABLE IF NOT EXISTS open_investigations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question TEXT NOT NULL,
+    condition_type TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    target REAL NOT NULL,
+    current REAL NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    promoted_run_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_open_investigations_status ON open_investigations (status);
+
+CREATE TABLE IF NOT EXISTS manual_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    event_ts TEXT NOT NULL,
+    end_ts TEXT,
+    title TEXT,
+    description TEXT,
+    tags TEXT NOT NULL,
+    intensity TEXT,
+    confidence TEXT NOT NULL,
+    source TEXT NOT NULL,
+    linked_run_id TEXT,
+    linked_glucose_event_id INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_manual_events_ts ON manual_events (event_ts);
+
+CREATE TABLE IF NOT EXISTS therapy_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    active_from TEXT NOT NULL,
+    active_to TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_therapy_profiles_active ON therapy_profiles (active_from);
 """
 
 
@@ -258,6 +340,102 @@ def _row_to_goal(r: tuple[Any, ...]) -> Goal:
         cadence_days=r[6],
         status=GoalStatus(r[7]),
         created_at=_opt_text_to_dt(r[8]),
+    )
+
+
+_RUN_COLUMNS = (
+    "id, run_id, kind, status, question, window_start, window_end, "
+    "plan, trace, findings, n_findings, started_at, finished_at, "
+    "coverage_summary, tool_calls, evidence_items, answer"
+)
+
+
+def _opt_json(value: str | None, default: Any) -> Any:
+    """Decode a nullable JSON text column, falling back for legacy NULL rows."""
+    return default if value is None else json.loads(value)
+
+
+def _row_to_run(r: tuple[Any, ...]) -> InvestigationRun:
+    return InvestigationRun(
+        id=r[0],
+        run_id=r[1],
+        kind=r[2],
+        status=r[3],
+        question=r[4],
+        window_start=date.fromisoformat(r[5]),
+        window_end=date.fromisoformat(r[6]),
+        plan=json.loads(r[7]),
+        trace=json.loads(r[8]),
+        findings=[RunFinding(**f) for f in json.loads(r[9])],
+        n_findings=r[10],
+        started_at=_text_to_dt(r[11]),
+        finished_at=_text_to_dt(r[12]),
+        coverage_summary=_opt_json(r[13], None),
+        tool_calls=_opt_json(r[14], []),
+        evidence_items=_opt_json(r[15], []),
+        answer=r[16],
+    )
+
+
+_OPEN_INVESTIGATION_COLUMNS = (
+    "id, question, condition_type, subject, target, current, status, "
+    "created_at, promoted_run_id"
+)
+
+
+def _row_to_open_investigation(r: tuple[Any, ...]) -> OpenInvestigation:
+    return OpenInvestigation(
+        id=r[0],
+        question=r[1],
+        condition_type=r[2],
+        subject=r[3],
+        target=r[4],
+        current=r[5],
+        status=r[6],
+        created_at=_text_to_dt(r[7]),
+        promoted_run_id=r[8],
+    )
+
+
+_MANUAL_EVENT_COLUMNS = (
+    "id, event_type, event_ts, end_ts, title, description, tags, intensity, "
+    "confidence, source, linked_run_id, linked_glucose_event_id, created_at"
+)
+
+
+def _row_to_manual_event(r: tuple[Any, ...]) -> ManualEvent:
+    return ManualEvent(
+        id=r[0],
+        event_type=r[1],
+        event_ts=_text_to_dt(r[2]),
+        end_ts=_opt_text_to_dt(r[3]),
+        title=r[4],
+        description=r[5],
+        tags=json.loads(r[6]),
+        intensity=r[7],
+        confidence=r[8],
+        source=r[9],
+        linked_run_id=r[10],
+        linked_glucose_event_id=r[11],
+        created_at=_text_to_dt(r[12]),
+    )
+
+
+_THERAPY_PROFILE_COLUMNS = (
+    "id, source, name, content, content_hash, active_from, active_to, created_at"
+)
+
+
+def _row_to_therapy_profile(r: tuple[Any, ...]) -> TherapyProfile:
+    return TherapyProfile(
+        id=r[0],
+        source=r[1],
+        name=r[2],
+        content=json.loads(r[3]),
+        content_hash=r[4],
+        active_from=_text_to_dt(r[5]),
+        active_to=_opt_text_to_dt(r[6]),
+        created_at=_text_to_dt(r[7]),
     )
 
 
@@ -312,6 +490,15 @@ class SQLiteStore:
         """Create or upgrade the schema. Idempotent (IF NOT EXISTS throughout)."""
         with self._conn:
             self._conn.executescript(_SCHEMA)
+            # Additive column upgrades for DBs created before these columns existed.
+            # CREATE TABLE IF NOT EXISTS never alters an existing table, so add them
+            # here; idempotent because we check the live column set first.
+            self._add_column("findings", "last_verified", "TEXT")
+            self._add_column("findings", "seen_count", "INTEGER NOT NULL DEFAULT 1")
+            self._add_column("investigation_runs", "coverage_summary", "TEXT")
+            self._add_column("investigation_runs", "tool_calls", "TEXT")
+            self._add_column("investigation_runs", "evidence_items", "TEXT")
+            self._add_column("investigation_runs", "answer", "TEXT")
             row = self._conn.execute("SELECT version FROM schema_version").fetchone()
             if row is None:
                 self._conn.execute(
@@ -320,24 +507,93 @@ class SQLiteStore:
             elif row[0] < SCHEMA_VERSION:
                 self._conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
 
+    def _add_column(self, table: str, column: str, decl: str) -> None:
+        """Add ``column`` to ``table`` if it is not already present (idempotent)."""
+        existing = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
     # ── layer 1: raw events ──────────────────────────────────────────────────
 
-    def upsert_raw_events(self, events: list[RawEvent]) -> int:
+    def upsert_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
+        if not events:
+            return {}
         rows = [
             (e.source, e.source_id, _dt_to_text(e.source_ts), json.dumps(e.payload))
             for e in events
         ]
-        return self._write_counted(
-            "INSERT INTO raw_events (source, source_id, source_ts, payload) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(source, source_id) DO NOTHING",
-            rows,
+        with self._conn:
+            self._conn.executemany(
+                "INSERT INTO raw_events (source, source_id, source_ts, payload) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(source, source_id) DO NOTHING",
+                rows,
+            )
+        return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def replace_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
+        if not events:
+            return {}
+        rows = [
+            (e.source, e.source_id, _dt_to_text(e.source_ts), json.dumps(e.payload))
+            for e in events
+        ]
+        with self._conn:
+            self._conn.executemany(
+                "INSERT INTO raw_events (source, source_id, source_ts, payload) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(source, source_id) DO UPDATE SET "
+                "source_ts = excluded.source_ts, payload = excluded.payload",
+                rows,
+            )
+        return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def get_raw_event(self, source: str, source_id: str) -> RawEvent | None:
+        row = self._conn.execute(
+            "SELECT source, source_id, source_ts, payload FROM raw_events "
+            "WHERE source = ? AND source_id = ?",
+            (source, source_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return RawEvent(
+            source=row[0],
+            source_id=row[1],
+            source_ts=_text_to_dt(row[2]),
+            payload=json.loads(row[3]),
         )
+
+    def existing_raw_ids(self, events: list[RawEvent]) -> dict[str, int]:
+        if not events:
+            return {}
+        return self._raw_ids({(e.source, e.source_id) for e in events})
+
+    def _raw_ids(self, keys: set[tuple[str, str]]) -> dict[str, int]:
+        """Resolve ``source_id -> id`` for the given ``(source, source_id)`` keys.
+
+        Covers both freshly-inserted and pre-existing rows; ``source_id`` is
+        unique within a source, so the returned keys never collide for a
+        single-source batch.
+        """
+        result: dict[str, int] = {}
+        for source, source_id in keys:
+            row = self._conn.execute(
+                "SELECT id FROM raw_events WHERE source = ? AND source_id = ?",
+                (source, source_id),
+            ).fetchone()
+            if row is not None:
+                result[source_id] = int(row[0])
+        return result
 
     def get_watermark(self, source: str) -> datetime | None:
         row = self._conn.execute(
             "SELECT MAX(source_ts) FROM raw_events WHERE source = ?", (source,)
         ).fetchone()
         return _opt_text_to_dt(row[0])
+
+    def source_event_counts(self) -> dict[str, int]:
+        rows = self._conn.execute(
+            "SELECT source, COUNT(*) FROM raw_events GROUP BY source"
+        ).fetchall()
+        return {r[0]: int(r[1]) for r in rows}
 
     # ── layer 2: clinical timeline ───────────────────────────────────────────
 
@@ -679,11 +935,13 @@ class SQLiteStore:
 
     def insert_finding(self, finding: Finding) -> int:
         """Persist a finding with a freshly assigned id (any incoming id is ignored)."""
+        last_verified = finding.last_verified or datetime.now(tz=UTC)
         with self._conn:
             cursor = self._conn.execute(
                 "INSERT INTO findings (agent, kind, scope, headline, body_md, evidence, stats, "
-                "confidence, status, skeptic_notes, window_start, window_end, superseded_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "confidence, status, skeptic_notes, window_start, window_end, superseded_by, "
+                "last_verified, seen_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     finding.agent,
                     finding.kind,
@@ -698,6 +956,8 @@ class SQLiteStore:
                     _opt_dt_to_text(finding.window_start),
                     _opt_dt_to_text(finding.window_end),
                     finding.superseded_by,
+                    _dt_to_text(last_verified),
+                    finding.seen_count,
                 ),
             )
         assert cursor.lastrowid is not None
@@ -739,7 +999,8 @@ class SQLiteStore:
         params.append(limit)
         cursor = self._conn.execute(
             "SELECT id, agent, kind, scope, headline, body_md, evidence, stats, confidence, "
-            "status, skeptic_notes, window_start, window_end, superseded_by FROM findings "
+            "status, skeptic_notes, window_start, window_end, superseded_by, last_verified, "
+            "seen_count FROM findings "
             f"{where}ORDER BY id DESC LIMIT ?",
             params,
         )
@@ -759,6 +1020,8 @@ class SQLiteStore:
                 window_start=_opt_text_to_dt(r[11]),
                 window_end=_opt_text_to_dt(r[12]),
                 superseded_by=r[13],
+                last_verified=_opt_text_to_dt(r[14]),
+                seen_count=r[15] if r[15] is not None else 1,
             )
             for r in cursor.fetchall()
         ]
@@ -869,6 +1132,234 @@ class SQLiteStore:
             )
             for r in cursor.fetchall()
         ]
+
+    # ── chat history ─────────────────────────────────────────────────────────
+
+    def append_chat_turn(self, turn: ChatTurn) -> int:
+        with self._conn:
+            cursor = self._conn.execute(
+                "INSERT INTO chat_turns (session_id, role, content, ts) VALUES (?, ?, ?, ?)",
+                (turn.session_id, turn.role, turn.content, _dt_to_text(turn.ts)),
+            )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def get_chat_turns(self, session_id: str, *, limit: int = 50) -> list[ChatTurn]:
+        cursor = self._conn.execute(
+            "SELECT id, session_id, role, content, ts FROM chat_turns "
+            "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+            (session_id, limit),
+        )
+        rows = cursor.fetchall()
+        rows.reverse()  # newest-N fetched DESC, return chronological (oldest→newest)
+        return [
+            ChatTurn(id=r[0], session_id=r[1], role=r[2], content=r[3], ts=_text_to_dt(r[4]))
+            for r in rows
+        ]
+
+    def get_chat_sessions(self, *, limit: int = 50) -> list[ChatSession]:
+        cursor = self._conn.execute(
+            "SELECT session_id, MAX(ts) AS last_ts, COUNT(*) AS turn_count, "
+            "(SELECT content FROM chat_turns inner_t "
+            " WHERE inner_t.session_id = chat_turns.session_id AND inner_t.role = 'user' "
+            " ORDER BY inner_t.id ASC LIMIT 1) AS preview "
+            "FROM chat_turns GROUP BY session_id "
+            "ORDER BY last_ts DESC, MAX(id) DESC LIMIT ?",
+            (limit,),
+        )
+        return [
+            ChatSession(
+                session_id=r[0],
+                last_ts=_text_to_dt(r[1]),
+                turn_count=r[2],
+                preview=r[3] or "",
+            )
+            for r in cursor.fetchall()
+        ]
+
+    def delete_chat_session(self, session_id: str) -> int:
+        with self._conn:
+            cursor = self._conn.execute(
+                "DELETE FROM chat_turns WHERE session_id = ?",
+                (session_id,),
+            )
+        return cursor.rowcount
+
+    # ── investigation runs ─────────────────────────────────────────────────────
+
+    def insert_investigation_run(self, run: InvestigationRun) -> int:
+        with self._conn:
+            cursor = self._conn.execute(
+                "INSERT INTO investigation_runs "
+                "(run_id, kind, status, question, window_start, window_end, plan, trace, "
+                "findings, n_findings, started_at, finished_at, "
+                "coverage_summary, tool_calls, evidence_items, answer) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run.run_id,
+                    run.kind,
+                    run.status,
+                    run.question,
+                    run.window_start.isoformat(),
+                    run.window_end.isoformat(),
+                    json.dumps(run.plan),
+                    json.dumps(run.trace),
+                    json.dumps([f.model_dump() for f in run.findings]),
+                    run.n_findings,
+                    _dt_to_text(run.started_at),
+                    _dt_to_text(run.finished_at),
+                    None if run.coverage_summary is None else json.dumps(run.coverage_summary),
+                    json.dumps(run.tool_calls),
+                    json.dumps(run.evidence_items),
+                    run.answer,
+                ),
+            )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def get_investigation_runs(self, *, limit: int = 50) -> list[InvestigationRun]:
+        cursor = self._conn.execute(
+            f"SELECT {_RUN_COLUMNS} FROM investigation_runs ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+        return [_row_to_run(r) for r in cursor.fetchall()]
+
+    def get_investigation_run(self, run_db_id: int) -> InvestigationRun | None:
+        cursor = self._conn.execute(
+            f"SELECT {_RUN_COLUMNS} FROM investigation_runs WHERE id = ?",
+            (run_db_id,),
+        )
+        row = cursor.fetchone()
+        return _row_to_run(row) if row is not None else None
+
+    # ── open investigations ─────────────────────────────────────────────────────
+
+    def insert_open_investigation(self, inv: OpenInvestigation) -> int:
+        with self._conn:
+            cursor = self._conn.execute(
+                "INSERT INTO open_investigations "
+                "(question, condition_type, subject, target, current, status, "
+                "created_at, promoted_run_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    inv.question,
+                    inv.condition_type,
+                    inv.subject,
+                    inv.target,
+                    inv.current,
+                    inv.status,
+                    _dt_to_text(inv.created_at),
+                    inv.promoted_run_id,
+                ),
+            )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def get_open_investigations(
+        self, *, status: str | None = None
+    ) -> list[OpenInvestigation]:
+        sql = f"SELECT {_OPEN_INVESTIGATION_COLUMNS} FROM open_investigations"
+        params: tuple[Any, ...] = ()
+        if status is not None:
+            sql += " WHERE status = ?"
+            params = (status,)
+        sql += " ORDER BY id DESC"
+        cursor = self._conn.execute(sql, params)
+        return [_row_to_open_investigation(r) for r in cursor.fetchall()]
+
+    def update_open_investigation(
+        self,
+        inv_id: int,
+        *,
+        current: float,
+        status: str,
+        promoted_run_id: str | None = None,
+    ) -> None:
+        with self._conn:
+            self._conn.execute(
+                "UPDATE open_investigations "
+                "SET current = ?, status = ?, promoted_run_id = ? WHERE id = ?",
+                (current, status, promoted_run_id, inv_id),
+            )
+
+    # ── manual context ───────────────────────────────────────────────────────
+
+    def add_manual_event(self, event: ManualEvent) -> int:
+        with self._conn:
+            cursor = self._conn.execute(
+                "INSERT INTO manual_events "
+                "(event_type, event_ts, end_ts, title, description, tags, intensity, "
+                "confidence, source, linked_run_id, linked_glucose_event_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    event.event_type,
+                    _dt_to_text(event.event_ts),
+                    _opt_dt_to_text(event.end_ts),
+                    event.title,
+                    event.description,
+                    json.dumps(event.tags),
+                    event.intensity,
+                    event.confidence,
+                    event.source,
+                    event.linked_run_id,
+                    event.linked_glucose_event_id,
+                    _dt_to_text(event.created_at),
+                ),
+            )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def get_manual_events(self, start: datetime, end: datetime) -> list[ManualEvent]:
+        rows = self._window(
+            f"SELECT {_MANUAL_EVENT_COLUMNS} FROM manual_events", "event_ts", start, end
+        )
+        return [_row_to_manual_event(r) for r in rows]
+
+    # ── therapy profile versions ─────────────────────────────────────────────
+
+    def add_profile_version(self, profile: TherapyProfile) -> int:
+        latest = self._conn.execute(
+            f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles "
+            "ORDER BY active_from DESC, id DESC LIMIT 1"
+        ).fetchone()
+        if latest is not None and latest[4] == profile.content_hash:
+            return int(latest[0])  # unchanged - same version still active
+        with self._conn:
+            if latest is not None and latest[6] is None:
+                self._conn.execute(
+                    "UPDATE therapy_profiles SET active_to = ? WHERE id = ?",
+                    (_dt_to_text(profile.active_from), latest[0]),
+                )
+            cursor = self._conn.execute(
+                "INSERT INTO therapy_profiles "
+                "(source, name, content, content_hash, active_from, active_to, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    profile.source,
+                    profile.name,
+                    json.dumps(profile.content),
+                    profile.content_hash,
+                    _dt_to_text(profile.active_from),
+                    _opt_dt_to_text(profile.active_to),
+                    _dt_to_text(profile.created_at),
+                ),
+            )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def get_profile_versions(self) -> list[TherapyProfile]:
+        rows = self._conn.execute(
+            f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles ORDER BY active_from ASC"
+        ).fetchall()
+        return [_row_to_therapy_profile(r) for r in rows]
+
+    def get_active_profile(self, at: datetime) -> TherapyProfile | None:
+        row = self._conn.execute(
+            f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles "
+            "WHERE active_from <= ? ORDER BY active_from DESC, id DESC LIMIT 1",
+            (_dt_to_text(at),),
+        ).fetchone()
+        return _row_to_therapy_profile(row) if row is not None else None
 
     # ── internals ────────────────────────────────────────────────────────────
 

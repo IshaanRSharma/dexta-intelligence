@@ -1,4 +1,4 @@
-"""Pure MCP tool implementations — StoragePort + optional RealtimeConnector.
+"""Pure MCP tool implementations - StoragePort + optional RealtimeConnector.
 
 No fastmcp imports here: deterministic, JSON-serializable dict outputs only.
 Computed numbers trace to stored or live readings; undefined metrics are
@@ -59,12 +59,12 @@ __all__ = [
 STALE_THRESHOLD_MINUTES = 10
 #: Minimum contiguous out-of-range duration to count as an episode.
 EPISODE_MIN_DURATION_MINUTES = 15
-#: Informational-only disclaimer — never dosing advice.
+#: Informational-only disclaimer - never dosing advice.
 ALERT_DISCLAIMER = (
     "Informational only. Not medical advice. Do not use for insulin dosing "
     "or treatment decisions. Consult your diabetes care team."
 )
-#: IOB is Tier B analysis context computed from logged boluses — never dosing input.
+#: IOB is Tier B analysis context computed from logged boluses - never dosing input.
 IOB_DISCLAIMER = (
     "Analysis context only. Computed from logged boluses, not pump state. "
     "Never use for insulin dosing or treatment decisions."
@@ -141,7 +141,7 @@ def _window_readings(
 def _cap_events(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str | None]:
     if len(items) <= MAX_EVENT_ITEMS:
         return items, None
-    note = f"showing first {MAX_EVENT_ITEMS} of {len(items)} events — narrow the window"
+    note = f"showing first {MAX_EVENT_ITEMS} of {len(items)} events - narrow the window"
     return items[:MAX_EVENT_ITEMS], note
 
 
@@ -537,7 +537,7 @@ def check_alerts(
     high: int = TARGET_HIGH_MG_DL,
     urgent_high: int = VERY_HIGH_MG_DL,
 ) -> dict[str, Any]:
-    """Threshold + trend projection alerts — informational only."""
+    """Threshold + trend projection alerts - informational only."""
     current = get_current_glucose(store, realtime, now=now)
     payload: dict[str, Any] = {
         "disclaimer": ALERT_DISCLAIMER,
@@ -620,7 +620,7 @@ def get_agp_report(
     start: datetime,
     end: datetime,
 ) -> dict[str, Any]:
-    """AGP-style percentile profile — 5-minute-of-day bins across days."""
+    """AGP-style percentile profile - 5-minute-of-day bins across days."""
     readings = _window_readings(store, start, end)
     if not readings:
         return {

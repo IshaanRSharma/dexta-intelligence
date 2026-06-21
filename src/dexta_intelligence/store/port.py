@@ -1,13 +1,13 @@
-"""StoragePort — the single seam between the system and persistence.
+"""StoragePort - the single seam between the system and persistence.
 
 Everything above this module is backend-agnostic. Postgres is the reference
 backend (TIMESTAMPTZ / JSONB / pgvector); SQLite is the zero-setup on-ramp.
-Nothing outside ``dexta_intelligence.store`` may import a database driver —
+Nothing outside ``dexta_intelligence.store`` may import a database driver -
 CI enforces this.
 
 The port is deliberately narrow: connectors write, analytics read windows,
 agents read/write findings. If a feature needs a new query, it gets a new
-*named* method here — agents never build SQL.
+*named* method here - agents never build SQL.
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
     from dexta_intelligence.models import (
         ActivityEvent,
+        ChatSession,
+        ChatTurn,
         CoverageStats,
         DeviceEvent,
         Finding,
@@ -29,13 +31,17 @@ if TYPE_CHECKING:
         GoalStatus,
         Hypothesis,
         InsulinEvent,
+        InvestigationRun,
+        ManualEvent,
         MealEvent,
+        OpenInvestigation,
         PredictionEvent,
         RawEvent,
         RecoveryEvent,
         Rollup,
         RollupPeriod,
         SleepEvent,
+        TherapyProfile,
     )
 
 __all__ = ["StoragePort"]
@@ -53,16 +59,46 @@ class StoragePort(Protocol):
 
     # ── layer 1: raw events ──────────────────────────────────────────────────
 
-    def upsert_raw_events(self, events: list[RawEvent]) -> int:
+    def upsert_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
         """Insert raw events, skipping ``(source, source_id)`` duplicates.
 
-        Returns the number of *new* rows — the idempotency contract that makes
-        every connector re-run safe.
+        Returns a ``source_id -> assigned id`` map covering every input event -
+        both newly-inserted and already-existing rows. This both reports the
+        idempotency outcome (callers derive ``new`` counts from it) and exposes
+        the ids so the sync workflow can wire ``raw_event_id`` provenance onto
+        normalized events.
+
+        ``source_id`` keys are unique within a single source; a batch is always
+        one source's pull, so the map is unambiguous per call.
         """
+        ...
+
+    def existing_raw_ids(self, events: list[RawEvent]) -> dict[str, int]:
+        """``source_id -> id`` for the subset of ``events`` already stored.
+
+        Bounded to the given keys (never a full-table scan). The sync workflow
+        snapshots this before an upsert to count genuinely-new rows.
+        """
+        ...
+
+    def replace_raw_events(self, events: list[RawEvent]) -> dict[str, int]:
+        """Upsert raw events, overwriting ``source_ts`` and ``payload`` on conflict.
+
+        For singleton snapshots (e.g. the active pump insulin profile) whose
+        ``source_id`` is stable but whose contents change every sync.
+        """
+        ...
+
+    def get_raw_event(self, source: str, source_id: str) -> RawEvent | None:
+        """Fetch one raw row by ``(source, source_id)``, or ``None`` if absent."""
         ...
 
     def get_watermark(self, source: str) -> datetime | None:
         """Latest ``source_ts`` ingested for a source (sync cursor)."""
+        ...
+
+    def source_event_counts(self) -> dict[str, int]:
+        """Count of ingested raw events per source (source -> count)."""
         ...
 
     # ── layer 2: clinical timeline ───────────────────────────────────────────
@@ -122,3 +158,91 @@ class StoragePort(Protocol):
     def set_goal_status(self, goal_id: int, status: GoalStatus) -> None: ...
     def insert_goal_checkpoint(self, checkpoint: GoalCheckpoint) -> int: ...
     def get_goal_checkpoints(self, goal_id: int) -> list[GoalCheckpoint]: ...
+
+    # ── chat history ─────────────────────────────────────────────────────────
+
+    def append_chat_turn(self, turn: ChatTurn) -> int:
+        """Persist one chat turn; returns its id."""
+        ...
+
+    def get_chat_turns(self, session_id: str, *, limit: int = 50) -> list[ChatTurn]:
+        """Turns for a session, oldest→newest, capped to the most-recent ``limit``."""
+        ...
+
+    def get_chat_sessions(self, *, limit: int = 50) -> list[ChatSession]:
+        """Distinct conversations, newest-active first, with a first-message preview."""
+        ...
+
+    def delete_chat_session(self, session_id: str) -> int:
+        """Remove all turns for ``session_id``; returns rows deleted."""
+        ...
+
+    # ── investigation runs ─────────────────────────────────────────────────────
+
+    def insert_investigation_run(self, run: InvestigationRun) -> int:
+        """Persist one investigation run; returns its id."""
+        ...
+
+    def get_investigation_runs(self, *, limit: int = 50) -> list[InvestigationRun]:
+        """Recent runs, newest first, capped to ``limit``."""
+        ...
+
+    def get_investigation_run(self, run_db_id: int) -> InvestigationRun | None:
+        """One run by its row id, or None."""
+        ...
+
+    # ── manual context ───────────────────────────────────────────────────────
+
+    def add_manual_event(self, event: ManualEvent) -> int:
+        """Persist one user-reported manual event; returns its id.
+
+        Manual events are user-submitted context, never created autonomously by
+        an agent. Each call is one explicit submission (no idempotency dedup).
+        """
+        ...
+
+    def get_manual_events(self, start: datetime, end: datetime) -> list[ManualEvent]:
+        """Manual events in the half-open window ``[start, end)``, oldest first."""
+        ...
+
+    # ── therapy profile versions ─────────────────────────────────────────────
+
+    def add_profile_version(self, profile: TherapyProfile) -> int:
+        """Record a therapy-profile version; returns its id (or the existing one).
+
+        Idempotent on content: if the latest stored version has the same
+        ``content_hash`` nothing changes. Otherwise the previous live version is
+        closed (``active_to`` set) and the new version is inserted open-ended.
+        """
+        ...
+
+    def get_profile_versions(self) -> list[TherapyProfile]:
+        """All therapy-profile versions, oldest first."""
+        ...
+
+    def get_active_profile(self, at: datetime) -> TherapyProfile | None:
+        """The profile version in effect at ``at`` (latest with ``active_from <= at``)."""
+        ...
+
+    # ── open investigations ─────────────────────────────────────────────────────
+
+    def insert_open_investigation(self, inv: OpenInvestigation) -> int:
+        """Persist one open investigation; returns its id."""
+        ...
+
+    def get_open_investigations(
+        self, *, status: str | None = None
+    ) -> list[OpenInvestigation]:
+        """Open investigations, newest first; filtered by ``status`` when given."""
+        ...
+
+    def update_open_investigation(
+        self,
+        inv_id: int,
+        *,
+        current: float,
+        status: str,
+        promoted_run_id: str | None = None,
+    ) -> None:
+        """Update progress/status (and optionally the promoted run id) for one row."""
+        ...

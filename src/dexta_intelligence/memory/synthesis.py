@@ -1,14 +1,14 @@
-"""Agentic-wiki synthesis — the LLM authors the connective narrative across findings.
+"""Agentic-wiki synthesis - the LLM authors the connective narrative across findings.
 
 The deterministic templater (``wiki.py``) lists findings separately; this layer
-reasons *across* them — "your weekend TIR drop and your late-Saturday boluses are
-the same story" — in one LLM call, then renders into the wiki (spec §6.4).
+reasons *across* them - "your weekend TIR drop and your late-Saturday boluses are
+the same story" - in one LLM call, then renders into the wiki.
 
 Two honesty rules keep it safe and make it the place the model earns its keep:
 every paragraph and connection passes :func:`guard.faithfulness.audit` against the
 involved findings' evidence + stats (a fabricated number drops the line, never the
 run), and the synthesis is regenerated from the store, never hand-authored. The
-prose is observation only — no dosing, no numbers absent from evidence.
+prose is observation only - no dosing, no numbers absent from evidence.
 """
 
 from __future__ import annotations
@@ -36,19 +36,19 @@ __all__ = [
     "synthesize",
 ]
 
-#: Findings authored by this layer carry these markers — never re-synthesized,
+#: Findings authored by this layer carry these markers - never re-synthesized,
 #: never recalled as patterns, queried back as the persisted synthesis.
 _SYNTHESIS_AGENT = "synthesis"
 _SYNTHESIS_KIND = "wiki_synthesis"
 _SYNTHESIS_SCOPE = "memory"
 
-#: Connection lines longer than this are dropped — the prompt caps them, the
+#: Connection lines longer than this are dropped - the prompt caps them, the
 #: guard can't see word count, so we enforce it deterministically.
 _MAX_CONNECTION_WORDS = 30
 
 _SYSTEM = (
     "You are the synthesis layer of a Type-1 diabetes findings wiki. You connect "
-    "already-established findings into a short narrative. Observation only — never "
+    "already-established findings into a short narrative. Observation only - never "
     "dosing, basal, or treatment advice. Cite ONLY numbers that appear in the "
     "findings given to you; invent no figures. Each connection line is at most "
     f"{_MAX_CONNECTION_WORDS} words. Respond with ONE JSON object only, no prose."
@@ -88,7 +88,7 @@ def synthesize(findings: Sequence[Finding], model: Any) -> SynthesisResult:
     One JSON LLM call given the active findings' headlines, evidence, and stats.
     Every paragraph is audited against its finding's evidence pool; every
     connection against the union of all active findings' evidence. Unfaithful or
-    over-long lines are dropped and logged — never rendered. A missing model,
+    over-long lines are dropped and logged - never rendered. A missing model,
     a malformed response, or no active findings yields an empty result.
     """
     active = [
@@ -123,7 +123,7 @@ def save(store: StoragePort, result: SynthesisResult, *, today: date) -> None:
     ``wiki_synthesis``) whose ``evidence`` carries the topic paragraphs,
     connections, and date. Every currently-ACTIVE synthesis finding is flipped to
     SUPERSEDED first, so :func:`load_latest` always reads exactly one. An empty
-    result still supersedes — the prior narrative should not linger once stale.
+    result still supersedes - the prior narrative should not linger once stale.
     """
     for prior in store.get_findings(
         agent=_SYNTHESIS_AGENT, status=FindingStatus.ACTIVE
@@ -175,7 +175,7 @@ def load_latest(store: StoragePort) -> SynthesisResult | None:
     return SynthesisResult(topic_paragraphs=paragraphs, connections=connections)
 
 
-# ── LLM call (house pattern, mirrors workflows/goals._llm_compose) ───────────────
+# ── LLM call ─────────────────────────────────────────────────────────────────
 
 
 def _invoke(active: list[Finding], model: Any) -> dict[str, Any] | None:
@@ -257,7 +257,7 @@ def _audited_connections(raw: Any, pool: list[Any]) -> list[str]:
 
 
 def _evidence_pool(findings: list[Finding]) -> list[Any]:
-    """Union of the involved findings' evidence + stats — the guard's pool."""
+    """Union of the involved findings' evidence + stats - the guard's pool."""
     pool: list[Any] = []
     for finding in findings:
         pool.append(finding.evidence)

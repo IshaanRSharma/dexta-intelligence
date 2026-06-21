@@ -1,4 +1,4 @@
-"""Glucose-over-MCP v1 + insulin extension — the harness-wide MCP tool contract."""
+"""Glucose-over-MCP v1 + insulin extension - the harness-wide MCP tool contract."""
 
 from dexta_intelligence.mcp_server.contract import (
     ALERT_DISCLAIMER,
