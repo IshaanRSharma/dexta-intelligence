@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import logging
 import os
 import queue
 import threading
@@ -88,6 +89,11 @@ if TYPE_CHECKING:
     from dexta_intelligence.config import Config
     from dexta_intelligence.models import Finding, InvestigationRun
     from dexta_intelligence.store.port import StoragePort
+
+logger = logging.getLogger(__name__)
+
+#: Client-facing text for a failed stream; the detail is logged server-side.
+_STREAM_ERROR_TEXT = "Something went wrong. Check the server logs for details."
 
 _INSTALL_HINT = (
     "The web GUI needs the optional GUI stack. Install it with:\n"
@@ -950,11 +956,12 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                         },
                     }
                 )
-            except Exception as exc:
+            except Exception:
+                logger.exception("chat stream failed")
                 events.put(
                     {
                         "kind": "error",
-                        "payload": {"text": f"{type(exc).__name__}: {exc}"},
+                        "payload": {"text": _STREAM_ERROR_TEXT},
                     }
                 )
             finally:
@@ -1114,8 +1121,9 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                         },
                     }
                 )
-            except Exception as exc:
-                events.put({"kind": "error", "payload": {"text": f"{type(exc).__name__}: {exc}"}})
+            except Exception:
+                logger.exception("investigate stream failed")
+                events.put({"kind": "error", "payload": {"text": _STREAM_ERROR_TEXT}})
             finally:
                 _close(store, store_opener)
                 events.put(done)
@@ -1148,8 +1156,9 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                         },
                     }
                 )
-            except Exception as exc:
-                events.put({"kind": "error", "payload": {"text": f"{type(exc).__name__}: {exc}"}})
+            except Exception:
+                logger.exception("investigate stream failed")
+                events.put({"kind": "error", "payload": {"text": _STREAM_ERROR_TEXT}})
             finally:
                 _close(store, store_opener)
                 events.put(done)
@@ -1702,9 +1711,24 @@ def _storage_view(config: Config) -> dict[str, str]:
     return {
         "backend": "PostgreSQL",
         "detail": "external server",
-        "path": config.data.database_url or "(DATABASE_URL)",
+        "path": _mask_dsn(config.data.database_url or "") or "(DATABASE_URL)",
         "size": "",
     }
+
+
+def _mask_dsn(dsn: str) -> str:
+    """Replace the password in a DSN with ``***`` before it reaches the page."""
+    from urllib.parse import urlsplit, urlunsplit  # noqa: PLC0415
+
+    if not dsn:
+        return dsn
+    parts = urlsplit(dsn)
+    if not parts.password:
+        return dsn
+    host = parts.netloc.rsplit("@", 1)[-1]
+    user = parts.username or ""
+    netloc = f"{user}:***@{host}" if user else f":***@{host}"
+    return urlunsplit(parts._replace(netloc=netloc))
 
 
 def _relative_time(ts: datetime, now: datetime) -> str:

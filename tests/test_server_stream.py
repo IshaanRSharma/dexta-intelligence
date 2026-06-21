@@ -177,7 +177,9 @@ def test_stream_surfaces_agent_error(
     assert resp.status_code == 200
     events = _read_sse(resp.text)
     assert events[-1]["kind"] == "error"
-    assert "model exploded" in events[-1]["payload"]["text"]
+    # detail is logged server-side, never sent to the client
+    assert "model exploded" not in events[-1]["payload"]["text"]
+    assert "went wrong" in events[-1]["payload"]["text"].lower()
     store.close()
 
 

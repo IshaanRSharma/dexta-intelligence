@@ -80,6 +80,11 @@ def _is_safe(text: str) -> bool:
     return not _ADVICE_RE.search(text)
 
 
+def _item_is_safe(item: DiscussionItem) -> bool:
+    """Gate every model-derived text field of an item, including evidence refs."""
+    return _is_safe(" ".join([item.item, item.rationale, *item.evidence_refs]))
+
+
 def _topic(finding: Finding) -> str:
     """A literature query for a finding: its scope + kind, e.g. 'overnight basal'."""
     return f"{finding.scope} {finding.kind} type 1 diabetes".replace("_", " ").strip()
@@ -123,11 +128,11 @@ class ClinicalAdvisoryAgent:
                 generated_at=now,
             )
 
-        items = [it for f in active if _is_safe((it := self._item(f)).item + " " + it.rationale)]
+        items = [it for f in active if _item_is_safe(it := self._item(f))]
         analysis = [f"dexta has {len(active)} active finding(s) over the analysed window."]
         goals = self._goals(active)
-        monitoring = self._monitoring(active)
-        questions = self._questions(active)
+        monitoring = [it for it in self._monitoring(active) if _item_is_safe(it)]
+        questions = [it for it in self._questions(active) if _item_is_safe(it)]
         limitations = [
             f"Coverage {coverage.glucose_coverage_pct:.0f}% over {coverage.span_days:.0f} days.",
             "These are discussion points for your clinician, not dosing recommendations.",

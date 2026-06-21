@@ -250,5 +250,7 @@ def test_deep_mode_surfaces_coordinator_error(
     _patch_coordinator(monkeypatch, _Boom)
     events = _read_sse(_client(store).get("/api/investigate/stream?q=boom&mode=deep").text)
     assert events[-1]["kind"] == "error"
-    assert "planner exploded" in events[-1]["payload"]["text"]
+    # detail is logged server-side, never sent to the client
+    assert "planner exploded" not in events[-1]["payload"]["text"]
+    assert "went wrong" in events[-1]["payload"]["text"].lower()
     store.close()

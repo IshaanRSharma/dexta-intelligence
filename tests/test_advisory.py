@@ -119,6 +119,27 @@ def test_no_brief_text_reads_as_dosing_advice() -> None:
     assert not _ADVICE_RE.search(render_markdown(brief))
 
 
+def test_dosing_headline_gated_from_monitoring_and_questions_refs() -> None:
+    # A dosing-phrased headline must not leak through evidence_refs into the
+    # monitoring / questions sections (the gate covers every text field).
+    brief = ClinicalAdvisoryAgent().build(
+        [
+            _finding("Increase basal insulin overnight", scope="nocturnal"),
+            _finding("Dinner highs follow late boluses", scope="dinner"),
+        ],
+        _coverage(),
+        now=_NOW,
+    )
+    refs = [
+        ref
+        for section in (brief.monitoring, brief.questions_for_clinician)
+        for it in section
+        for ref in it.evidence_refs
+    ]
+    assert not any("Increase basal" in r for r in refs)
+    assert not _ADVICE_RE.search(" ".join(refs))
+
+
 def test_pubmed_citations_attach_when_backend_present() -> None:
     brief = ClinicalAdvisoryAgent(evidence=_StubEvidence()).build(
         [_finding("Dawn rise before breakfast")], _coverage(), now=_NOW

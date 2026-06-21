@@ -947,3 +947,16 @@ def test_analyze_passes_selected_lens(
     assert captured["lens"] == "watch"
     store.close()
     store.close()
+
+
+def test_mask_dsn_hides_password() -> None:
+    from dexta_intelligence.server.app import _mask_dsn  # noqa: PLC0415
+
+    masked = _mask_dsn("postgresql://user:secret@db.example.com:5432/dexta")
+    assert "secret" not in masked
+    assert "***" in masked
+    assert "user" in masked
+    assert "db.example.com:5432/dexta" in masked
+    # no password -> unchanged; empty -> empty
+    assert _mask_dsn("postgresql://db.example.com/dexta") == "postgresql://db.example.com/dexta"
+    assert _mask_dsn("") == ""
