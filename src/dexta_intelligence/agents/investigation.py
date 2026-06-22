@@ -81,6 +81,7 @@ class BeliefState:
     gaps: list[str] = field(default_factory=list)
     confidence: float = 0.0
     summary: str = ""
+    probed: list[str] = field(default_factory=list)
     _auto_id: int = 1
 
     def apply(self, update: dict[str, Any]) -> None:
@@ -130,6 +131,37 @@ class BeliefState:
         self._auto_id += 1
         return hid
 
+    def note_probe(self, name: str) -> None:
+        """Record that a real (non-belief) tool was called, for probe selection."""
+        if name and name != "update_belief":
+            self.probed.append(name)
+
+    def suggested_probe(self) -> str:
+        """The most discriminating modality not yet examined for an open hypothesis.
+
+        An information-gain proxy: the most useful next probe gathers evidence a
+        live hypothesis depends on but the run has not collected. Advisory only -
+        the model may probe otherwise. Empty when nothing open needs a new
+        modality.
+        """
+        text = " ".join(
+            h.statement.lower()
+            for h in self.hypotheses.values()
+            if h.status in (HypothesisStatus.OPEN, HypothesisStatus.UNDETERMINED)
+        )
+        if not text:
+            return ""
+        relevant = [m for m, kws in _MODALITY_KEYWORDS.items() if any(k in text for k in kws)]
+        probed_modalities = {
+            m for name in self.probed for m, tools in _MODALITY_TOOLS.items() if name in tools
+        }
+        missing = [m for m in relevant if m not in probed_modalities]
+        if not missing:
+            return ""
+        nxt = missing[0]
+        examples = ", ".join(sorted(_MODALITY_TOOLS[nxt])[:3])
+        return f"{nxt} (e.g. {examples}): no {nxt} evidence yet for the open hypotheses"
+
     def snapshot(self) -> dict[str, Any]:
         """JSON-serializable view of the current state."""
         return {
@@ -141,6 +173,7 @@ class BeliefState:
             "gaps": list(self.gaps),
             "confidence": round(self.confidence, 3),
             "summary": self.summary,
+            "suggested_probe": self.suggested_probe(),
         }
 
     def as_text(self) -> str:
@@ -183,6 +216,44 @@ def _coerce_status(value: Any) -> HypothesisStatus:
         return HypothesisStatus(str(value))
     except ValueError:
         return HypothesisStatus.UNDETERMINED
+
+
+#: Evidence modalities for next-probe selection. ``_MODALITY_TOOLS`` are the tools
+#: that read each modality directly (so a call marks it examined);
+#: ``_MODALITY_KEYWORDS`` are the hypothesis terms that point to it. Insertion
+#: order is the tie-break when several modalities are unexamined. The buckets are a
+#: deliberate simplification for a heuristic: manual-event tools sit under carbs,
+#: and "activity" is the event-proximity modality, not an exercise-only feed.
+_MODALITY_TOOLS: dict[str, frozenset[str]] = {
+    "carbs": frozenset(
+        {
+            "get_carb_entries",
+            "get_cob",
+            "meal_response",
+            "get_manual_events",
+            "search_manual_events",
+        }
+    ),
+    "insulin": frozenset(
+        {
+            "get_boluses",
+            "get_iob",
+            "get_basal_timeline",
+            "basal_overnight",
+            "correction_outcome",
+            "get_insulin_profile",
+        }
+    ),
+    "activity": frozenset({"event_proximity", "find_similar_events"}),
+    "temporal": frozenset({"get_weekday", "tod_compare"}),
+}
+
+_MODALITY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "carbs": ("carb", "meal", "breakfast", "lunch", "dinner", "snack", "food", "cob", "eat"),
+    "insulin": ("bolus", "insulin", "iob", "basal", "correction", "dose", "dosing", "units"),
+    "activity": ("exercise", "workout", "activity", "walk", "run", "gym", "steps"),
+    "temporal": ("weekday", "weekend", "morning", "afternoon", "evening", "time of day", "dawn"),
+}
 
 
 def seed_belief_from_store(ctx: AgentContext, *, limit: int = _SEED_LIMIT) -> BeliefState:

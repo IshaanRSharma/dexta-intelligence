@@ -56,7 +56,10 @@ _BELIEF_DIRECTIVE = (
     "Maintain a working belief state with update_belief. After each probe, record "
     "your competing hypotheses and their status, the evidence so far, any gap "
     "still blocking you, and your confidence. Probe to discriminate between live "
-    "hypotheses; conclude when one is clearly supported or say what is missing."
+    "hypotheses; conclude when one is clearly supported or say what is missing. "
+    "update_belief returns suggested_probe: the most discriminating evidence you "
+    "have not gathered yet for your open hypotheses. Use it unless you have a "
+    "better reason."
 )
 
 

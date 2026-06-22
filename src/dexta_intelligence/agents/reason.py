@@ -179,6 +179,8 @@ def run_reasoning_loop(
             on_event=on_event,
         )
         if belief is not None:
+            for call in tool_calls:
+                belief.note_probe(call.get("name", ""))
             _emit(on_event, ReasoningEvent("belief", belief.snapshot()))
 
     return ReasoningResult(

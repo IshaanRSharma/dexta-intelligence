@@ -8,6 +8,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Next-probe guidance: the belief state suggests the most discriminating evidence
+  the investigation has not gathered yet for its open hypotheses (a light
+  information-gain heuristic over modality coverage), folded into what the model
+  reads each step. Advisory, never a controller.
 - Hypotheses now steer the live loop: open hypotheses banked by prior analysis
   re-enter a new investigation as competing hypotheses in the belief state, and
   reach the model in the first-turn prompt (with stable ids) so it probes to
