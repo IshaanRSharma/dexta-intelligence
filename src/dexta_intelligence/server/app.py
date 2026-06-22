@@ -63,6 +63,7 @@ from dexta_intelligence.server.settings_schema import (
     FieldKind,
     source_nav,
 )
+from dexta_intelligence.server.views_context import context_page_view
 from dexta_intelligence.server.views_evals import evals_page_view
 from dexta_intelligence.server.views_findings import (
     evidence_strength,
@@ -692,6 +693,15 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
         return _render("reconciliation.html", request, "/reconciliation", **view)
+
+    @app.get("/context", response_class=HTMLResponse)
+    def context_page(request: Request) -> Any:
+        store = store_opener(config, None)
+        try:
+            view = context_page_view(store, config, datetime.now(tz=UTC))
+        finally:
+            _close(store, store_opener)
+        return _render("context.html", request, "/context", **view)
 
     @app.get("/evals", response_class=HTMLResponse)
     def evals(request: Request) -> Any:

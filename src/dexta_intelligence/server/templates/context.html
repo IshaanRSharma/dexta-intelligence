@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}dexta · context{% endblock %}
+{% block content %}
+{% from "_components.html" import chip %}
+{% set requests = requests|default([]) %}
+
+<div class="page-head">
+  <h1>Context dexta is missing</h1>
+  <p class="page-sub">When glucose moves and nothing was logged nearby, dexta asks rather than guesses. Log what was happening so the deterministic engine can check for a recurring pattern.</p>
+</div>
+
+{% if requests %}
+<div class="cards">
+  {% for r in requests %}
+  <article class="card finding-card">
+    <p class="stats">{{ r.question }}</p>
+    <div class="chips">
+      {% if r.peak is not none %}{{ chip("peak", "%d mg/dL"|format(r.peak)) }}{% endif %}
+      {{ chip("suggested", r.suggested_event_type) }}
+    </div>
+    <div class="btn-row">
+      <a class="btn btn-secondary" href="/log">Log it</a>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <p>No missing context right now.</p>
+  <p class="hint">dexta has what it needs for this window.</p>
+</div>
+{% endif %}
+{% endblock %}
