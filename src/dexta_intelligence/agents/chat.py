@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
     from dexta_intelligence.agents.base import AgentContext
+    from dexta_intelligence.agents.investigation import Synthesis
     from dexta_intelligence.coldstart import CapabilitySet
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,8 @@ class ChatAnswer:
     stopped_reason: str
     trace: tuple[TraceLine, ...] = ()
     violations: tuple[str, ...] = ()
+    #: The grounded synthesis of the investigation, when one was run (orchestrator).
+    synthesis: Synthesis | None = None
 
 
 @dataclass
@@ -75,9 +78,7 @@ class ChatAgent:
                 max_steps=self.max_steps,
             )
 
-        return _finish(
-            result, question=question, capabilities=toolkit.capabilities(), rerun=rerun
-        )
+        return _finish(result, question=question, capabilities=toolkit.capabilities(), rerun=rerun)
 
 
 def _finish(
@@ -108,8 +109,7 @@ def _finish(
         logger.warning("chat: %d untraceable number(s) in answer", len(report.violations))
         violations = tuple(str(v) for v in report.violations)
         warned = (
-            result.answer
-            + "\n\n⚠️ Some figures above could not be traced to your data - "
+            result.answer + "\n\n⚠️ Some figures above could not be traced to your data - "
             "treat them with caution."
         )
         return ChatAnswer(

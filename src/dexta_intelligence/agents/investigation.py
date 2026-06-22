@@ -19,10 +19,12 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.reason import ToolSpec
+from dexta_intelligence.guard.faithfulness import audit
 from dexta_intelligence.models import HypothesisStatus as StoredHypothesisStatus
 
 if TYPE_CHECKING:
     from dexta_intelligence.agents.base import AgentContext
+    from dexta_intelligence.agents.reason import ToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +32,18 @@ __all__ = [
     "BeliefState",
     "Hypothesis",
     "HypothesisStatus",
+    "Synthesis",
     "seed_belief_from_store",
+    "synthesize",
 ]
 
 #: Cap on prior hypotheses seeded into a live investigation. A handful keeps the
 #: model discriminating between real competitors, not wading through a backlog.
 _SEED_LIMIT = 5
+
+#: Scaffolding tools that do not themselves gather evidence, excluded from the
+#: synthesis's list of probes.
+_META_TOOLS = frozenset({"update_belief", "request_context"})
 
 
 class HypothesisStatus(StrEnum):
@@ -216,6 +224,78 @@ def _coerce_status(value: Any) -> HypothesisStatus:
         return HypothesisStatus(str(value))
     except ValueError:
         return HypothesisStatus.UNDETERMINED
+
+
+@dataclass(frozen=True, slots=True)
+class Synthesis:
+    """A grounded, gated end-of-investigation explanation and its evidence graph.
+
+    Assembled from material the investigation already produced: the model's
+    leading hypothesis and confidence, the alternatives it ruled out, the evidence
+    it recorded (each line re-audited against the tool evidence pool, so untraceable
+    figures are dropped, not narrated), the cross-modal probes that produced it,
+    and the gaps still open. Determinism fuses and verifies; the model did the
+    thinking.
+    """
+
+    leading: str
+    confidence: float
+    explanation: str
+    evidence: tuple[str, ...]
+    ruled_out: tuple[str, ...]
+    probes: tuple[str, ...]
+    gaps: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        """JSON-serializable view for a surface (SSE, trace, report)."""
+        return {
+            "leading": self.leading,
+            "confidence": self.confidence,
+            "explanation": self.explanation,
+            "evidence": list(self.evidence),
+            "ruled_out": list(self.ruled_out),
+            "probes": list(self.probes),
+            "gaps": list(self.gaps),
+        }
+
+
+def _grounded(text: str, pool: dict[str, Any]) -> str:
+    """``text`` if every number in it traces to ``pool``, else empty.
+
+    The belief's free text (hypothesis statements, summary, gaps) is the model's,
+    never audited on the way in. Gating it here is what lets the synthesis claim it
+    cannot surface a figure the tools did not produce."""
+    return text if audit(text, pool).ok else ""
+
+
+def synthesize(
+    belief: BeliefState, steps: list[ToolCall], evidence_pool: dict[str, Any]
+) -> Synthesis:
+    """Fuse a finished investigation's belief and trace into one grounded explanation.
+
+    The leading explanation is the first supported hypothesis (else the leading
+    open one). Every text field that could carry a number (leading, explanation,
+    evidence lines, ruled-out, gaps) is audited against ``evidence_pool`` and
+    dropped if a figure does not trace, so the synthesis cannot surface a number
+    the tools never produced. Probes exclude the belief/context scaffolding tools.
+    """
+    supported = [h for h in belief.hypotheses.values() if h.status is HypothesisStatus.SUPPORTED]
+    open_h = [h for h in belief.hypotheses.values() if h.status is HypothesisStatus.OPEN]
+    leading_raw = supported[0].statement if supported else (open_h[0].statement if open_h else "")
+    leading = _grounded(leading_raw, evidence_pool)
+    return Synthesis(
+        leading=leading,
+        confidence=round(belief.confidence, 3),
+        explanation=_grounded(belief.summary, evidence_pool) or leading,
+        evidence=tuple(line for line in belief.evidence if audit(line, evidence_pool).ok),
+        ruled_out=tuple(
+            g
+            for h in belief.hypotheses.values()
+            if h.status is HypothesisStatus.REFUTED and (g := _grounded(h.statement, evidence_pool))
+        ),
+        probes=tuple(dict.fromkeys(s.name for s in steps if s.name not in _META_TOOLS)),
+        gaps=tuple(g for g in belief.gaps if audit(g, evidence_pool).ok),
+    )
 
 
 #: Evidence modalities for next-probe selection. ``_MODALITY_TOOLS`` are the tools

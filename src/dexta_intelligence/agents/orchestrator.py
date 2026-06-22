@@ -20,13 +20,13 @@ available.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents.chat import _finish
 from dexta_intelligence.agents.context_acquisition import request_context_tool
-from dexta_intelligence.agents.investigation import seed_belief_from_store
+from dexta_intelligence.agents.investigation import seed_belief_from_store, synthesize
 from dexta_intelligence.agents.reason import ReasoningEvent, ToolSpec, run_reasoning_loop
 from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.trace import render_trace
@@ -195,4 +195,11 @@ class OrchestratorAgent:
                 belief=belief,
             )
 
-        return _finish(result, question=question, capabilities=toolkit.capabilities(), rerun=rerun)
+        answer = _finish(
+            result, question=question, capabilities=toolkit.capabilities(), rerun=rerun
+        )
+        concluded = bool(result.answer) and answer.faithful and answer.stopped_reason == "answered"
+        if result.belief is not None and concluded:
+            synthesis = synthesize(result.belief, result.steps, result.evidence)
+            return replace(answer, synthesis=synthesis)
+        return answer

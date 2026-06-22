@@ -8,6 +8,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Deliberate synthesis pass: a finished investigation now produces a grounded
+  synthesis (the leading explanation, the alternatives ruled out, the supporting
+  evidence, the cross-modal probes, and the open gaps). Every figure is re-audited
+  against the tool evidence pool, so the synthesis cannot surface a number the
+  tools never produced. Attached to a clean answer.
 - Mid-loop context acquisition: when a gap blocks it, the agent can call a
   `request_context` tool for the moment it cannot explain and surface a precise,
   dosing-gated logging request instead of guessing. It reuses the unexplained-spike
