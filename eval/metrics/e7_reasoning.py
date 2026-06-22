@@ -21,6 +21,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from dexta_intelligence.agents.investigation import META_TOOLS
 from eval.agent_eval import attribution_hit, run_investigation
 from eval.scenarios import REASONING_BENCHMARK
 
@@ -56,6 +57,12 @@ _GAP_RE = re.compile(
 )
 
 
+def _probe_count(outcome: InvestigationOutcome) -> int:
+    """Real probes only: the belief/context scaffolding tools are bookkeeping, not
+    evidence-gathering, so they never count toward probe efficiency."""
+    return sum(1 for name in outcome.tools_used if name not in META_TOOLS)
+
+
 def modality_coverage(outcome: InvestigationOutcome, scenario: Scenario) -> float:
     """Fraction of required evidence classes the run probed (1.0 if none required)."""
     required = scenario.required_evidence
@@ -67,8 +74,8 @@ def modality_coverage(outcome: InvestigationOutcome, scenario: Scenario) -> floa
 
 
 def probe_efficiency(outcome: InvestigationOutcome, *, ideal: int = IDEAL_PROBES) -> float:
-    """1.0 at or under ``ideal`` tool calls, decaying as ``ideal / count`` above it."""
-    count = len(outcome.tools_used)
+    """1.0 at or under ``ideal`` real probes, decaying as ``ideal / count`` above it."""
+    count = _probe_count(outcome)
     if count <= ideal:
         return 1.0
     return ideal / count
@@ -145,7 +152,7 @@ def run_e7_reasoning(
             E7ReasoningCell(
                 scenario=scenario.name,
                 coverage=modality_coverage(outcome, scenario),
-                probes=len(outcome.tools_used),
+                probes=_probe_count(outcome),
                 efficiency=probe_efficiency(outcome),
                 attribution_hit=attribution_hit(outcome.answer, scenario.expected_keywords),
                 gap_flagged=gap_flagged(outcome),

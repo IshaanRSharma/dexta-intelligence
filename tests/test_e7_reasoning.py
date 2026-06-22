@@ -92,6 +92,12 @@ def test_probe_efficiency_fractional_decay() -> None:
     assert probe_efficiency(outcome) == IDEAL_PROBES / (IDEAL_PROBES + 2)
 
 
+def test_scaffolding_tools_do_not_count_as_probes() -> None:
+    # update_belief / request_context are bookkeeping, not probes: efficiency stays full.
+    tools = ("update_belief",) * 20 + ("find_spikes", "request_context")
+    assert probe_efficiency(_outcome(tools=tools)) == 1.0
+
+
 def test_gap_flagged_detects_missing_context_language() -> None:
     assert gap_flagged(_outcome("I have no logged meal to explain this; please log it."))
     assert not gap_flagged(_outcome("It is clearly breakfast carbohydrates."))

@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "META_TOOLS",
     "BeliefState",
     "Hypothesis",
     "HypothesisStatus",
@@ -41,9 +42,10 @@ __all__ = [
 #: model discriminating between real competitors, not wading through a backlog.
 _SEED_LIMIT = 5
 
-#: Scaffolding tools that do not themselves gather evidence, excluded from the
-#: synthesis's list of probes.
-_META_TOOLS = frozenset({"update_belief", "request_context"})
+#: Scaffolding tools that do not themselves gather evidence. The single source of
+#: truth for "not a probe", shared by the synthesis and the reasoning-process eval
+#: so probe counts cannot drift between them.
+META_TOOLS = frozenset({"update_belief", "request_context"})
 
 
 class HypothesisStatus(StrEnum):
@@ -293,7 +295,7 @@ def synthesize(
             for h in belief.hypotheses.values()
             if h.status is HypothesisStatus.REFUTED and (g := _grounded(h.statement, evidence_pool))
         ),
-        probes=tuple(dict.fromkeys(s.name for s in steps if s.name not in _META_TOOLS)),
+        probes=tuple(dict.fromkeys(s.name for s in steps if s.name not in META_TOOLS)),
         gaps=tuple(g for g in belief.gaps if audit(g, evidence_pool).ok),
     )
 
