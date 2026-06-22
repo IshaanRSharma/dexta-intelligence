@@ -8,6 +8,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Mid-loop context acquisition: when a gap blocks it, the agent can call a
+  `request_context` tool for the moment it cannot explain and surface a precise,
+  dosing-gated logging request instead of guessing. It reuses the unexplained-spike
+  detector's proximity rule and never fabricates the missing value.
 - Adaptive stop conditions: the reasoning loop now nudges the model to conclude
   when it reaches high confidence or when the last probes added no new
   information, instead of letting it probe in circles to the step budget. The

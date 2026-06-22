@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents.chat import _finish
+from dexta_intelligence.agents.context_acquisition import request_context_tool
 from dexta_intelligence.agents.investigation import seed_belief_from_store
 from dexta_intelligence.agents.reason import ReasoningEvent, ToolSpec, run_reasoning_loop
 from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
@@ -59,7 +60,8 @@ _BELIEF_DIRECTIVE = (
     "hypotheses; conclude when one is clearly supported or say what is missing. "
     "update_belief returns suggested_probe: the most discriminating evidence you "
     "have not gathered yet for your open hypotheses. Use it unless you have a "
-    "better reason."
+    "better reason. If a gap blocks you, call request_context for the moment you "
+    "cannot explain: surface its logging request instead of guessing."
 )
 
 
@@ -164,9 +166,11 @@ class OrchestratorAgent:
         history: list[dict[str, Any]] | None = None,
     ) -> ChatAnswer:
         toolkit = DiscoveryToolkit(ctx, target_low=self.target_low, target_high=self.target_high)
-        belt = tool_specs(ctx, toolkit) + workflow_tool_specs(
-            ctx, target_low=self.target_low, target_high=self.target_high
-        )
+        belt = [
+            *tool_specs(ctx, toolkit),
+            *workflow_tool_specs(ctx, target_low=self.target_low, target_high=self.target_high),
+            request_context_tool(ctx),
+        ]
         belief = seed_belief_from_store(ctx)
         system = f"{_SYSTEM}\n\n{_belief_directive(belief)}"
         result = run_reasoning_loop(
