@@ -64,7 +64,8 @@ SOURCE = "dexcom_api"
 
 PROD_BASE = "https://api.dexcom.com"
 SANDBOX_BASE = "https://sandbox-api.dexcom.com"
-TOKEN_PATH = "/v2/oauth2/token"
+# v3 token endpoint, matching the v3 /egvs data path used below.
+TOKEN_PATH = "/v3/oauth2/token"
 
 _DEDUPE_MARGIN = timedelta(minutes=5)
 #: Dexcom serves at most ~30 days per egvs call; page in 30-day spans.
@@ -184,7 +185,8 @@ class DexcomApiConnector:
             return HealthReport(ok=False, source=self.source, detail=str(exc))
 
         latest_ts: datetime | None = None
-        records = payload.get("records")
+        # v3 /egvs wraps readings under "egvs"; "records" was the v2 envelope.
+        records = payload.get("egvs") or payload.get("records")
         if isinstance(records, list):
             for rec in records:
                 event = egv_to_event(rec) if isinstance(rec, dict) else None
@@ -218,7 +220,7 @@ class DexcomApiConnector:
         while span_start < feed_edge:
             span_end = min(span_start + _PAGE_SPAN, feed_edge)
             payload = self._get_egvs(span_start, span_end)
-            records = payload.get("records")
+            records = payload.get("egvs") or payload.get("records")
             if isinstance(records, list):
                 for rec in records:
                     if not isinstance(rec, dict):

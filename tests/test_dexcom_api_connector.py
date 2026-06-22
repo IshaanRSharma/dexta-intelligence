@@ -159,7 +159,7 @@ class _DexcomServer:
         self.requests.append(request)
         if str(request.url).split("?")[0] != self.base + request.url.path:
             return httpx.Response(404, json={"error": "wrong host"})
-        if request.url.path == "/v2/oauth2/token":
+        if request.url.path == "/v3/oauth2/token":
             return self._token_grant(request)
         if request.headers.get("Authorization") != f"Bearer {self.valid_token}":
             return httpx.Response(401, json={"error": "invalid_token"})
@@ -196,7 +196,7 @@ class _DexcomServer:
             records = [r for r in records if r["systemTime"] >= start]
         if end is not None:
             records = [r for r in records if r["systemTime"] <= end]
-        return httpx.Response(200, json={"unit": "mg/dL", "records": records})
+        return httpx.Response(200, json={"unit": "mg/dL", "egvs": records})
 
 
 def _connector(
