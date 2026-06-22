@@ -135,6 +135,14 @@ def test_model_can_chain_workflow_then_granular_tool() -> None:
     assert answer.faithful
 
 
+def test_timing_context_is_on_the_agent_belt() -> None:
+    # Regression: the deterministic timing_context engine must be a tool the agent
+    # can actually call, not just a CLI/report (the "built but not wired" bug).
+    model = _FakeToolModel(["All looks steady."])
+    OrchestratorAgent(model=model).ask(_ctx("late_bolus"), "what's my dinner pattern?")
+    assert "timing_context" in model.seen_tools
+
+
 def test_use_belief_false_drops_the_reasoning_scaffold() -> None:
     model = _FakeToolModel(["All looks steady."])
     answer = OrchestratorAgent(model=model, use_belief=False).ask(_ctx("late_bolus"), "how am I?")

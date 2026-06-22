@@ -114,6 +114,34 @@ def workflow_tool_specs(ctx: AgentContext, *, target_low: int, target_high: int)
         numbers = {f"investigate_spike.{k}": v for k, v in ev.pool.items()}
         return result, numbers
 
+    def timing_context(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        from dexta_intelligence.investigations.timing_context import (  # noqa: PLC0415
+            gather_timing_context,
+            resolve_bucket,
+        )
+
+        bucket = resolve_bucket(str(args.get("bucket", "dinner")))
+        if bucket is None:
+            return {
+                "error": "timing_context needs `bucket`: a preset "
+                "(overnight/breakfast/lunch/dinner/bedtime) or an hour range like 17-22"
+            }, {}
+        intent = str(args.get("intent", "general"))
+        if intent not in ("general", "meal", "basal"):
+            intent = "general"
+        tc = gather_timing_context(
+            ctx, bucket, intent=intent, target_low=target_low, target_high=target_high
+        )
+        result = {
+            "bucket": {"name": tc.bucket.name, "label": tc.bucket.label, "intent": intent},
+            "cards": [
+                {"id": c.id, "title": c.title, "lines": c.lines, "n": c.n} for c in tc.cards
+            ],
+            "limitations": tc.limitations,
+        }
+        numbers = {f"timing_context.{k}": v for k, v in tc.pool.items()}
+        return result, numbers
+
     return [
         ToolSpec(
             name="investigate_spike",
@@ -139,6 +167,33 @@ def workflow_tool_specs(ctx: AgentContext, *, target_low: int, target_high: int)
                 "required": ["when"],
             },
             fn=investigate_spike,
+        ),
+        ToolSpec(
+            name="timing_context",
+            description=(
+                "Observation-only briefing for a time bucket (overnight/breakfast/lunch/"
+                "dinner/bedtime, or an hour range like 17-22): the pump profile segment "
+                "for that window, glucose in the window, basal context, how oref0's own "
+                "forecasts held up against realized CGM (observation, never a dose), and "
+                "meal-timing patterns when intent=meal. Use for 'what's my pattern at "
+                "<time of day>' / 'how do my dinners go' / reasoning about a period of "
+                "day, then reason over the cards. Never produces a dose."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "bucket": {
+                        "type": "string",
+                        "description": (
+                            "preset (overnight/breakfast/lunch/dinner/bedtime) or an "
+                            "hour range like 17-22"
+                        ),
+                    },
+                    "intent": {"type": "string", "enum": ["general", "meal", "basal"]},
+                },
+                "required": ["bucket"],
+            },
+            fn=timing_context,
         ),
     ]
 
