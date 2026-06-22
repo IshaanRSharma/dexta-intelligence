@@ -1,7 +1,7 @@
-"""The Active Context Acquisition page (/context).
+"""Missing-context prompts live on /log; /context redirects there.
 
 A planted, unexplained spike with no meal or note nearby must surface a logging
-question; an empty store must show the calm empty state. The page never 500s.
+question; an empty store must show the calm empty state.
 """
 
 from __future__ import annotations
@@ -51,20 +51,29 @@ def _seed_spike(db: Path) -> None:
     store.insert_glucose(glucose)
 
 
-def test_context_page_surfaces_question(tmp_path: Path) -> None:
-    db = tmp_path / "context.db"
-    _seed_spike(db)
-    client = TestClient(create_app(Config(), store_opener=_opener(db)))
-    resp = client.get("/context")
-    assert resp.status_code == 200
-    assert "mg/dL" in resp.text
-    assert "/log" in resp.text
-
-
-def test_context_page_empty_store(tmp_path: Path) -> None:
+def test_context_redirects_to_log(tmp_path: Path) -> None:
     db = tmp_path / "empty.db"
     SQLiteStore(db).migrate()
     client = TestClient(create_app(Config(), store_opener=_opener(db)))
-    resp = client.get("/context")
+    resp = client.get("/context", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/log#missing-context"
+
+
+def test_log_page_surfaces_missing_context_question(tmp_path: Path) -> None:
+    db = tmp_path / "context.db"
+    _seed_spike(db)
+    client = TestClient(create_app(Config(), store_opener=_opener(db)))
+    resp = client.get("/log")
+    assert resp.status_code == 200
+    assert 'id="missing-context"' in resp.text
+    assert "mg/dL" in resp.text
+
+
+def test_log_page_missing_context_empty_store(tmp_path: Path) -> None:
+    db = tmp_path / "empty.db"
+    SQLiteStore(db).migrate()
+    client = TestClient(create_app(Config(), store_opener=_opener(db)))
+    resp = client.get("/log")
     assert resp.status_code == 200
     assert "No missing context right now" in resp.text

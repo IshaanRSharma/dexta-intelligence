@@ -16,6 +16,7 @@ import logging
 import os
 import queue
 import threading
+import time as time_mod
 import uuid
 from datetime import UTC, datetime, time, timedelta
 from importlib import resources
@@ -66,13 +67,21 @@ from dexta_intelligence.server.settings_schema import (
 from dexta_intelligence.server.views_context import context_page_view
 from dexta_intelligence.server.views_evals import evals_page_view
 from dexta_intelligence.server.views_findings import (
+    _active_card,
     evidence_strength,
     findings_page_view,
     lifecycle_label,
 )
 from dexta_intelligence.server.views_goals import goal_card_view
+from dexta_intelligence.server.views_goals_sidebar import goals_sidebar_view
+from dexta_intelligence.server.views_hero import hero_chart_view
 from dexta_intelligence.server.views_reconciliation import reconciliation_page_view
 from dexta_intelligence.server.views_system import system_page_view
+from dexta_intelligence.server.views_trace import (
+    answer_faithfulness_flagged,
+    faithfulness_violations_from_answer,
+    trace_entries_from_lines,
+)
 
 # FastAPI resolves route annotations against this module's globals, so the GUI
 # types must live here at import time. They are an optional extra, so a missing
@@ -96,6 +105,8 @@ logger = logging.getLogger(__name__)
 
 #: Client-facing text for a failed stream; the detail is logged server-side.
 _STREAM_ERROR_TEXT = "Something went wrong. Check the server logs for details."
+_FINDINGS_QUERY_CAP = 100
+_STATUS_PILL_TTL_S = 30.0
 
 _INSTALL_HINT = (
     "The web GUI needs the optional GUI stack. Install it with:\n"
@@ -162,23 +173,34 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     # Runtime-managed background sync. Constructed here (idle); cmd_serve enables
     # it from config at boot, and the Connectors page retunes it live.
     app.state.autosync = AutoSyncController(config, store_opener)
+    app.state.status_pill_cache = {"text": "", "at": 0.0}
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     templates = Jinja2Templates(directory=str(templates_dir))
     _static_stamps = [f.stat().st_mtime for f in static_dir.iterdir() if f.is_file()]
     templates.env.globals["static_version"] = str(int(max(_static_stamps, default=0)))
-    # One feature per tab. Reconciliation, Evals, and Log are reached from their
-    # parent pages rather than crowding the top nav.
-    templates.env.globals["nav_items"] = (
+    # Primary nav + overflow "More" menu (Phase 4 tiering).
+    _nav_more = (
+        ("/investigations", "Investigations"),
+        ("/goals", "Goals"),
+        ("/reports", "Reports"),
+        ("/system", "System"),
+        ("/wiki", "Wiki"),
+        ("/reconciliation", "Reconciliation"),
+        ("/log", "Log / missing context"),
+        ("/evals", "Evals"),
+    )
+    _nav_primary = (
         ("/", "Dashboard"),
         ("/chat", "Chat"),
-        ("/investigations", "Investigations"),
         ("/findings", "Findings"),
-        ("/reports", "Reports"),
-        ("/goals", "Goals"),
         ("/connectors", "Connectors"),
-        ("/system", "System"),
         ("/settings", "Settings"),
     )
+    templates.env.globals["nav_primary"] = _nav_primary
+    templates.env.globals["nav_more"] = _nav_more
+    templates.env.globals["nav_more_paths"] = frozenset(h for h, _ in _nav_more)
+    # Legacy alias for templates that still iterate nav_items.
+    templates.env.globals["nav_items"] = _nav_primary + _nav_more
     templates.env.globals["source_nav"] = source_nav()
 
     def _render(
@@ -192,11 +214,9 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         **kw: Any,
     ) -> Any:
         if status_pill is None and not lite:
-            store = store_opener(config, None)
-            try:
-                status_pill = _status_pill_text(store.coverage())
-            finally:
-                _close(store, store_opener)
+            status_pill = _cached_status_pill(
+                request, config=config, store_opener=store_opener
+            )
         elif status_pill is None:
             status_pill = ""
         return templates.TemplateResponse(
@@ -215,10 +235,11 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         try:
             coverage = store.coverage()
             gates = ColdStartReport.from_coverage(coverage)
-            findings = store.get_findings(status=None, limit=1_000_000)
+            findings = store.get_findings(status=None, limit=_FINDINGS_QUERY_CAP)
             has_connectors = bool(build_connectors(config))
             hero = _hero_metrics(store, config, coverage, findings)
-            sidebar = _status_sidebar(config, coverage, gates, store)
+            hero_chart = hero_chart_view(store, config, gates)
+            sidebar = _status_sidebar(config, coverage, gates, store, now=datetime.now(tz=UTC))
             status_pill = _status_pill_text(coverage)
         finally:
             _close(store, store_opener)
@@ -234,39 +255,48 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             if f.status
             in (FindingStatus.REJECTED, FindingStatus.SUPERSEDED, FindingStatus.DISMISSED)
         ]
-        cards = [_finding_card(f, active_findings) for f in _ranked(active_findings)]
+        ranked = _ranked(active_findings)
+        now = datetime.now(tz=UTC)
+        cards = [_active_card(f, now) for f in ranked[:5]]
+        cards_total = len(ranked)
         banners = _dashboard_banners(
             coverage,
             gates,
             flash=flash,
             has_connectors=has_connectors,
         )
+        now = datetime.now(tz=UTC)
+        autosync = _autosync_view(request.app.state.autosync.status(), now)
         return _render(
             "dashboard.html",
             request,
             "/",
             status_pill=status_pill,
             hero=hero,
+            hero_chart=hero_chart,
             sidebar=sidebar,
             banners=banners,
             has_connectors=has_connectors,
             below_floor=gates.below_hard_floor,
             cards=cards,
+            cards_total=cards_total,
             graveyard=[_graveyard_row(f) for f in graveyard],
             lenses=_lens_names(config),
+            autosync=autosync,
         )
 
     @app.post("/actions/sync")
-    def action_sync() -> Any:
+    def action_sync(request: Request) -> Any:
         from dexta_intelligence.cli.data import cmd_sync  # noqa: PLC0415
 
         buf = io.StringIO()
         code = cmd_sync(config=config, db_path=None, out=buf)
         flash = "sync_ok" if code == 0 else "sync_fail"
-        return RedirectResponse(f"/?flash={flash}", status_code=303)
+        _invalidate_status_pill(request.app)
+        return RedirectResponse(f"/connectors?flash={flash}", status_code=303)
 
     @app.post("/actions/analyze")
-    def action_analyze(lens: str = Form("analyze")) -> Any:
+    def action_analyze(request: Request, lens: str = Form("analyze")) -> Any:
         from dexta_intelligence.cli.analysis import cmd_analyze  # noqa: PLC0415
 
         buf = io.StringIO()
@@ -280,40 +310,17 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             flash = "analyze_skip"
         else:
             flash = "analyze_fail"
+        _invalidate_status_pill(request.app)
         return RedirectResponse(f"/?flash={flash}", status_code=303)
 
     @app.post("/actions/investigate")
     def action_investigate(question: str = Form(...)) -> Any:
-        from dexta_intelligence.agents.base import AgentContext  # noqa: PLC0415
-        from dexta_intelligence.agents.coordinator import CoordinatorAgent  # noqa: PLC0415
-        from dexta_intelligence.workflows.deep_analysis import persist_findings  # noqa: PLC0415
+        from urllib.parse import quote  # noqa: PLC0415
 
         goal = question.strip()
         if not goal:
-            return RedirectResponse("/?flash=investigate_empty", status_code=303)
-        store = store_opener(config, None)
-        try:
-            coverage = store.coverage()
-            gates = ColdStartReport.from_coverage(coverage)
-            if gates.below_hard_floor:
-                return RedirectResponse("/?flash=investigate_skip", status_code=303)
-            end = coverage.last_ts.date() if coverage.last_ts is not None else None
-            ctx = AgentContext(
-                store=store,
-                window=_analysis_window(config, end),
-                gates=gates,
-                run_id=f"gui-investigate-{uuid.uuid4()}",
-                timezone=config.analysis.timezone,
-            )
-            coordinator = CoordinatorAgent(model=discovery_model(config), config=config)
-            findings = coordinator.investigate(ctx, goal=goal)
-            persisted = persist_findings(store, findings)
-            flash = f"investigate_ok:{len(persisted)}"
-        except Exception:
-            flash = "investigate_fail"
-        finally:
-            _close(store, store_opener)
-        return RedirectResponse(f"/?flash={flash}", status_code=303)
+            return RedirectResponse("/investigations", status_code=303)
+        return RedirectResponse(f"/investigations?q={quote(goal)}", status_code=303)
 
     @app.get("/investigations", response_class=HTMLResponse)
     def investigations(request: Request) -> Any:
@@ -345,6 +352,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         store = store_opener(config, None)
         try:
             recent = store.get_manual_events(now - timedelta(days=30), now + timedelta(days=1))
+            missing = context_page_view(store, config, now)
         finally:
             _close(store, store_opener)
         events = [_manual_event_view(e, tz, now) for e in reversed(recent)]
@@ -356,6 +364,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             event_types=_MANUAL_EVENT_TYPES,
             events=events,
             default_ts=now.astimezone(tz).strftime("%Y-%m-%dT%H:%M"),
+            **missing,
         )
 
     @app.post("/actions/log-context")
@@ -393,7 +402,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         return RedirectResponse("/log?flash=log_ok", status_code=303)
 
     @app.post("/actions/upload")
-    async def action_upload(file: UploadFile = File(...)) -> Any:  # noqa: B008 - FastAPI idiom
+    async def action_upload(request: Request, file: UploadFile = File(...)) -> Any:  # noqa: B008
         """Ingest a Dexcom Clarity / LibreView CSV export through the same sync
         path as a live connector (format auto-detected; re-uploading is safe)."""
         import tempfile  # noqa: PLC0415
@@ -420,6 +429,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
             tmp_path.unlink(missing_ok=True)
+        _invalidate_status_pill(request.app)
         return RedirectResponse(f"/?flash={flash}", status_code=303)
 
     # ── wiki ──────────────────────────────────────────────────────────────────
@@ -623,6 +633,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         "autosync_ok": ("ok", "Continuous sync updated."),
         "autosync_bad": ("bad", "Interval must be a whole number of minutes."),
         "sync_none": ("bad", "Select at least one source, or use Sync all."),
+        "sync_ok": ("ok", "Sync finished successfully."),
         "sync_fail": ("bad", "Sync failed. Check the source credentials in Settings."),
     }
 
@@ -667,41 +678,22 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
 
     @app.get("/reconciliation", response_class=HTMLResponse)
     def reconciliation(request: Request) -> Any:
-        from dexta_intelligence.agents.base import AgentContext  # noqa: PLC0415
-        from dexta_intelligence.agents.reconciliation import (  # noqa: PLC0415
-            PredictionReconciliationAgent,
-        )
-
         now = datetime.now(tz=UTC)
         store = store_opener(config, None)
         try:
-            coverage = store.coverage()
-            gates = ColdStartReport.from_coverage(coverage)
-            end = coverage.last_ts.date() if coverage.last_ts is not None else None
-            ctx = AgentContext(
-                store=store,
-                window=_analysis_window(config, end),
-                gates=gates,
-                run_id="gui-reconciliation",
-                timezone=config.analysis.timezone,
+            findings = store.get_findings(
+                agent="reconciliation",
+                status=FindingStatus.ACTIVE,
+                limit=50,
             )
-            try:
-                findings = PredictionReconciliationAgent().run(ctx)
-            except Exception:
-                findings = []
             view = reconciliation_page_view(store, findings, now=now)
         finally:
             _close(store, store_opener)
         return _render("reconciliation.html", request, "/reconciliation", **view)
 
     @app.get("/context", response_class=HTMLResponse)
-    def context_page(request: Request) -> Any:
-        store = store_opener(config, None)
-        try:
-            view = context_page_view(store, config, datetime.now(tz=UTC))
-        finally:
-            _close(store, store_opener)
-        return _render("context.html", request, "/context", **view)
+    def context_page() -> Any:
+        return RedirectResponse("/log#missing-context", status_code=302)
 
     @app.get("/evals", response_class=HTMLResponse)
     def evals(request: Request) -> Any:
@@ -962,6 +954,10 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                             "html": markdown_to_html(answer.text),
                             "tools": list(answer.tools_used),
                             "faithful": answer.faithful,
+                            "trace": [
+                                {"icon": line.icon, "text": line.text} for line in answer.trace
+                            ],
+                            "violations": list(answer.violations),
                         },
                     }
                 )
@@ -1103,6 +1099,10 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                             "html": markdown_to_html(answer.text),
                             "tools": list(answer.tools_used),
                             "faithful": answer.faithful,
+                            "trace": [
+                                {"icon": line.icon, "text": line.text} for line in answer.trace
+                            ],
+                            "violations": list(answer.violations),
                         },
                     }
                 )
@@ -1530,6 +1530,28 @@ def _status_pill_text(coverage: Any) -> str:
     return f"Local only · {days} day{suffix}"
 
 
+def _cached_status_pill(
+    request: Request, *, config: Config, store_opener: StoreOpener
+) -> str:
+    """Return the header status pill, refreshing at most every ``_STATUS_PILL_TTL_S``."""
+    cache = request.app.state.status_pill_cache
+    now = time_mod.time()
+    if cache["text"] and (now - cache["at"]) < _STATUS_PILL_TTL_S:
+        return str(cache["text"])
+    store = store_opener(config, None)
+    try:
+        text = _status_pill_text(store.coverage())
+    finally:
+        _close(store, store_opener)
+    cache["text"] = text
+    cache["at"] = now
+    return text
+
+
+def _invalidate_status_pill(app: Any) -> None:
+    app.state.status_pill_cache = {"text": "", "at": 0.0}
+
+
 #: Coordinator investigation receipts (kind="investigation") are planning memory
 #: - recalled to avoid re-running the same belt - not user-facing findings.
 _INTERNAL_FINDING_KINDS = frozenset({"investigation"})
@@ -1587,24 +1609,12 @@ def _dashboard_banners(
             f"Need at least {HARD_FLOOR_DAYS:.0f} days of data before analysis.",
         ),
         "analyze_fail": ("bad", "Analysis failed - see the CLI log for details."),
-        "investigate_skip": (
-            "setup",
-            f"Need at least {HARD_FLOOR_DAYS:.0f} days of data before an investigation.",
-        ),
-        "investigate_empty": ("bad", "Type a question to investigate."),
-        "investigate_fail": ("bad", "Investigation failed - see the CLI log for details."),
         "wiki_ok": ("ok", "Wiki rebuilt from current findings."),
         "wiki_fail": ("bad", "Wiki rebuild failed - see the CLI log for details."),
     }
     if flash in flash_msgs:
         kind, message = flash_msgs[flash]
         banners.append({"kind": kind, "message": message})
-    elif flash and flash.startswith("investigate_ok"):
-        n = flash.split(":", 1)[1] if ":" in flash else "0"
-        plural = "s" if n != "1" else ""
-        banners.append(
-            {"kind": "ok", "message": f"Investigation complete - {n} finding{plural} banked."}
-        )
     elif flash and flash.startswith("upload_ok"):
         n = flash.split(":", 1)[1] if ":" in flash else "0"
         banners.append({"kind": "ok", "message": f"Imported {n} glucose rows from CSV."})
@@ -1654,8 +1664,11 @@ def _status_sidebar(
     coverage: Any,
     gates: ColdStartReport,
     store: StoragePort,
+    *,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
-    now = datetime.now(tz=UTC)
+    if now is None:
+        now = datetime.now(tz=UTC)
     sources: list[dict[str, str]] = []
     for conn in build_connectors(config):
         label = _SOURCE_LABELS.get(conn.source, conn.source)
@@ -1688,6 +1701,7 @@ def _status_sidebar(
             "meals": coverage.n_meals,
         },
         "storage": _storage_view(config),
+        "goals": goals_sidebar_view(store, now=now),
     }
 
 
@@ -1981,6 +1995,7 @@ def _scope_label(scope: Any) -> str:
 
 def _run_view(run: InvestigationRun, now: datetime) -> dict[str, Any]:
     """Shape one investigation run for the Investigations page."""
+    violations = faithfulness_violations_from_answer(run.answer)
     return {
         "question": run.question or "Whole-record investigation",
         "kind": run.kind,
@@ -1989,6 +2004,9 @@ def _run_view(run: InvestigationRun, now: datetime) -> dict[str, Any]:
         "window": f"{run.window_start.isoformat()} to {run.window_end.isoformat()}",
         "plan": run.plan,
         "trace": run.trace,
+        "trace_entries": trace_entries_from_lines(run.trace),
+        "trace_violations": violations,
+        "faithfulness_flagged": answer_faithfulness_flagged(run.answer),
         "n_findings": run.n_findings,
         "coverage": _coverage_view(run.coverage_summary),
         "evidence_items": run.evidence_items,

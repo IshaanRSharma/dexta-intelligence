@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["evidence_strength", "findings_page_view", "lifecycle_label"]
 
+_FINDINGS_QUERY_CAP = 100
+
 #: Kinds that are bookkeeping artifacts rather than user-facing findings. They
 #: are excluded from both the active and rejected lists on the Findings page.
 INTERNAL_FINDING_KINDS = frozenset({"investigation"})
@@ -144,7 +146,7 @@ def findings_page_view(store: StoragePort, *, now: datetime) -> dict[str, Any]:
     rejected lists. STALE findings fall out of the active list naturally because
     they are not ACTIVE.
     """
-    findings = store.get_findings(status=None, limit=1_000_000)
+    findings = store.get_findings(status=None, limit=_FINDINGS_QUERY_CAP)
     user_facing = [f for f in findings if f.kind not in INTERNAL_FINDING_KINDS]
 
     active = [f for f in user_facing if f.status == FindingStatus.ACTIVE]

@@ -7,7 +7,7 @@
   {% if report.detail %} · {{ report.detail }}{% endif %}
   {% if report.latest_data_ts %} · latest data {{ report.latest_data_ts.strftime('%b %d, %H:%M') }}{% endif %}
 </p>
-<p class="test-msg test-neutral">Credentials look good - click <strong>Sync now</strong> to pull pump data.</p>
+<p class="test-msg test-neutral">Credentials look good - save, then use <strong>Sync all</strong> on <a href="/connectors">Connectors</a> (or Sync now here for a quick test pull).</p>
 {% else %}
 <p class="test-msg test-bad">
   <span class="dot unset"></span>

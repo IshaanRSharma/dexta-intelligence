@@ -45,6 +45,7 @@ class ChatAnswer:
     faithful: bool
     stopped_reason: str
     trace: tuple[TraceLine, ...] = ()
+    violations: tuple[str, ...] = ()
 
 
 @dataclass
@@ -105,13 +106,19 @@ def _finish(
     report = audit(result.answer, result.evidence)
     if not report.ok:
         logger.warning("chat: %d untraceable number(s) in answer", len(report.violations))
+        violations = tuple(str(v) for v in report.violations)
         warned = (
             result.answer
             + "\n\n⚠️ Some figures above could not be traced to your data - "
             "treat them with caution."
         )
         return ChatAnswer(
-            warned, tools_used, faithful=False, stopped_reason=result.stopped_reason, trace=trace
+            warned,
+            tools_used,
+            faithful=False,
+            stopped_reason=result.stopped_reason,
+            trace=trace,
+            violations=violations,
         )
     return ChatAnswer(
         result.answer, tools_used, faithful=True, stopped_reason=result.stopped_reason, trace=trace

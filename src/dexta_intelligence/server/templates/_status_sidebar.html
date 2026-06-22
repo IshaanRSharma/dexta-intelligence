@@ -26,7 +26,7 @@
       · {{ sidebar.stream_counts.meals }} meals
     </p>
     {% if sidebar.stream_counts.insulin == 0 %}
-    <p class="muted small" style="margin:8px 0 0">No pump data yet - connect a source in Settings and tap <strong>Sync now</strong>.</p>
+    <p class="muted small" style="margin:8px 0 0">No pump data yet - connect a source in Settings, then <a href="/connectors">sync on Connectors</a>.</p>
     {% endif %}
   </div>
   {% endif %}
@@ -59,6 +59,20 @@
     {% if sidebar.storage.path %}
     <p class="side-meta mono" style="margin:4px 0 0;word-break:break-all">{{ sidebar.storage.path }}{% if sidebar.storage.size %} · {{ sidebar.storage.size }}{% endif %}</p>
     {% endif %}
+  </div>
+  {% endif %}
+
+  {% if sidebar.goals is defined %}
+  <div class="side-panel">
+    <h3>Goals</h3>
+    {% if sidebar.goals.active %}
+    <p class="small" style="margin:0">
+      {{ sidebar.goals.active }} active{% if sidebar.goals.due %} · {{ sidebar.goals.due }} due for check{% endif %}
+    </p>
+    {% else %}
+    <p class="muted small" style="margin:0">No active goals yet.</p>
+    {% endif %}
+    <a class="btn btn-secondary" href="/goals" style="margin-top:10px;width:100%">Open Goals</a>
   </div>
   {% endif %}
 </aside>

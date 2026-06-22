@@ -71,9 +71,14 @@
 
     <div class="run-section">
       <h3>Trace</h3>
+      {% with entries=r.trace_entries, violations=r.trace_violations %}
+      {% include "_trace_timeline.html" %}
+      {% endwith %}
+      {% if not r.trace_entries and r.trace %}
       <ol class="run-trace">
         {% for line in r.trace %}<li>{{ line }}</li>{% endfor %}
       </ol>
+      {% endif %}
     </div>
 
     {% if r.tool_calls %}
@@ -139,8 +144,7 @@
 {% else %}
 <div class="empty">
   <p>No investigations yet.</p>
-  <p class="hint">Ask a question in the dashboard "Investigate a question" box, or run analyze, to start one.</p>
-  <a class="btn btn-secondary" href="/" style="margin-top:14px">Go to dashboard</a>
+  <p class="hint">Use the form above to ask a question, or run deep analysis for a whole-record sweep.</p>
 </div>
 {% endif %}
 <script src="/static/investigate.js?v={{ static_version }}" defer></script>

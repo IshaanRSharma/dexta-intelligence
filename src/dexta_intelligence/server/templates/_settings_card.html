@@ -66,7 +66,7 @@
                 hx-post="/settings/{{ card.key }}/sync"
                 hx-target="#card-{{ card.key }}"
                 hx-swap="outerHTML settle:0 swap:0"
-                hx-on:click="document.getElementById('test-{{ card.key }}').innerHTML='&lt;p class=&quot;test-msg test-neutral&quot;&gt;Syncing…&lt;/p&gt;'">Sync now</button>
+                hx-on:click="document.getElementById('test-{{ card.key }}').innerHTML='&lt;p class=&quot;test-msg test-neutral&quot;&gt;Syncing…&lt;/p&gt;'">Test sync</button>
         {% endif %}
       </div>
     </form>

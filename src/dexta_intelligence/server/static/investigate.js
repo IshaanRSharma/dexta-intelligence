@@ -29,6 +29,38 @@
     return String(name || "tool").replace(/_/g, " ");
   }
 
+  function traceIcon(icon) {
+    const map = {
+      zoom: "⌖",
+      scope: "◧",
+      compare: "⇔",
+      recall: "◎",
+      scan: "◉",
+      trend: "↗",
+      treatment: "💉",
+      time: "◷",
+    };
+    return map[icon] || "•";
+  }
+
+  function renderTraceTimeline(container, trace, violations) {
+    container.innerHTML = "";
+    container.className = "trace-timeline";
+    (trace || []).forEach(function (line) {
+      const item = el("div", "trace-item trace-" + (line.icon || "scope"));
+      item.appendChild(el("span", "trace-icon", traceIcon(line.icon)));
+      item.appendChild(el("span", "trace-text", line.text || ""));
+      container.appendChild(item);
+    });
+    if (violations && violations.length) {
+      const row = el("div", "trace-guard-row");
+      violations.forEach(function (v) {
+        row.appendChild(el("span", "trace-guard-chip", "claim rejected: not traceable · " + v));
+      });
+      container.appendChild(row);
+    }
+  }
+
   function summarizeScope(scope) {
     if (!scope || typeof scope !== "object") return "";
     const parts = [];
@@ -141,6 +173,14 @@
   function addAnswer(view, payload) {
     answerShell(view);
     view.answer.innerHTML = payload.html || escapeHtml(payload.text || "");
+    if (payload.trace && payload.trace.length) {
+      view.traceHead.style.display = "";
+      view.traceHead.textContent = "Trace";
+      renderTraceTimeline(view.steps, payload.trace, payload.violations);
+    } else if (payload.violations && payload.violations.length) {
+      view.traceHead.style.display = "";
+      renderTraceTimeline(view.steps, [], payload.violations);
+    }
     const chips = el("div", "chips");
     chips.appendChild(chip("faithful", payload.faithful ? "yes" : "flagged"));
     if (payload.tools && payload.tools.length) chips.appendChild(chip("tools", payload.tools.length));
@@ -284,5 +324,15 @@
     deepBtn.addEventListener("click", function () {
       start(input.value.trim(), "deep");
     });
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const qParam = params.get("q");
+  if (qParam) {
+    input.value = qParam;
+    start(qParam, "question");
+    params.delete("q");
+    const qs = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (qs ? "?" + qs : ""));
   }
 })();

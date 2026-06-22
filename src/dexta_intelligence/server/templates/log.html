@@ -83,6 +83,33 @@
 </div>
 {% endif %}
 
+<section id="missing-context" class="findings-section" style="margin-top:32px">
+  <h2 class="section-title">Context dexta is missing</h2>
+  <p class="muted small" style="margin:-8px 0 14px">When glucose moves and nothing was logged nearby, dexta asks rather than guesses.</p>
+  {% set requests = requests|default([]) %}
+  {% if requests %}
+  <div class="cards">
+    {% for r in requests %}
+    <article class="card finding-card">
+      <p class="stats">{{ r.question }}</p>
+      <div class="chips">
+        {% if r.peak is not none %}{{ chip("peak", "%d mg/dL"|format(r.peak)) }}{% endif %}
+        {{ chip("suggested", r.suggested_event_type) }}
+      </div>
+      <div class="btn-row">
+        <a class="btn btn-secondary" href="#log-type">Log it above</a>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">
+    <p>No missing context right now.</p>
+    <p class="hint">dexta has what it needs for this window.</p>
+  </div>
+  {% endif %}
+</section>
+
 <script>
 (function () {
   const form = document.querySelector(".settings-form");
