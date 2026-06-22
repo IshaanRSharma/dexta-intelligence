@@ -228,6 +228,67 @@ def cmd_demo(*, out: TextIO, model: Any = None) -> int:
     return 0
 
 
+def cmd_timing(
+    *,
+    bucket: str,
+    intent: str,
+    config: Config,
+    db_path: Path | None,
+    out: TextIO,
+    opener: StoreOpener = open_sqlite_store,
+) -> int:
+    """Timing context: a deterministic, observation-only briefing for a time bucket.
+
+    ``bucket`` is a preset (overnight/breakfast/lunch/dinner/bedtime) or an hour
+    range (``17-22``). No model, no API key; never gives a dose."""
+    from dexta_intelligence.investigations.timing_context import (  # noqa: PLC0415
+        resolve_bucket,
+        timing_report,
+    )
+
+    resolved = resolve_bucket(bucket)
+    if resolved is None:
+        out.write(f"Could not parse bucket {bucket!r}; try a preset (dinner) or a range (17-22).\n")
+        return 2
+
+    store = opener(config, db_path)
+    try:
+        coverage = store.coverage()
+        window = (
+            coverage.first_ts.date() if coverage.first_ts else datetime.now(tz=UTC).date(),
+            coverage.last_ts.date() if coverage.last_ts else datetime.now(tz=UTC).date(),
+        )
+        ctx = AgentContext(
+            store=store,
+            window=window,
+            gates=ColdStartReport.from_coverage(coverage),
+            run_id=str(uuid.uuid4()),
+            timezone=config.analysis.timezone,
+        )
+        report = timing_report(
+            ctx,
+            resolved,
+            intent=intent,
+            target_low=config.analysis.target_low,
+            target_high=config.analysis.target_high,
+        )
+    finally:
+        _maybe_close_store(store, opener)
+
+    out.write(f"Timing context - {report['bucket']['name']} ({report['bucket']['label']})\n")
+    for card in report["cards"]:
+        n = f" (n={card['n']})" if card["n"] is not None else ""
+        out.write(f"\n[{card['id']}] {card['title']}{n}\n")
+        for line in card["lines"]:
+            out.write(f"  - {line}\n")
+    if report["limitations"]:
+        out.write("\nLimitations:\n")
+        for item in report["limitations"]:
+            out.write(f"  - {item}\n")
+    out.write(f"\nSafety: {report['safety']}\n")
+    return 0
+
+
 def cmd_goals(
     *,
     action: str,

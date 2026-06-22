@@ -1,0 +1,359 @@
+"""Timing context - a prospective, time-bucket-scoped briefing.
+
+The retrospective twin of ``explain_spike``: instead of "why did I spike?", this
+answers "what does my data show for *this period of day*?" for a chosen bucket
+(overnight, dinner, a custom window). It is deterministic - the cards are fixed
+code paths composing existing tools, never LLM-chosen - and it is observation
+only: pump profile read-outs and historical patterns, never a dose, ratio, or
+"raise/lower" directive (the treatment gate's bar).
+
+Output schema is frozen: ``{bucket, cards, limitations, trace, safety}``. Each
+card is ``{id, title, lines, n}``.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, time
+from typing import TYPE_CHECKING, Any
+
+from dexta_intelligence.agents.reason import ToolCall
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit
+from dexta_intelligence.agents.trace import render_trace
+
+if TYPE_CHECKING:
+    from dexta_intelligence.agents.base import AgentContext
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "OUTPUT_KEYS",
+    "PRESETS",
+    "SAFETY_LINE",
+    "Bucket",
+    "TimingCard",
+    "TimingContext",
+    "gather_timing_context",
+    "resolve_bucket",
+    "timing_report",
+]
+
+OUTPUT_KEYS = ("bucket", "cards", "limitations", "trace", "safety")
+SAFETY_LINE = "Pattern context for a time window. No dosing recommendation."
+
+#: Local-time, hour-granular presets (half-open [start, end)).
+PRESETS: dict[str, tuple[int, int]] = {
+    "overnight": (0, 6),
+    "breakfast": (6, 10),
+    "lunch": (11, 14),
+    "dinner": (17, 22),
+    "bedtime": (21, 24),
+}
+
+#: A bolus this many minutes after the carb entry counts as the late-bolus signal.
+_LATE_BOLUS_MIN = 15
+#: Buckets whose midpoint falls in these hours get the meal cards by default.
+_MEAL_HOURS = range(6, 22)
+
+
+@dataclass(frozen=True, slots=True)
+class Bucket:
+    """A local-time, half-open hour window the briefing is scoped to."""
+
+    name: str
+    start_hour: int
+    end_hour: int
+
+    @property
+    def label(self) -> str:
+        return f"{self.start_hour:02d}:00-{self.end_hour:02d}:00"
+
+    @property
+    def midpoint_hour(self) -> int:
+        return (self.start_hour + self.end_hour) // 2
+
+
+@dataclass(frozen=True, slots=True)
+class TimingCard:
+    """One observation-only card. ``n`` is the supporting sample size, if any."""
+
+    id: str
+    title: str
+    lines: list[str]
+    n: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TimingContext:
+    """Deterministically gathered briefing for one bucket. No LLM in here."""
+
+    bucket: Bucket
+    cards: list[TimingCard]
+    limitations: list[str]
+    steps: list[ToolCall]
+    pool: dict[str, Any] = field(default_factory=dict)
+
+
+def resolve_bucket(spec: str) -> Bucket | None:
+    """A preset name (``dinner``) or an hour range (``17-22`` / ``17:00-22:00``).
+
+    ``None`` when unparseable. Minute precision is truncated to the hour (the
+    glucose bucketing is hour-granular in v1)."""
+    raw = spec.strip().lower()
+    if raw in PRESETS:
+        start, end = PRESETS[raw]
+        return Bucket(name=raw, start_hour=start, end_hour=end)
+    if "-" not in raw:
+        return None
+    left, _, right = raw.partition("-")
+    start_h = _parse_hour(left)
+    end_h = _parse_hour(right)
+    if start_h is None or end_h is None or not (0 <= start_h < end_h <= 24):
+        return None
+    return Bucket(name=raw, start_hour=start_h, end_hour=end_h)
+
+
+def _parse_hour(text: str) -> int | None:
+    head = text.strip().split(":", 1)[0]
+    if not head.isdigit():
+        return None
+    hour = int(head)
+    return hour if 0 <= hour <= 24 else None
+
+
+def gather_timing_context(
+    ctx: AgentContext,
+    bucket: Bucket,
+    *,
+    intent: str = "general",
+    target_low: int = 70,
+    target_high: int = 180,
+) -> TimingContext:
+    """Compose the fixed cards for ``bucket``: profile read-out, glucose in the
+    window, basal context, and meal patterns when the intent calls for it.
+
+    Pure: no model, never raises on bad input. Mirrors ``gather_spike_evidence``
+    so the audit trail is reproducible and the numbers stay guard-traceable."""
+    toolkit = DiscoveryToolkit(ctx, target_low=target_low, target_high=target_high)
+    caps = toolkit.capabilities()
+    steps: list[ToolCall] = []
+    pool: dict[str, Any] = {}
+    limitations: list[str] = []
+    cards: list[TimingCard] = []
+
+    def step(name: str, args: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+        ok = not result.get("error")
+        steps.append(ToolCall(name=name, args=args, ok=ok, result=result))
+        if ok:
+            _collect(pool, name, len(steps), result)
+        return result
+
+    anchor_iso = datetime.combine(ctx.window[1], time(12), tzinfo=UTC).isoformat()
+    cards.append(_profile_card(step, toolkit, bucket, anchor_iso, limitations))
+    cards.append(_glucose_card(step, toolkit, bucket, limitations))
+
+    want_basal = intent == "basal" or bucket.name == "overnight"
+    if want_basal and caps.has_insulin:
+        cards.append(_basal_card(step, toolkit))
+    elif want_basal:
+        limitations.append("no insulin data - basal context skipped")
+
+    if intent == "meal":
+        if not caps.has_insulin:
+            limitations.append("no insulin data - meal-timing cards skipped")
+        elif bucket.midpoint_hour not in _MEAL_HOURS:
+            limitations.append("bucket is outside meal hours - meal-timing cards skipped")
+        else:
+            cards.extend(_meal_cards(step, toolkit, bucket, limitations))
+
+    return TimingContext(
+        bucket=bucket, cards=cards, limitations=limitations, steps=steps, pool=pool
+    )
+
+
+def timing_report(
+    ctx: AgentContext,
+    bucket: Bucket,
+    *,
+    intent: str = "general",
+    target_low: int = 70,
+    target_high: int = 180,
+) -> dict[str, Any]:
+    """The frozen output dict for a bucket briefing (CLI / web / tests)."""
+    tc = gather_timing_context(
+        ctx, bucket, intent=intent, target_low=target_low, target_high=target_high
+    )
+    return {
+        "bucket": {"name": tc.bucket.name, "label": tc.bucket.label, "intent": intent},
+        "cards": [{"id": c.id, "title": c.title, "lines": c.lines, "n": c.n} for c in tc.cards],
+        "limitations": tc.limitations,
+        "trace": [line.text for line in render_trace(tc.steps)],
+        "safety": SAFETY_LINE,
+    }
+
+
+# ── cards ──────────────────────────────────────────────────────────────────────
+
+
+def _profile_card(
+    step: Any, toolkit: DiscoveryToolkit, bucket: Bucket, anchor_iso: str, limitations: list[str]
+) -> TimingCard:
+    profile = step("get_insulin_profile", {}, toolkit.get_insulin_profile())
+    if profile.get("error"):
+        # Fall back to the versioned profile in effect (covers stores with version
+        # history but no current-snapshot, like the demo).
+        profile = step(
+            "get_active_profile", {"timestamp": anchor_iso}, toolkit.get_active_profile(anchor_iso)
+        )
+    if profile.get("error"):
+        limitations.append("no pump profile synced - segment read-out skipped")
+        return TimingCard(id="P", title="Pump profile for this window", lines=[], n=None)
+    segments = _segments_overlapping(_profile_segments(profile), bucket)
+    if not segments:
+        limitations.append("no profile segment overlaps this window")
+        return TimingCard(id="P", title="Pump profile for this window", lines=[], n=None)
+    lines = [
+        f"{s.get('start', '??')} - basal {s.get('basal_u_hr', '?')} U/hr, "
+        f"ISF {s.get('isf_mg_dl_u', '?')} mg/dL/U, CR {s.get('carb_ratio_g_u', '?')} g/U, "
+        f"target {s.get('target_mg_dl', '?')} mg/dL  (on pump now, not a recommendation)"
+        for s in segments
+    ]
+    return TimingCard(id="P", title="Pump profile for this window", lines=lines, n=len(segments))
+
+
+def _glucose_card(
+    step: Any, toolkit: DiscoveryToolkit, bucket: Bucket, limitations: list[str]
+) -> TimingCard:
+    g = step(
+        "glucose_stats",
+        {"hours": [bucket.start_hour, bucket.end_hour]},
+        toolkit.glucose_stats(hours=(bucket.start_hour, bucket.end_hour)),
+    )
+    n = int(g.get("n") or 0)
+    if not n:
+        limitations.append("no glucose readings in this window over the active range")
+        return TimingCard(id="G", title="Glucose in this window (recent)", lines=[], n=0)
+    lines = [
+        f"Mean {g.get('mean')} mg/dL, median {g.get('median')} mg/dL",
+        f"Time in range {g.get('tir_pct')}% (low {g.get('tbr_pct')}%, high {g.get('tar_pct')}%)",
+        f"Variability CV {g.get('cv_pct')}%",
+    ]
+    return TimingCard(id="G", title="Glucose in this window (recent)", lines=lines, n=n)
+
+
+def _basal_card(step: Any, toolkit: DiscoveryToolkit) -> TimingCard:
+    basal = step("get_basal_timeline", {}, toolkit.get_basal_timeline())
+    if basal.get("basal_stable"):
+        lines = ["Basal delivery was stable across the active window (no temp/suspend activity)."]
+    else:
+        n_temp = basal.get("n_temp_basals") or basal.get("n_segments")
+        suffix = f" ({n_temp} temp/suspend segments)" if isinstance(n_temp, int) else ""
+        lines = [f"Temp-basal or suspend activity occurred in the window{suffix}."]
+    lines.append(
+        "Observation only - basal changes are a decision for you, Loop, and your care team."
+    )
+    return TimingCard(id="B", title="Basal delivery in this window", lines=lines, n=None)
+
+
+def _meal_cards(
+    step: Any, toolkit: DiscoveryToolkit, bucket: Bucket, limitations: list[str]
+) -> list[TimingCard]:
+    boluses = step("get_boluses", {}, toolkit.get_boluses())
+    delays = _bucket_bolus_delays(boluses, bucket, toolkit)
+    if not delays:
+        limitations.append("no bolused meals with timing in this window")
+        return []
+    usual = TimingCard(
+        id="U",
+        title="Your usual timing in this window",
+        lines=[f"Median bolus delay {_median(delays):.0f} min after the carb entry"],
+        n=len(delays),
+    )
+    late = [d for d in delays if d >= _LATE_BOLUS_MIN]
+    cards = [usual]
+    if late:
+        cards.append(
+            TimingCard(
+                id="L",
+                title="When you bolused late in this window",
+                lines=[
+                    f"{len(late)} of {len(delays)} boluses were >= {_LATE_BOLUS_MIN} min late",
+                    f"Median late delay {_median(late):.0f} min after the carb entry",
+                ],
+                n=len(late),
+            )
+        )
+    return cards
+
+
+# ── helpers ────────────────────────────────────────────────────────────────────
+
+
+def _profile_segments(profile: dict[str, Any]) -> list[Any]:
+    """Segments from either profile shape: the snapshot's ``active_segments`` or a
+    versioned profile's active (else first) entry in ``profiles``."""
+    seg = profile.get("active_segments")
+    if seg:
+        return list(seg)
+    profiles = profile.get("profiles") or []
+    active = next((p for p in profiles if isinstance(p, dict) and p.get("active")), None)
+    chosen = active or (profiles[0] if profiles else None)
+    return list(chosen.get("segments") or []) if isinstance(chosen, dict) else []
+
+
+def _segments_overlapping(segments: list[Any], bucket: Bucket) -> list[dict[str, Any]]:
+    """Segments whose start hour falls within the bucket (or the one in effect at
+    bucket start when none start inside it)."""
+    inside = [
+        s
+        for s in segments
+        if isinstance(s, dict) and bucket.start_hour <= _seg_hour(s) < bucket.end_hour
+    ]
+    if inside:
+        return inside
+    before = [s for s in segments if isinstance(s, dict) and _seg_hour(s) <= bucket.start_hour]
+    return [max(before, key=_seg_hour)] if before else []
+
+
+def _seg_hour(segment: dict[str, Any]) -> int:
+    head = str(segment.get("start", "0")).split(":", 1)[0]
+    return int(head) if head.isdigit() else 0
+
+
+def _bucket_bolus_delays(
+    boluses: dict[str, Any], bucket: Bucket, toolkit: DiscoveryToolkit
+) -> list[float]:
+    out: list[float] = []
+    for row in boluses.get("boluses") or []:
+        delay = row.get("minutes_after_carb_entry")
+        if not isinstance(delay, (int, float)):
+            continue
+        try:
+            ts = datetime.fromisoformat(str(row.get("ts"))).astimezone(toolkit.tzinfo)
+        except (TypeError, ValueError):
+            continue
+        if bucket.start_hour <= ts.hour < bucket.end_hour:
+            out.append(float(delay))
+    return out
+
+
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    n = len(ordered)
+    mid = n // 2
+    return ordered[mid] if n % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+
+
+def _collect(pool: dict[str, Any], name: str, idx: int, result: dict[str, Any]) -> None:
+    """Flatten a tool result's numbers (one list level deep) into the guard pool."""
+    numbers: dict[str, Any] = {k: v for k, v in result.items() if isinstance(v, (int, float))}
+    for k, v in result.items():
+        if isinstance(v, list):
+            for i, row in enumerate(v[:50]):
+                if isinstance(row, dict):
+                    nums = {kk: vv for kk, vv in row.items() if isinstance(vv, (int, float))}
+                    if nums:
+                        numbers[f"{k}_{i}"] = nums
+    if numbers:
+        pool[f"{name}_{idx}"] = numbers
