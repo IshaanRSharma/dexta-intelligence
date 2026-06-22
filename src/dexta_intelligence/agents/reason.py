@@ -33,6 +33,11 @@ __all__ = [
 #: Default ceiling on reasoning turns - insurance against a model that loops.
 _DEFAULT_MAX_STEPS = 6
 
+#: Confidence at which the loop nudges the model to conclude rather than keep probing.
+_CONCLUDE_CONFIDENCE = 0.85
+#: Consecutive no-new-information rounds before the loop nudges the model to wrap up.
+_STAGNATION_ROUNDS = 2
+
 
 @dataclass(frozen=True, slots=True)
 class ReasoningEvent:
@@ -130,6 +135,8 @@ def run_reasoning_loop(
     steps: its ``update_belief`` tool is offered alongside ``tools``, the merged
     state streams as a ``belief`` event after each tool round, and the final
     state rides home on the result. It scaffolds the reasoning; it never decides.
+    Deterministic stop conditions (high confidence, no new information) nudge the
+    model to conclude; ``max_steps`` is the hard budget.
     """
     active_tools = [belief.tool(), *tools] if belief is not None else list(tools)
     bound = model.bind_tools([t.schema() for t in active_tools])
@@ -140,6 +147,9 @@ def run_reasoning_loop(
     messages.append({"role": "user", "content": user})
     steps: list[ToolCall] = []
     evidence: dict[str, Any] = {}
+    prev_signature: tuple[Any, ...] | None = None
+    stall_rounds = 0
+    nudged: set[str] = set()
 
     for _ in range(max_steps):
         try:
@@ -182,6 +192,13 @@ def run_reasoning_loop(
             for call in tool_calls:
                 belief.note_probe(call.get("name", ""))
             _emit(on_event, ReasoningEvent("belief", belief.snapshot()))
+            signature = _belief_signature(belief)
+            stall_rounds = stall_rounds + 1 if signature == prev_signature else 0
+            prev_signature = signature
+            nudge, reason = _stop_nudge(belief, stall_rounds, nudged)
+            if nudge:
+                messages.append({"role": "user", "content": nudge})
+                _emit(on_event, ReasoningEvent("stop_signal", {"reason": reason}))
 
     return ReasoningResult(
         answer="",
@@ -190,6 +207,42 @@ def run_reasoning_loop(
         stopped_reason="max_steps",
         belief=belief,
     )
+
+
+def _belief_signature(belief: BeliefState) -> tuple[Any, ...]:
+    """A cheap fingerprint of belief 'information'. Changes when the investigation
+    learns something: new evidence, confidence, or a hypothesis's status, statement,
+    or note. Excludes gaps/summary (framing, not information). Confidence is rounded
+    to a 0.01 tolerance band so trivial drift does not mask a real stall."""
+    return (
+        len(belief.evidence),
+        round(belief.confidence, 2),
+        tuple(
+            sorted((h.id, h.status.value, h.statement, h.note) for h in belief.hypotheses.values())
+        ),
+    )
+
+
+def _stop_nudge(belief: BeliefState, stall_rounds: int, nudged: set[str]) -> tuple[str, str]:
+    """A deterministic, one-shot nudge to conclude when a stop condition is met.
+
+    Advisory: the model still decides whether to answer; ``max_steps`` is the only
+    hard stop. Returns ``(nudge_text, reason)`` or two empty strings."""
+    if belief.confidence >= _CONCLUDE_CONFIDENCE and "confidence" not in nudged:
+        nudged.add("confidence")
+        return (
+            "You have reached high confidence in a leading hypothesis. Give your "
+            "answer now unless one quick check would change it.",
+            "confidence",
+        )
+    if stall_rounds >= _STAGNATION_ROUNDS and "stall" not in nudged:
+        nudged.add("stall")
+        return (
+            "The last probes added no new information. Conclude with what you have, "
+            "or state precisely what is missing. Do not keep probing in circles.",
+            "stall",
+        )
+    return "", ""
 
 
 def _invoke_model(

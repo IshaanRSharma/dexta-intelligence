@@ -8,6 +8,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Adaptive stop conditions: the reasoning loop now nudges the model to conclude
+  when it reaches high confidence or when the last probes added no new
+  information, instead of letting it probe in circles to the step budget. The
+  nudges are advisory (the model still writes the answer); the step ceiling stays
+  the only hard stop.
 - Next-probe guidance: the belief state suggests the most discriminating evidence
   the investigation has not gathered yet for its open hypotheses (a light
   information-gain heuristic over modality coverage), folded into what the model
