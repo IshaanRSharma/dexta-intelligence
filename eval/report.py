@@ -12,6 +12,7 @@ from eval.metrics.e5_perturbation import E5PerturbationResult
 from eval.metrics.e6_attribution import E6AttributionResult
 from eval.metrics.e6_faithfulness import E6FaithfulnessResult
 from eval.metrics.e6_safety import E6SafetyResult
+from eval.metrics.e7_reasoning import E7ReasoningResult
 from eval.metrics.e_consensus import EConsensusResult
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "E6AttributionResult",
     "E6FaithfulnessResult",
     "E6SafetyResult",
+    "E7ReasoningResult",
     "EConsensusResult",
     "e1_row",
     "e2_row",
@@ -32,6 +34,7 @@ __all__ = [
     "e6_attribution_row",
     "e6_faithfulness_row",
     "e6_safety_row",
+    "e7_reasoning_row",
     "e_consensus_row",
     "render_json",
     "render_markdown",
@@ -112,9 +115,7 @@ def e5_row(result: E5PerturbationResult) -> dict[str, object]:
         "E5_min_jaccard": round(result.min_jaccard, 4),
         "E5_total_new_kinds": result.total_new_kinds,
         "E5_jaccard_target": result.jaccard_target,
-        "E5_per_corruption_jaccard": {
-            r.name: round(r.jaccard, 4) for r in result.corruptions
-        },
+        "E5_per_corruption_jaccard": {r.name: round(r.jaccard, 4) for r in result.corruptions},
         "E5_passed": result.passed,
     }
 
@@ -142,4 +143,24 @@ def e6_faithfulness_row(result: E6FaithfulnessResult) -> dict[str, object]:
         "E6_faithfulness_rate": round(result.faithful_rate, 4),
         "E6_faithfulness_target": result.faithful_target,
         "E6_faithfulness_passed": result.passed,
+    }
+
+
+def e7_reasoning_row(result: E7ReasoningResult) -> dict[str, object]:
+    return {
+        "E7_mean_coverage": round(result.mean_coverage, 4),
+        "E7_coverage_target": result.coverage_target,
+        "E7_mean_efficiency": round(result.mean_efficiency, 4),
+        "E7_soundness_rate": round(result.soundness_rate, 4),
+        "E7_soundness_target": result.soundness_target,
+        "E7_gap_handling_rate": round(result.gap_handling_rate, 4),
+        "E7_cells": {
+            c.scenario: {
+                "coverage": round(c.coverage, 2),
+                "probes": c.probes,
+                "sound": c.sound,
+            }
+            for c in result.cells
+        },
+        "E7_passed": result.passed,
     }

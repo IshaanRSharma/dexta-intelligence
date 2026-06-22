@@ -8,6 +8,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Reasoning-process eval (E7, `eval reasoning`): grades the investigation path,
+  not just the answer. Scores cross-modal evidence coverage, probe efficiency,
+  gap-handling, and path soundness against the labeled benchmark, so each
+  intelligence-flow phase is measured rather than asserted.
 - LLM providers: Google DeepMind Gemini (`google_genai`), local Ollama
   (`ollama`, honoring `OLLAMA_HOST`), and local model files via llama.cpp
   (`llamacpp`, the optional `local` extra).

@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from eval.agent_eval import run_investigation
+from eval.agent_eval import attribution_hit, run_investigation
 from eval.scenarios import BENCHMARK
 
 if TYPE_CHECKING:
@@ -59,8 +59,7 @@ def run_e6_attribution(
     hits = 0
     for scenario in scenarios:
         outcome = runner(scenario.build(), scenario.question, model)
-        answer = outcome.answer.lower()
-        hit = all(keyword.lower() in answer for keyword in scenario.expected_keywords)
+        hit = attribution_hit(outcome.answer, scenario.expected_keywords)
         if hit:
             hits += 1
         cells.append(E6AttributionCell(scenario=scenario.name, hit=hit))
