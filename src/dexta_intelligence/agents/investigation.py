@@ -13,13 +13,29 @@ does the thinking; this only gives that thinking a place to live.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.reason import ToolSpec
+from dexta_intelligence.models import HypothesisStatus as StoredHypothesisStatus
 
-__all__ = ["BeliefState", "Hypothesis", "HypothesisStatus"]
+if TYPE_CHECKING:
+    from dexta_intelligence.agents.base import AgentContext
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "BeliefState",
+    "Hypothesis",
+    "HypothesisStatus",
+    "seed_belief_from_store",
+]
+
+#: Cap on prior hypotheses seeded into a live investigation. A handful keeps the
+#: model discriminating between real competitors, not wading through a backlog.
+_SEED_LIMIT = 5
 
 
 class HypothesisStatus(StrEnum):
@@ -167,6 +183,40 @@ def _coerce_status(value: Any) -> HypothesisStatus:
         return HypothesisStatus(str(value))
     except ValueError:
         return HypothesisStatus.UNDETERMINED
+
+
+def seed_belief_from_store(ctx: AgentContext, *, limit: int = _SEED_LIMIT) -> BeliefState:
+    """Seed a belief state from the open hypotheses banked by prior runs.
+
+    Prior wonders re-enter as live competing hypotheses for the model to
+    discriminate, so a new investigation builds on what came before instead of a
+    blank slate. Returns an empty state when the store holds none.
+    """
+    state = BeliefState()
+    try:
+        stored = ctx.store.get_hypotheses(status=StoredHypothesisStatus.OPEN.value)
+    except Exception:  # pragma: no cover - defensive over an optional backend
+        logger.debug("seed_belief_from_store: hypothesis store unavailable", exc_info=True)
+        return state
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for h in stored:
+        if len(entries) >= limit:
+            break
+        statement = h.statement.strip()
+        if not statement or statement in seen:
+            continue
+        seen.add(statement)
+        entry: dict[str, Any] = {
+            "statement": statement,
+            "status": StoredHypothesisStatus.OPEN.value,
+        }
+        if h.id is not None:
+            entry["id"] = f"stored-{h.id}"
+        entries.append(entry)
+    if entries:
+        state.apply({"hypotheses": entries})
+    return state
 
 
 _BELIEF_SCHEMA: dict[str, Any] = {

@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents.chat import _finish
-from dexta_intelligence.agents.investigation import BeliefState
+from dexta_intelligence.agents.investigation import seed_belief_from_store
 from dexta_intelligence.agents.reason import ReasoningEvent, ToolSpec, run_reasoning_loop
 from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.trace import render_trace
@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 
     from dexta_intelligence.agents.base import AgentContext
     from dexta_intelligence.agents.chat import ChatAnswer
+    from dexta_intelligence.agents.investigation import BeliefState
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,23 @@ _BELIEF_DIRECTIVE = (
     "still blocking you, and your confidence. Probe to discriminate between live "
     "hypotheses; conclude when one is clearly supported or say what is missing."
 )
+
+
+def _belief_directive(belief: BeliefState) -> str:
+    """The belief directive, plus any hypotheses carried in from prior runs.
+
+    Seeded hypotheses must be in the model's view from the first turn to steer
+    probing; the update_belief tool only returns the state once the model calls
+    it, so they go in the prompt here.
+    """
+    if not belief.hypotheses:
+        return _BELIEF_DIRECTIVE
+    carried = "\n".join(f"- [{hid}] {h.statement}" for hid, h in belief.hypotheses.items())
+    return (
+        f"{_BELIEF_DIRECTIVE}\n\nOpen hypotheses carried from prior analysis "
+        f"(discriminate or refute these; reuse the bracketed id in update_belief "
+        f"to change a hypothesis's status):\n{carried}"
+    )
 
 
 def workflow_tool_specs(ctx: AgentContext, *, target_low: int, target_high: int) -> list[ToolSpec]:
@@ -146,8 +164,8 @@ class OrchestratorAgent:
         belt = tool_specs(ctx, toolkit) + workflow_tool_specs(
             ctx, target_low=self.target_low, target_high=self.target_high
         )
-        belief = BeliefState()
-        system = f"{_SYSTEM}\n\n{_BELIEF_DIRECTIVE}"
+        belief = seed_belief_from_store(ctx)
+        system = f"{_SYSTEM}\n\n{_belief_directive(belief)}"
         result = run_reasoning_loop(
             self.model,
             belt,

@@ -8,6 +8,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Hypotheses now steer the live loop: open hypotheses banked by prior analysis
+  re-enter a new investigation as competing hypotheses in the belief state, and
+  reach the model in the first-turn prompt (with stable ids) so it probes to
+  discriminate or refute them and tracks their status in place.
 - Working belief state: an investigation now carries an explicit, structured
   understanding across steps (competing hypotheses and their status, evidence,
   open gaps, running confidence) that the model revises through an `update_belief`
