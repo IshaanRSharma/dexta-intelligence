@@ -159,6 +159,7 @@ def test_contradicts_prior_in_memory(store: SQLiteStore) -> None:
     assert reviewed[0].skeptic_notes is not None
     assert str(prior_id) in reviewed[0].skeptic_notes
     assert reviewed[0].confidence <= 0.35
+    assert reviewed[0].status == FindingStatus.CONTRADICTED
 
 
 def test_clean_finding_survives(store: SQLiteStore) -> None:

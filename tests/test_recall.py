@@ -182,3 +182,37 @@ def test_recall_open_questions_only_open_status() -> None:
     )
     payload, _ = _recall(_ctx(store), "overnight")
     assert payload["open_questions"] == ["Still open?"]
+
+
+def _f(scope: str, headline: str, status: FindingStatus) -> Finding:
+    return Finding(
+        agent="discovery",
+        kind="pattern",
+        scope=scope,
+        headline=headline,
+        confidence=0.6,
+        status=status,
+        stats=FindingStats(effect_size=0.6, n=12),
+        window_end=_NOW,
+    )
+
+
+def test_recall_excludes_non_active_and_labels_them() -> None:
+    store = _store()
+    store.insert_finding(_f("overnight", "Active overnight pattern.", FindingStatus.ACTIVE))
+    store.insert_finding(_f("dawn", "Rejected dawn pattern.", FindingStatus.REJECTED))
+    store.insert_finding(_f("dinner", "Contradicted dinner pattern.", FindingStatus.CONTRADICTED))
+    store.insert_finding(_f("am", "Superseded morning pattern.", FindingStatus.SUPERSEDED))
+
+    payload, _numbers = _recall(_ctx(store), "")
+
+    used = [item["headline"] for item in payload["findings"]]
+    assert "Active overnight pattern." in used
+    assert "Rejected dawn pattern." not in used
+    assert "Contradicted dinner pattern." not in used
+    assert "Superseded morning pattern." not in used
+
+    excluded = {e["headline"]: e["reason"] for e in payload.get("excluded", [])}
+    assert excluded["Rejected dawn pattern."] == "not_used_rejected"
+    assert excluded["Contradicted dinner pattern."] == "not_used_contradicted"
+    assert excluded["Superseded morning pattern."] == "not_used_superseded"

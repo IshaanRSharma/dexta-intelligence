@@ -32,7 +32,12 @@ INTERNAL_FINDING_KINDS = frozenset({"investigation"})
 
 #: Statuses shown in the rejected ("graveyard") section.
 _REJECTED_STATUSES = frozenset(
-    {FindingStatus.REJECTED, FindingStatus.DISMISSED, FindingStatus.SUPERSEDED}
+    {
+        FindingStatus.REJECTED,
+        FindingStatus.DISMISSED,
+        FindingStatus.SUPERSEDED,
+        FindingStatus.CONTRADICTED,
+    }
 )
 
 

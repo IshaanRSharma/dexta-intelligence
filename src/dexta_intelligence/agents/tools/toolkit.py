@@ -76,6 +76,14 @@ _SPIKE_THRESHOLD = 200.0
 _MAX_LISTED_EVENTS = 40
 #: Max findings / connections / open-questions recall returns (context budget).
 _MAX_RECALL_ITEMS = 8
+#: Why a non-active finding was withheld from recall (the retrieval-guard label).
+_EXCLUSION_REASON: dict[FindingStatus, str] = {
+    FindingStatus.STALE: "not_used_stale",
+    FindingStatus.REJECTED: "not_used_rejected",
+    FindingStatus.DISMISSED: "not_used_rejected",
+    FindingStatus.SUPERSEDED: "not_used_superseded",
+    FindingStatus.CONTRADICTED: "not_used_contradicted",
+}
 #: Analysis-only oref profile defaults - mirrors the reconciliation agent.
 #: Never used for dosing; tier-B labeling on every result that uses them.
 _ANALYSIS_ISF = 50.0
@@ -1552,13 +1560,16 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
     from dexta_intelligence.memory import embeddings  # noqa: PLC0415
     from dexta_intelligence.memory.synthesis import load_latest  # noqa: PLC0415
 
-    candidates = [
+    user_facing = [
         f
         for f in ctx.store.get_findings(limit=50)
-        if f.agent != "synthesis"
-        and f.kind != "investigation"
-        and f.status != FindingStatus.STALE
+        if f.agent != "synthesis" and f.kind != "investigation"
     ]
+    # Only ACTIVE beliefs are reusable. Rejected, superseded, dismissed,
+    # contradicted, and stale findings are excluded (and reported separately)
+    # so an answer never reasons from a memory the rigor layer has retired.
+    candidates = [f for f in user_facing if f.status == FindingStatus.ACTIVE]
+    excluded = [f for f in user_facing if f.status != FindingStatus.ACTIVE]
     q = query.strip()
     if q and candidates:
         scored = embeddings.rank_findings(q, candidates, top_k=_MAX_RECALL_ITEMS)
@@ -1594,6 +1605,15 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
         "findings": items,
         "open_questions": [h.statement for h in open_q[:_MAX_RECALL_ITEMS]],
     }
+    if excluded:
+        payload["excluded"] = [
+            {
+                "headline": f.headline,
+                "status": f.status.value,
+                "reason": _EXCLUSION_REASON.get(f.status, "not_used"),
+            }
+            for f in excluded[:_MAX_RECALL_ITEMS]
+        ]
     if len(open_q) > _MAX_RECALL_ITEMS:
         payload["open_questions_note"] = (
             f"showing first {_MAX_RECALL_ITEMS} of {len(open_q)}"

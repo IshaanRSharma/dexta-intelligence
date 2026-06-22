@@ -327,6 +327,7 @@ class FindingStatus(enum.StrEnum):
     REJECTED = "rejected"
     DISMISSED = "dismissed"
     STALE = "stale"
+    CONTRADICTED = "contradicted"
 
 
 class FindingStats(_FrozenModel):

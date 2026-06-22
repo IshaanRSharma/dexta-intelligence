@@ -156,6 +156,12 @@ class SkepticAgent:
             status = FindingStatus.REJECTED
             notes.append("rejected: producer rigor_verdict was fail")
 
+        # Contradiction marks the finding only if it was not already rejected
+        # (rejection takes precedence): a live belief the evidence now opposes.
+        if prior_note is not None and status == FindingStatus.ACTIVE:
+            status = FindingStatus.CONTRADICTED
+            notes.append("status: contradicted by a prior finding")
+
         return finding.model_copy(
             update={
                 "status": status,

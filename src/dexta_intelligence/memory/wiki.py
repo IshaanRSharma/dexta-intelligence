@@ -54,12 +54,14 @@ _GRAVEYARD_STATUSES = (
     FindingStatus.REJECTED,
     FindingStatus.SUPERSEDED,
     FindingStatus.DISMISSED,
+    FindingStatus.CONTRADICTED,
 )
 _STATUS_MARKS = {
     FindingStatus.ACTIVE: "✓",
     FindingStatus.SUPERSEDED: "⊘",
     FindingStatus.REJECTED: "✗",
     FindingStatus.DISMISSED: "-",
+    FindingStatus.CONTRADICTED: "≠",
 }
 _HYPOTHESIS_ORDER = (
     HypothesisStatus.OPEN,
