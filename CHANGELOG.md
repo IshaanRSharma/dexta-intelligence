@@ -8,6 +8,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Working belief state: an investigation now carries an explicit, structured
+  understanding across steps (competing hypotheses and their status, evidence,
+  open gaps, running confidence) that the model revises through an `update_belief`
+  tool. It scaffolds the reasoning without deciding for it, and stays out of the
+  faithfulness evidence pool. Threaded through the orchestrator's loop.
 - Reasoning-process eval (E7, `eval reasoning`): grades the investigation path,
   not just the answer. Scores cross-modal evidence coverage, probe efficiency,
   gap-handling, and path soundness against the labeled benchmark, so each

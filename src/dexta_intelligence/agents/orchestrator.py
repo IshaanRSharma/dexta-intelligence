@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents.chat import _finish
+from dexta_intelligence.agents.investigation import BeliefState
 from dexta_intelligence.agents.reason import ReasoningEvent, ToolSpec, run_reasoning_loop
 from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.trace import render_trace
@@ -48,10 +49,17 @@ INVESTIGATION_DOCTRINE = prompts.load("orchestrator_doctrine")
 
 _SYSTEM = prompts.with_safety(prompts.load("orchestrator_system"))
 
+#: Appended when a working belief state is threaded through the loop, so the model
+#: keeps its understanding explicit between probes. It scaffolds; it never decides.
+_BELIEF_DIRECTIVE = (
+    "Maintain a working belief state with update_belief. After each probe, record "
+    "your competing hypotheses and their status, the evidence so far, any gap "
+    "still blocking you, and your confidence. Probe to discriminate between live "
+    "hypotheses; conclude when one is clearly supported or say what is missing."
+)
 
-def workflow_tool_specs(
-    ctx: AgentContext, *, target_low: int, target_high: int
-) -> list[ToolSpec]:
+
+def workflow_tool_specs(ctx: AgentContext, *, target_low: int, target_high: int) -> list[ToolSpec]:
     """Whole investigation workflows, exposed as tools the orchestrator can choose.
 
     Each runs a deterministic, audited investigation and returns its structured
@@ -134,32 +142,32 @@ class OrchestratorAgent:
         on_event: Callable[[ReasoningEvent], None] | None = None,
         history: list[dict[str, Any]] | None = None,
     ) -> ChatAnswer:
-        toolkit = DiscoveryToolkit(
-            ctx, target_low=self.target_low, target_high=self.target_high
-        )
+        toolkit = DiscoveryToolkit(ctx, target_low=self.target_low, target_high=self.target_high)
         belt = tool_specs(ctx, toolkit) + workflow_tool_specs(
             ctx, target_low=self.target_low, target_high=self.target_high
         )
+        belief = BeliefState()
+        system = f"{_SYSTEM}\n\n{_BELIEF_DIRECTIVE}"
         result = run_reasoning_loop(
             self.model,
             belt,
-            system=_SYSTEM,
+            system=system,
             user=question,
             max_steps=self.max_steps,
             on_event=on_event,
             history=history,
+            belief=belief,
         )
 
         def rerun(hint: str) -> Any:
             return run_reasoning_loop(
                 self.model,
                 belt,
-                system=f"{_SYSTEM}\n\nGATE: {hint}",
+                system=f"{system}\n\nGATE: {hint}",
                 user=question,
                 max_steps=self.max_steps,
                 history=history,
+                belief=belief,
             )
 
-        return _finish(
-            result, question=question, capabilities=toolkit.capabilities(), rerun=rerun
-        )
+        return _finish(result, question=question, capabilities=toolkit.capabilities(), rerun=rerun)

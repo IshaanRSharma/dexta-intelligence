@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from dexta_intelligence.agents.investigation import BeliefState
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -93,6 +95,8 @@ class ReasoningResult:
     evidence: dict[str, Any] = field(default_factory=dict)
     stopped_reason: str = "answered"
     error_detail: str = ""
+    #: The working belief state, when one was threaded through this run.
+    belief: BeliefState | None = None
 
 
 def run_reasoning_loop(
@@ -104,6 +108,7 @@ def run_reasoning_loop(
     max_steps: int = _DEFAULT_MAX_STEPS,
     on_event: Callable[[ReasoningEvent], None] | None = None,
     history: list[dict[str, Any]] | None = None,
+    belief: BeliefState | None = None,
 ) -> ReasoningResult:
     """Run the model in a tool-calling loop until it answers or hits the cap.
 
@@ -120,9 +125,15 @@ def run_reasoning_loop(
     dicts, seeded before the current ``user`` turn so follow-up questions resolve
     against the conversation. The faithfulness guard still runs per-turn against
     this turn's evidence, so history adds context without weakening the rail.
+
+    ``belief`` (optional) is a working belief state the model maintains across
+    steps: its ``update_belief`` tool is offered alongside ``tools``, the merged
+    state streams as a ``belief`` event after each tool round, and the final
+    state rides home on the result. It scaffolds the reasoning; it never decides.
     """
-    bound = model.bind_tools([t.schema() for t in tools])
-    by_name = {t.name: t for t in tools}
+    active_tools = [belief.tool(), *tools] if belief is not None else list(tools)
+    bound = model.bind_tools([t.schema() for t in active_tools])
+    by_name = {t.name: t for t in active_tools}
     messages: list[Any] = [{"role": "system", "content": system}]
     if history:
         messages.extend(history)
@@ -141,6 +152,7 @@ def run_reasoning_loop(
                 evidence=evidence,
                 stopped_reason="model_error",
                 error_detail=_model_error_message(exc),
+                belief=belief,
             )
 
         tool_calls = list(getattr(response, "tool_calls", None) or [])
@@ -154,6 +166,7 @@ def run_reasoning_loop(
                 steps=steps,
                 evidence=evidence,
                 stopped_reason="answered",
+                belief=belief,
             )
 
         messages.append(response)
@@ -165,12 +178,15 @@ def run_reasoning_loop(
             messages=messages,
             on_event=on_event,
         )
+        if belief is not None:
+            _emit(on_event, ReasoningEvent("belief", belief.snapshot()))
 
     return ReasoningResult(
         answer="",
         steps=steps,
         evidence=evidence,
         stopped_reason="max_steps",
+        belief=belief,
     )
 
 
