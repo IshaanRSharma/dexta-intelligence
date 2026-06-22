@@ -109,6 +109,23 @@ def test_meal_intent_outside_meal_hours_skips_meal_cards() -> None:
     assert any("meal" in lim.lower() for lim in report["limitations"])
 
 
+def test_oref_card_present_and_labeled_with_predictions() -> None:
+    report = timing_report(_demo_ctx(), resolve_bucket("dinner"), intent="meal")  # type: ignore[arg-type]
+    oref = [c for c in report["cards"] if c["id"] == "O"]
+    assert oref, "expected an oref0 forecast card on demo data (it logs predBGs)"
+    card = oref[0]
+    assert card["n"] > 0
+    text = " ".join(card["lines"]).lower()
+    assert "forecast error" in text
+    assert "never a dose" in text  # the provenance + safety stamp is always present
+
+
+def test_oref_card_absent_without_predictions() -> None:
+    report = timing_report(_empty_ctx(), resolve_bucket("dinner"), intent="general")  # type: ignore[arg-type]
+    assert not [c for c in report["cards"] if c["id"] == "O"]
+    assert any("oref0" in lim.lower() for lim in report["limitations"])
+
+
 def test_empty_store_degrades_without_crashing() -> None:
     report = timing_report(_empty_ctx(), resolve_bucket("dinner"), intent="meal")  # type: ignore[arg-type]
     assert tuple(report) == OUTPUT_KEYS

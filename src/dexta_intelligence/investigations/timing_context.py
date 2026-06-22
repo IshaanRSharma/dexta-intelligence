@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.reason import ToolCall
@@ -55,6 +55,14 @@ PRESETS: dict[str, tuple[int, int]] = {
 _LATE_BOLUS_MIN = 15
 #: Buckets whose midpoint falls in these hours get the meal cards by default.
 _MEAL_HOURS = range(6, 22)
+
+#: The provenance + safety stamp on every oref0-derived line. The algorithm's own
+#: forecast, scored against what actually happened - never a forward dose.
+_OREF_LABEL = "oref0 algorithm computation. Observation only, never a dose."
+#: Horizon (minutes) at which the logged forecast is compared to realized CGM.
+_FORECAST_HORIZON_MIN = 60
+#: Curve preference when a cycle logged several oref0 scenarios.
+_CURVE_PREFERENCE = ("cob", "loop", "iob", "uam", "zt")
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +167,10 @@ def gather_timing_context(
     elif want_basal:
         limitations.append("no insulin data - basal context skipped")
 
+    oref = _oref_card(step, ctx, toolkit, bucket, limitations)
+    if oref is not None:
+        cards.append(oref)
+
     if intent == "meal":
         if not caps.has_insulin:
             limitations.append("no insulin data - meal-timing cards skipped")
@@ -254,6 +266,68 @@ def _basal_card(step: Any, toolkit: DiscoveryToolkit) -> TimingCard:
         "Observation only - basal changes are a decision for you, Loop, and your care team."
     )
     return TimingCard(id="B", title="Basal delivery in this window", lines=lines, n=None)
+
+
+def _oref_card(
+    step: Any,
+    ctx: AgentContext,
+    toolkit: DiscoveryToolkit,
+    bucket: Bucket,
+    limitations: list[str],
+) -> TimingCard | None:
+    """How oref0's own logged forecasts held up against realized CGM in this window.
+
+    Pure backward observation: each cycle's predicted curve is scored against what
+    glucose actually did ``_FORECAST_HORIZON_MIN`` minutes later. Never a forward
+    dose. ``None`` when no forecast curves were logged for the window."""
+    win_start = datetime.combine(ctx.window[0], time.min, tzinfo=UTC)
+    win_end = datetime.combine(ctx.window[1], time.max, tzinfo=UTC)
+    try:
+        predictions = ctx.store.get_predictions(win_start, win_end)
+        glucose = ctx.store.get_glucose(win_start, win_end)
+    except (AttributeError, NotImplementedError):  # minimal/partial stores
+        predictions = []
+        glucose = []
+    if not predictions:
+        limitations.append(
+            "no oref0 forecast curves logged in this window - reconciliation skipped"
+        )
+        return None
+
+    glucose_map = {g.ts: g.mg_dl for g in glucose}
+    cycles: dict[datetime, dict[str, list[float]]] = {}
+    for p in predictions:
+        cycles.setdefault(p.ts, {})[p.curve_kind] = p.values_mg_dl
+
+    idx = _FORECAST_HORIZON_MIN // 5
+    errors: list[float] = []
+    for cycle_ts, curves in cycles.items():
+        if not (bucket.start_hour <= cycle_ts.astimezone(toolkit.tzinfo).hour < bucket.end_hour):
+            continue
+        curve = next((curves[k] for k in _CURVE_PREFERENCE if k in curves), None)
+        realized = glucose_map.get(cycle_ts + timedelta(minutes=_FORECAST_HORIZON_MIN))
+        if curve is None or len(curve) <= idx or realized is None:
+            continue
+        errors.append(abs(curve[idx] - realized))
+
+    if not errors:
+        limitations.append("oref0 forecasts present but none aligned to CGM in this window")
+        return None
+
+    result = step(
+        "oref_reconcile",
+        {"hours": [bucket.start_hour, bucket.end_hour], "horizon_min": _FORECAST_HORIZON_MIN},
+        {"n_cycles": len(errors), "median_error_mg_dl": round(_median(errors), 1)},
+    )
+    lines = [
+        f"{result['n_cycles']} oref0 forecast cycles in this window",
+        f"Median {_FORECAST_HORIZON_MIN}-min forecast error {result['median_error_mg_dl']} mg/dL "
+        "(the algorithm's prediction vs your CGM)",
+        _OREF_LABEL,
+    ]
+    return TimingCard(
+        id="O", title="oref0 forecast vs reality (this window)", lines=lines, n=len(errors)
+    )
 
 
 def _meal_cards(
