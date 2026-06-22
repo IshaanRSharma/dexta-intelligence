@@ -13,6 +13,7 @@ card is ``{id, title, lines, n}``.
 
 from __future__ import annotations
 
+import bisect
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
@@ -23,6 +24,8 @@ from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit
 from dexta_intelligence.agents.trace import render_trace
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from dexta_intelligence.agents.base import AgentContext
 
 logger = logging.getLogger(__name__)
@@ -56,13 +59,16 @@ _LATE_BOLUS_MIN = 15
 #: Buckets whose midpoint falls in these hours get the meal cards by default.
 _MEAL_HOURS = range(6, 22)
 
-#: The provenance + safety stamp on every oref0-derived line. The algorithm's own
-#: forecast, scored against what actually happened - never a forward dose.
+#: The provenance + safety stamp the oref0 card always carries. The algorithm's
+#: own forecast, scored against what actually happened - never a forward dose.
 _OREF_LABEL = "oref0 algorithm computation. Observation only, never a dose."
 #: Horizon (minutes) at which the logged forecast is compared to realized CGM.
 _FORECAST_HORIZON_MIN = 60
 #: Curve preference when a cycle logged several oref0 scenarios.
 _CURVE_PREFERENCE = ("cob", "loop", "iob", "uam", "zt")
+#: How close a CGM reading must be to the forecast horizon to count as realized.
+#: Real CGM is not on the algorithm's cycle grid, so an exact match is too strict.
+_ALIGN_TOL = timedelta(minutes=2, seconds=30)
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,8 +265,14 @@ def _basal_card(step: Any, toolkit: DiscoveryToolkit) -> TimingCard:
     if basal.get("basal_stable"):
         lines = ["Basal delivery was stable across the active window (no temp/suspend activity)."]
     else:
-        n_temp = basal.get("n_temp_basals") or basal.get("n_segments")
-        suffix = f" ({n_temp} temp/suspend segments)" if isinstance(n_temp, int) else ""
+        n_temp = basal.get("n_temp_basal")
+        n_susp = basal.get("n_suspend")
+        parts = []
+        if isinstance(n_temp, int) and n_temp:
+            parts.append(f"{n_temp} temp-basal")
+        if isinstance(n_susp, int) and n_susp:
+            parts.append(f"{n_susp} suspend")
+        suffix = f" ({', '.join(parts)})" if parts else ""
         lines = [f"Temp-basal or suspend activity occurred in the window{suffix}."]
     lines.append(
         "Observation only - basal changes are a decision for you, Loop, and your care team."
@@ -280,8 +292,10 @@ def _oref_card(
     Pure backward observation: each cycle's predicted curve is scored against what
     glucose actually did ``_FORECAST_HORIZON_MIN`` minutes later. Never a forward
     dose. ``None`` when no forecast curves were logged for the window."""
-    win_start = datetime.combine(ctx.window[0], time.min, tzinfo=UTC)
-    win_end = datetime.combine(ctx.window[1], time.max, tzinfo=UTC)
+    # Local-day bounds resolved in the patient timezone (match the toolkit's
+    # window), then converted to UTC for the store query.
+    win_start = datetime.combine(ctx.window[0], time.min, tzinfo=toolkit.tzinfo).astimezone(UTC)
+    win_end = datetime.combine(ctx.window[1], time.max, tzinfo=toolkit.tzinfo).astimezone(UTC)
     try:
         predictions = ctx.store.get_predictions(win_start, win_end)
         glucose = ctx.store.get_glucose(win_start, win_end)
@@ -294,7 +308,8 @@ def _oref_card(
         )
         return None
 
-    glucose_map = {g.ts: g.mg_dl for g in glucose}
+    g_ts = [g.ts for g in glucose]  # store returns ascending by ts
+    g_val = [g.mg_dl for g in glucose]
     cycles: dict[datetime, dict[str, list[float]]] = {}
     for p in predictions:
         cycles.setdefault(p.ts, {})[p.curve_kind] = p.values_mg_dl
@@ -305,8 +320,10 @@ def _oref_card(
         if not (bucket.start_hour <= cycle_ts.astimezone(toolkit.tzinfo).hour < bucket.end_hour):
             continue
         curve = next((curves[k] for k in _CURVE_PREFERENCE if k in curves), None)
-        realized = glucose_map.get(cycle_ts + timedelta(minutes=_FORECAST_HORIZON_MIN))
-        if curve is None or len(curve) <= idx or realized is None:
+        if curve is None or len(curve) <= idx:
+            continue
+        realized = _nearest_value(g_ts, g_val, cycle_ts + timedelta(minutes=_FORECAST_HORIZON_MIN))
+        if realized is None:
             continue
         errors.append(abs(curve[idx] - realized))
 
@@ -377,17 +394,38 @@ def _profile_segments(profile: dict[str, Any]) -> list[Any]:
 
 
 def _segments_overlapping(segments: list[Any], bucket: Bucket) -> list[dict[str, Any]]:
-    """Segments whose start hour falls within the bucket (or the one in effect at
-    bucket start when none start inside it)."""
-    inside = [
-        s
-        for s in segments
-        if isinstance(s, dict) and bucket.start_hour <= _seg_hour(s) < bucket.end_hour
-    ]
+    """Segments whose start hour falls within the bucket, else the one in effect at
+    bucket start. Basal schedules wrap midnight, so when nothing starts at or before
+    the bucket start the segment in effect is the day's last one (carried over)."""
+    seg_dicts = [s for s in segments if isinstance(s, dict)]
+    inside = [s for s in seg_dicts if bucket.start_hour <= _seg_hour(s) < bucket.end_hour]
     if inside:
         return inside
-    before = [s for s in segments if isinstance(s, dict) and _seg_hour(s) <= bucket.start_hour]
-    return [max(before, key=_seg_hour)] if before else []
+    before = [s for s in seg_dicts if _seg_hour(s) <= bucket.start_hour]
+    if before:
+        return [max(before, key=_seg_hour)]
+    return [max(seg_dicts, key=_seg_hour)] if seg_dicts else []
+
+
+def _nearest_value(
+    ts_list: Sequence[datetime], val_list: Sequence[float], target: datetime
+) -> float | None:
+    """The CGM value nearest ``target`` within ``_ALIGN_TOL`` (``None`` if none).
+
+    ``ts_list`` is ascending; real CGM is not on the algorithm's cycle grid, so an
+    exact-timestamp match would drop most cycles."""
+    if not ts_list:
+        return None
+    i = bisect.bisect_left(ts_list, target)
+    best_val: float | None = None
+    best_gap = _ALIGN_TOL
+    for j in (i - 1, i):
+        if 0 <= j < len(ts_list):
+            gap = abs(ts_list[j] - target)
+            if gap <= best_gap:
+                best_gap = gap
+                best_val = val_list[j]
+    return best_val
 
 
 def _seg_hour(segment: dict[str, Any]) -> int:

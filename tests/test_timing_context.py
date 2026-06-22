@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 from dexta_intelligence.agents.base import AgentContext
 from dexta_intelligence.agents.brief import _ADVICE_RE
@@ -14,10 +14,11 @@ from dexta_intelligence.investigations.timing_context import (
     resolve_bucket,
     timing_report,
 )
+from dexta_intelligence.models import GlucoseEvent, PredictionEvent
 from dexta_intelligence.store import SQLiteStore
 
 
-def _demo_ctx() -> AgentContext:
+def _demo_ctx(timezone: str = "UTC") -> AgentContext:
     store = build_demo_store()
     cov = store.coverage()
     return AgentContext(
@@ -25,6 +26,27 @@ def _demo_ctx() -> AgentContext:
         window=(cov.first_ts.date(), cov.last_ts.date()),
         gates=ColdStartReport.from_coverage(cov),
         run_id="timing-test",
+        timezone=timezone,
+    )
+
+
+def _offgrid_forecast_ctx() -> AgentContext:
+    """A store whose oref cycle is off the CGM 5-min grid (the real-data case)."""
+    store = SQLiteStore(":memory:")
+    store.migrate()
+    base = datetime(2026, 2, 1, 17, 0, tzinfo=UTC)
+    store.insert_glucose(
+        [GlucoseEvent(ts=base + timedelta(minutes=5 * i), mg_dl=150) for i in range(40)]
+    )
+    cycle = base + timedelta(minutes=62)  # 18:02 - two minutes off the grid
+    store.insert_predictions(
+        [PredictionEvent(ts=cycle, source="openaps", curve_kind="cob", values_mg_dl=[160.0] * 13)]
+    )
+    return AgentContext(
+        store=store,
+        window=(date(2026, 2, 1), date(2026, 2, 1)),
+        gates=ColdStartReport.from_coverage(store.coverage()),
+        run_id="offgrid",
     )
 
 
@@ -124,6 +146,24 @@ def test_oref_card_absent_without_predictions() -> None:
     report = timing_report(_empty_ctx(), resolve_bucket("dinner"), intent="general")  # type: ignore[arg-type]
     assert not [c for c in report["cards"] if c["id"] == "O"]
     assert any("oref0" in lim.lower() for lim in report["limitations"])
+
+
+def test_non_utc_timezone_runs_and_is_deterministic() -> None:
+    bucket = resolve_bucket("dinner")
+    report = timing_report(_demo_ctx("America/Los_Angeles"), bucket, intent="meal")  # type: ignore[arg-type]
+    assert tuple(report) == OUTPUT_KEYS  # local-tz windows resolve without crashing
+    again = timing_report(_demo_ctx("America/Los_Angeles"), bucket, intent="meal")  # type: ignore[arg-type]
+    assert report == again
+
+
+def test_oref_aligns_forecast_off_the_cgm_grid() -> None:
+    # cycle at 18:02, horizon 19:02; nearest CGM is 19:00 (2 min) -> within tolerance.
+    report = timing_report(_offgrid_forecast_ctx(), resolve_bucket("dinner"), intent="general")  # type: ignore[arg-type]
+    oref = [c for c in report["cards"] if c["id"] == "O"]
+    assert oref, "off-grid forecast should still align to CGM within tolerance"
+    assert oref[0]["n"] == 1
+    # |predicted 160 - realized 150| = 10
+    assert "10" in " ".join(oref[0]["lines"])
 
 
 def test_empty_store_degrades_without_crashing() -> None:
