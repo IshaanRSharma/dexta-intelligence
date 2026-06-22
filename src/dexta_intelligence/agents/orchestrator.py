@@ -156,6 +156,9 @@ class OrchestratorAgent:
     max_steps: int = 20
     target_low: int = 70
     target_high: int = 180
+    #: When False, drop the Phase 1-6 reasoning scaffold (belief state, mid-loop
+    #: context tool, synthesis) and run the plain tool-calling loop. For ablation.
+    use_belief: bool = True
 
     def ask(
         self,
@@ -169,10 +172,11 @@ class OrchestratorAgent:
         belt = [
             *tool_specs(ctx, toolkit),
             *workflow_tool_specs(ctx, target_low=self.target_low, target_high=self.target_high),
-            request_context_tool(ctx),
         ]
-        belief = seed_belief_from_store(ctx)
-        system = f"{_SYSTEM}\n\n{_belief_directive(belief)}"
+        if self.use_belief:
+            belt.append(request_context_tool(ctx))
+        belief = seed_belief_from_store(ctx) if self.use_belief else None
+        system = f"{_SYSTEM}\n\n{_belief_directive(belief)}" if belief is not None else _SYSTEM
         result = run_reasoning_loop(
             self.model,
             belt,

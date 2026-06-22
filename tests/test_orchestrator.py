@@ -133,3 +133,11 @@ def test_model_can_chain_workflow_then_granular_tool() -> None:
     assert "investigate_spike" in answer.tools_used
     assert "daily_series" in answer.tools_used
     assert answer.faithful
+
+
+def test_use_belief_false_drops_the_reasoning_scaffold() -> None:
+    model = _FakeToolModel(["All looks steady."])
+    answer = OrchestratorAgent(model=model, use_belief=False).ask(_ctx("late_bolus"), "how am I?")
+    assert "update_belief" not in model.seen_tools
+    assert "request_context" not in model.seen_tools
+    assert answer.synthesis is None
