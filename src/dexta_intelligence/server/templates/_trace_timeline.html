@@ -1,0 +1,19 @@
+{% set entries = entries|default([]) %}
+{% set violations = violations|default([]) %}
+{% if entries or violations %}
+<div class="trace-timeline">
+  {% for e in entries %}
+  <div class="trace-item trace-{{ e.icon|default('scope') }}">
+    <span class="trace-icon">{{ e.glyph|default('•') }}</span>
+    <span class="trace-text">{{ e.text }}</span>
+  </div>
+  {% endfor %}
+  {% if violations %}
+  <div class="trace-guard-row">
+    {% for v in violations %}
+    <span class="trace-guard-chip">claim rejected: not traceable · {{ v }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}

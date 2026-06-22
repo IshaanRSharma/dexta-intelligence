@@ -21,6 +21,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents.chat import _finish
 from dexta_intelligence.agents.reason import run_reasoning_loop
 from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
@@ -89,58 +90,11 @@ FAMILY_TOOLS: dict[str, tuple[str, ...]] = {
 }
 
 #: Family-specific system prompts layered on the shared safety preamble.
-_SAFETY = """You are dexta, a continuous health-intelligence assistant for one \
-Type-1 diabetes patient. You reason over their real data using ONLY the tools \
-provided - you never compute statistics yourself, you call a tool.
-
-Hard rules:
-- Observation and discussion only. NEVER give dosing, insulin, carb-ratio, or \
-medication advice. If asked, say that is for their care team and offer to show \
-the relevant pattern instead.
-- Every number you state must come from a tool result you actually called.
-- If the data cannot answer, say so plainly and say what would be needed.
-Be concise and specific. Cite the n behind any comparison."""
+_SAFETY = prompts.with_safety(prompts.load("router_safety"))
 
 _FAMILY_SYSTEM: dict[str, str] = {
-    "spike_explanation": (
-        _SAFETY
-        + "\n\nThis question asks WHY a glucose event happened. Follow the "
-        "investigation loop: resolve dates (parse_relative_date / get_current_time) "
-        "→ list_segments to orient → set_window to the day → find_spikes / "
-        "zoom_event to drill → get_carb_entries → get_boluses + get_iob → "
-        "get_basal_timeline → find_similar_events for recurrence. NEVER claim a "
-        "likely cause before inspecting carb entries, bolus timing, and basal "
-        "context; if those tools are not available, say explicitly: "
-        '"Insulin/carb data unavailable. This is glucose-shape inference only." '
-        "Ground a confirmed pattern with search_evidence AFTER the data work. "
-        "Phrase the conclusion as a pattern (e.g. 'more consistent with late "
-        "meal insulin context than basal drift'), never as a dosing or timing "
-        "directive."
-    ),
-    "time_traversal": (
-        _SAFETY
-        + "\n\nThis question is about CHANGE OVER TIME. Orient with list_segments, "
-        "narrow with set_window, drill a spike with zoom_event, read the trend with "
-        "daily_series, THEN compare windows with tod_compare / groupby_compare."
-    ),
-    "two_group": (
-        _SAFETY
-        + "\n\nThis question COMPARES two groups. Pick the instrument that matches "
-        "(tod_compare for times of day, groupby_compare for day cohorts, "
-        "event_proximity / meal_response / correction_outcome / basal_overnight for "
-        "events) and report the delta, effect size, and n."
-    ),
-    "memory": (
-        _SAFETY
-        + "\n\nThis question is about what dexta ALREADY KNOWS. Use recall to surface "
-        "prior findings and open questions; use coverage to frame how much data exists."
-    ),
-    "evidence": (
-        _SAFETY
-        + "\n\nThis question asks for CLINICAL EVIDENCE. Use search_evidence to ground a "
-        "pattern in published literature; cite only returned PMIDs. Use recall first to "
-        "anchor on the personal pattern being grounded."
-    ),
+    k: prompts.with_safety(prompts.load(f"router_family_{k}"))
+    for k in ("spike_explanation", "time_traversal", "two_group", "memory", "evidence")
 }
 
 #: Keyword → family, in priority order (first match wins). Mirrors the
@@ -236,21 +190,7 @@ _KEYWORD_FAMILY: tuple[tuple[frozenset[str], str], ...] = (
 #: Default family when nothing matches - the broadest comparison surface.
 _DEFAULT_FAMILY = "two_group"
 
-_ROUTE_PROMPT = """Classify this Type-1 patient's question into ONE tool family:
-
-- spike_explanation: WHY a glucose event happened - explaining a spike, a high, \
-a bad day, or a recurring post-meal pattern (e.g. "why did I spike on March 14", \
-"what caused last night's high").
-- time_traversal: how something CHANGED over time, trends, a specific month/week \
-(e.g. "what changed in March vs April", "is my variability trending down").
-- two_group: comparing two cohorts of days or events (weekend vs weekday, \
-after-meal vs before, sleep, workouts, boluses).
-- memory: what dexta ALREADY KNOWS - recalling prior findings or open questions.
-- evidence: grounding a pattern in published clinical literature.
-
-Question: "{question}"
-
-Output STRICT JSON, no prose: {{"family": "<one family>"}}"""
+_ROUTE_PROMPT = prompts.load("router_route")
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,7 +235,7 @@ class RouterAgent:
                     {"role": "user", "content": _ROUTE_PROMPT.format(question=question)},
                 ]
             )
-            data = json.loads(_text_of(response))
+            data = json.loads(_strip_code_fence(response))
             family = str(data["family"])
         except Exception:
             logger.warning("router: classification failed; keyword fallback", exc_info=True)
@@ -337,7 +277,7 @@ class RouterAgent:
         )
 
 
-def _text_of(response: Any) -> str:
+def _strip_code_fence(response: Any) -> str:
     content = getattr(response, "content", response)
     if not isinstance(content, str):
         return str(content)

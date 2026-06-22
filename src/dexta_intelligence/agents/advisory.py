@@ -15,7 +15,6 @@ refines the analysis/goals/phrasing under the same grounding + gate.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003 - pydantic resolves this field type at runtime
@@ -23,6 +22,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dexta_intelligence.agents import prompts
+from dexta_intelligence.agents._json import parse_json
 from dexta_intelligence.agents.brief import _ADVICE_RE, _rank
 
 if TYPE_CHECKING:
@@ -228,15 +229,7 @@ class ClinicalAdvisoryAgent:
         )
 
 
-_REFINE_PROMPT = """Summarize these diabetes findings for a clinician visit about: {question}
-
-FINDINGS:
-{findings}
-
-Write a short analysis and 2-3 management GOALS. Do NOT give dosing, insulin,
-basal, or carb-ratio instructions - goals are directions to discuss, not actions.
-
-Output STRICT JSON: {{"analysis": ["..."], "goals": ["..."]}}"""
+_REFINE_PROMPT = prompts.load("advisory_refine")
 
 
 def _str_list(value: Any) -> list[str]:
@@ -246,19 +239,7 @@ def _str_list(value: Any) -> list[str]:
 
 
 def _parse_json(content: Any) -> dict[str, Any] | None:
-    text = content if isinstance(content, str) else ""
-    if isinstance(content, list):
-        text = "".join(
-            p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"
-        )
-    text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    try:
-        parsed = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    return parsed if isinstance(parsed, dict) else None
-
-
+    return parse_json(content)
 # ── rendering ──────────────────────────────────────────────────────────────────
 
 

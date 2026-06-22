@@ -11,12 +11,10 @@
 {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
 {% if info %}<div class="flash">{{ info }}</div>{% endif %}
 
-{% if cards %}
 <form method="post" action="/actions/goals/tick" class="btn-row" style="margin-bottom:18px">
   <button type="submit" class="btn-secondary">Tick goals now</button>
-  <span class="muted small" style="align-self:center">Re-measure every goal and record a checkpoint, instead of waiting for the cadence.</span>
+  <span class="muted small" style="align-self:center">Re-measure active goals and record checkpoints — or run <code>dexta daemon</code> on a schedule.</span>
 </form>
-{% endif %}
 
 <article class="card goal-add">
   <h2>New goal</h2>

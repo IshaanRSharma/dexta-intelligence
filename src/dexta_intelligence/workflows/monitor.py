@@ -266,9 +266,14 @@ def _severe_high(
         run_start = run_end = None
         peak = 0
 
+    gap = timedelta(minutes=SENSOR_GAP_MIN)
     for g in recent:
         if g.mg_dl > VERY_HIGH_MG_DL:
             total_high += 1
+            # A sensor gap breaks the "sustained" claim: we cannot assert the run
+            # stayed high across minutes with no readings, so bank it and restart.
+            if run_end is not None and g.ts - run_end > gap:
+                close()
             if run_start is None:
                 run_start = g.ts
             run_end = g.ts

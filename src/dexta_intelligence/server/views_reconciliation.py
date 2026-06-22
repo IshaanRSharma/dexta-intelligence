@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from dexta_intelligence.server.render import sparkline_svg
+from dexta_intelligence.server.charts import dual_trace_svg
 
 if TYPE_CHECKING:
     from dexta_intelligence.models import Finding
@@ -106,8 +106,11 @@ def _card(store: StoragePort, finding: Finding) -> dict[str, Any]:
         "tier": tier,
         "tier_label": "logged forecast curves" if tier == "A" else "computed expectations (weaker)",
         "p": finding.stats.p_perm,
-        "expected_spark": sparkline_svg(expected) if len(expected) >= 2 else "",
-        "actual_spark": sparkline_svg(actual) if len(actual) >= 2 else "",
+        "overlay_svg": (
+            dual_trace_svg(expected, actual, step_min=_STEP_MIN)
+            if len(expected) >= 2 and len(actual) >= 2
+            else ""
+        ),
         "limited": tier == "B",
     }
 

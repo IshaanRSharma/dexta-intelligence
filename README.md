@@ -1,5 +1,9 @@
 # dexta-intelligence
 
+[![CI](https://github.com/IshaanRSharma/dexta-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/IshaanRSharma/dexta-intelligence/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+
 Continuous, evidence-grounded intelligence for Type 1 diabetes data. dexta is a self-hosted
 agentic harness that turns your CGM, insulin, pump, and wearable history into traceable findings:
 why something happened, what changed, and what the system has learned over months of your data.
@@ -131,7 +135,7 @@ dexta ships a reproducible eval harness with synthetic ground truth. Run any of 
 
 These are calibration and robustness checks on synthetic data, not clinical validation. E6 needs a
 model provider; the rest run without a key. The web app surfaces a live model card and a dosing
-safety scan at `/evals`. For the deeper design, see [TECHNICAL_REPORT.md](TECHNICAL_REPORT.md).
+safety scan at `/evals`. For the deeper design, see [TECHNICAL_REPORT.md](guide/TECHNICAL_REPORT.md).
 
 ## Running
 
@@ -160,8 +164,8 @@ Line length 100, mypy strict, tests for new behavior.
 ## Extending
 
 Adding a connector, an analysis agent, or a tool the reasoning loop can call is a small, local
-change. See [EXTENDING.md](EXTENDING.md) for minimal recipes, each backed by a conformance test,
-and [DEXTA_OSS_TECHNICAL_SPEC.md](DEXTA_OSS_TECHNICAL_SPEC.md) for the deeper design.
+change. See [EXTENDING.md](guide/EXTENDING.md) for minimal recipes, each backed by a conformance test,
+and [TECHNICAL_REPORT.md](guide/TECHNICAL_REPORT.md) for the deeper design.
 
 ## Disclaimer
 

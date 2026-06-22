@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use dexta-intelligence in your research, please cite it."
+title: "dexta-intelligence"
+abstract: >-
+  A self-hosted agentic harness for Type 1 diabetes data that turns CGM,
+  insulin, pump, and wearable history into traceable findings, with
+  deterministic analytics, statistical rigor, a numeric-faithfulness guard,
+  and a no-dosing treatment gate.
+type: software
+authors:
+  - family-names: Sharma
+    given-names: Ishaan
+repository-code: "https://github.com/IshaanRSharma/dexta-intelligence"
+license: MIT
+keywords:
+  - diabetes
+  - cgm
+  - nightscout
+  - agents
+  - health-ai
+  - llm
+  - faithfulness

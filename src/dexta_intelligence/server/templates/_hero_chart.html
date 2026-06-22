@@ -1,0 +1,16 @@
+{% set hero_chart = hero_chart|default({"has_chart": false}) %}
+{% if hero_chart.has_chart %}
+<article class="card hero-chart">
+  <div class="hero-chart-head">
+    <div>
+      <h2>{{ hero_chart.title }}</h2>
+      {% if hero_chart.subtitle %}<p class="muted small">{{ hero_chart.subtitle }}</p>{% endif %}
+    </div>
+    {% if hero_chart.annotation %}
+    <span class="badge neutral hero-chart-badge">{{ hero_chart.annotation }}</span>
+    {% endif %}
+  </div>
+  <div class="hero-chart-body">{{ hero_chart.svg|safe }}</div>
+  <p class="muted small hero-chart-foot">Target band shaded · markers show carb entries and boluses · retrospective only</p>
+</article>
+{% endif %}

@@ -32,6 +32,7 @@ __all__ = [
     "LibreConfig",
     "LibreRegion",
     "OuraConfig",
+    "PromptsConfig",
     "ServerConfig",
     "TandemConfig",
     "TidepoolConfig",
@@ -262,6 +263,13 @@ class ServerConfig(_Section):
     (sync + monitor + goal ticks) use ``dexta daemon`` instead."""
 
 
+class PromptsConfig(_Section):
+    dir: Path | None = None
+    """Optional directory of override prompt files (one ``<name>.md`` per prompt).
+    The dosing/observation rail is re-applied in code, so an override cannot
+    remove it."""
+
+
 class Config(_Section):
     data: DataConfig = Field(default_factory=DataConfig)
     nightscout: NightscoutConfig = Field(default_factory=NightscoutConfig)
@@ -278,6 +286,7 @@ class Config(_Section):
     evidence: EvidenceConfig = Field(default_factory=EvidenceConfig)
     wiki: WikiConfig = Field(default_factory=WikiConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
+    prompts: PromptsConfig = Field(default_factory=PromptsConfig)
     lens: dict[str, LensConfig] = Field(default_factory=dict)
 
 

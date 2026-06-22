@@ -58,6 +58,49 @@
     return String(name || "tool").replace(/_/g, " ");
   }
 
+  function traceIcon(icon) {
+    const map = {
+      zoom: "⌖",
+      scope: "◧",
+      compare: "⇔",
+      recall: "◎",
+      scan: "◉",
+      trend: "↗",
+      treatment: "💉",
+      time: "◷",
+    };
+    return map[icon] || "•";
+  }
+
+  function renderTraceTimeline(container, trace, violations) {
+    container.innerHTML = "";
+    container.className = "trace-timeline";
+    (trace || []).forEach(function (line) {
+      const item = el("div", "trace-item trace-" + (line.icon || "scope"));
+      item.appendChild(el("span", "trace-icon", traceIcon(line.icon)));
+      item.appendChild(el("span", "trace-text", line.text || ""));
+      container.appendChild(item);
+    });
+    if (violations && violations.length) {
+      const row = el("div", "trace-guard-row");
+      violations.forEach(function (v) {
+        row.appendChild(el("span", "trace-guard-chip", "claim rejected: not traceable · " + v));
+      });
+      container.appendChild(row);
+    }
+  }
+
+  function collapseRawSteps(view) {
+    if (!view.steps.childElementCount) return;
+    const details = el("details", "steps-collapsed");
+    details.appendChild(el("summary", null, "Raw tool log"));
+    const clone = view.steps.cloneNode(true);
+    clone.className = "steps";
+    details.appendChild(clone);
+    view.steps.replaceWith(details);
+    view.steps = clone;
+  }
+
   function renderRun(question) {
     clearEmptyState();
     const run = el("article", "card run");
@@ -198,7 +241,14 @@
     if (view._answerBody) {
       view._answerBody.classList.remove("answer-streaming");
     }
-    if (payload.faithful === false) {
+    if (payload.trace && payload.trace.length) {
+      renderTraceTimeline(view.steps, payload.trace, payload.violations);
+    } else if (payload.faithful === false && payload.violations && payload.violations.length) {
+      renderTraceTimeline(view.steps, [], payload.violations);
+    } else {
+      collapseRawSteps(view);
+    }
+    if (payload.faithful === false && !(payload.violations && payload.violations.length)) {
       view._answerBody.appendChild(
         el("p", "answer-warn small", "Not all claims could be traced to evidence."),
       );

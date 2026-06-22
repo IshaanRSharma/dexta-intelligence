@@ -109,18 +109,14 @@ def _recovered(
     effects: tuple[_Effect, ...]
     if scenario == "weekday_breakfast":
         # Plant on every weekday so the weekday-vs-weekend contrast is genuine.
-        effects = tuple(
-            WeekdayBreakfastSpike(weekday=w, effect_size=effect_size) for w in range(5)
-        )
+        effects = tuple(WeekdayBreakfastSpike(weekday=w, effect_size=effect_size) for w in range(5))
     elif scenario == "sensitivity_shift":
         effects = (SensitivityRegimeShift(effect_size=effect_size, after_day=n_days // 2),)
     else:  # pragma: no cover - guarded by caller
         msg = f"unknown E2 scenario {scenario!r}"
         raise ValueError(msg)
 
-    events, _manifest = generate_dataset(
-        seed=seed, n_days=n_days, effects=effects, name=scenario
-    )
+    events, _manifest = generate_dataset(seed=seed, n_days=n_days, effects=effects, name=scenario)
     window_end = DEFAULT_START + timedelta(days=n_days - 1)
     window = (DEFAULT_START.date(), window_end.date())
 

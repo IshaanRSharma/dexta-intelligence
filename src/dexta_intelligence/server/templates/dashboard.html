@@ -2,12 +2,15 @@
 {% block title %}dexta · dashboard{% endblock %}
 {% block main_class %}wrap-wide{% endblock %}
 {% block content %}
+{% from "_components.html" import finding_card %}
 {% set hero = hero|default({"span_days": none, "coverage_pct": none, "tir_pct": none, "active_findings": 0}) %}
 {% set sidebar = sidebar|default({"sources": [], "pending": [], "unlocked_count": 0, "last_sync": none}) %}
 {% set banners = banners|default([]) %}
 {% set has_connectors = has_connectors|default(false) %}
 {% set below_floor = below_floor|default(true) %}
 {% set lenses = lenses|default(["analyze", "watch", "why", "insulin"]) %}
+{% set autosync = autosync|default({"enabled": False, "interval_min": 0, "last_run": "", "last_error": None}) %}
+{% set cards_total = cards_total|default(cards|length if cards else 0) %}
 
 <div class="page-head">
   <h1>Dashboard</h1>
@@ -16,78 +19,62 @@
 
 {% include "_banner.html" %}
 {% include "_hero_metrics.html" %}
+{% include "_hero_chart.html" %}
+
+{% if autosync.enabled %}
+<p class="muted small sync-status-line">Continuous sync on · every {{ autosync.interval_min }} min{% if autosync.last_run %} · last run {{ autosync.last_run }}{% endif %} · <a href="/connectors">Connectors</a></p>
+{% endif %}
 
 <div class="actions-bar">
-  <form method="post" action="/actions/sync" class="btn-row">
-    <button type="submit" {% if not has_connectors %}disabled title="Connect a source in Settings first"{% endif %}>Sync now</button>
-  </form>
+  <a class="btn btn-ghost" href="/connectors"{% if not has_connectors %} title="Connect a source in Settings first"{% endif %}>Sync in Connectors →</a>
   <form method="post" action="/actions/analyze" class="btn-row lens-row">
     <select name="lens" class="lens-select" aria-label="Analysis lens" {% if below_floor %}disabled{% endif %}>
       {% for l in lenses %}<option value="{{ l }}"{% if l == "analyze" %} selected{% endif %}>{{ l }}</option>{% endfor %}
     </select>
     <button type="submit" class="btn-secondary" {% if below_floor %}disabled title="Need at least 3 days of data"{% endif %}>Run analyze</button>
   </form>
-  <form method="post" action="/actions/upload" enctype="multipart/form-data" class="btn-row upload-row">
-    <label class="btn btn-secondary upload-label">
-      Upload CSV
-      <input type="file" name="file" accept=".csv,text/csv" required
-             onchange="this.form.requestSubmit()" hidden />
-    </label>
-  </form>
-  <form method="post" action="/actions/wiki" class="btn-row">
-    <button type="submit" class="btn-secondary" title="Regenerate the knowledge base from current findings">Rebuild wiki</button>
-  </form>
-  <a class="btn btn-ghost" href="/log">+ Log context</a>
-  <a class="btn btn-ghost" href="/chat">Ask a question →</a>
+  <details class="more-menu">
+    <summary class="btn btn-ghost">More ▾</summary>
+    <div class="more-menu-panel">
+      <form method="post" action="/actions/upload" enctype="multipart/form-data" class="more-menu-item">
+        <label class="upload-label">
+          Upload CSV
+          <input type="file" name="file" accept=".csv,text/csv" required onchange="this.form.requestSubmit()" hidden />
+        </label>
+      </form>
+      <form method="post" action="/actions/wiki" class="more-menu-item">
+        <button type="submit" class="btn-ghost-full">Rebuild wiki</button>
+      </form>
+      <a class="more-menu-item" href="/log#missing-context">Log / missing context</a>
+      <a class="more-menu-item" href="/chat">Open chat</a>
+    </div>
+  </details>
 </div>
-<p class="muted small" style="margin:-6px 0 0">Upload a Dexcom Clarity or LibreView CSV export - parsed locally, no upload off your machine.</p>
 
-<form method="post" action="/actions/investigate" class="investigate-box">
-  <label for="investigate-q" class="investigate-label">Investigate a question</label>
-  <div class="investigate-row">
-    <input id="investigate-q" type="text" name="question"
-           placeholder="e.g. what drives my overnight lows?"
-           {% if below_floor %}disabled{% endif %} required />
-    <button type="submit" {% if below_floor %}disabled title="Need at least 3 days of data"{% endif %}>Investigate</button>
-  </div>
-  <p class="muted small">The coordinator plans which agents to run and banks the findings below. Runs synchronously - give it a moment.</p>
-</form>
+<p style="margin:16px 0 24px">
+  <a class="btn btn-secondary" href="/investigations">Start an investigation →</a>
+  <span class="muted small" style="display:block;margin-top:8px">Ask a question on Investigations - dexta streams its tool trace live as it works.</span>
+</p>
 
 <div class="layout-split">
   <section>
     <div class="feed-head">
       <h2>Active findings</h2>
+      {% if cards_total > cards|length %}
+      <a class="feed-more" href="/findings">View all {{ cards_total }} on Findings →</a>
+      {% endif %}
     </div>
 
     {% if cards %}
     <div class="cards">
-      {% for c in cards %}
-      <article class="card">
-        <div class="card-head">
-          <h2>{{ c.headline }}</h2>
-          <span class="badge {{ 'ok' if c.lifecycle == 'verified' else 'neutral' }}" title="finding lifecycle">{{ c.lifecycle }}</span>
-        </div>
-        <div class="meta">
-          <span class="mono">{{ c.agent }}</span>
-          <span class="chip strength-{{ c.strength }}">{{ c.strength }} evidence</span>
-          {% if c.recurrence > 1 %}<span class="chip recur">seen ×{{ c.recurrence }}</span>{% endif %}
-        </div>
-        {% if c.stats_line %}<p class="stats">{{ c.stats_line }}</p>{% endif %}
-        {% if c.body_html %}<div class="prose">{{ c.body_html|safe }}</div>{% endif %}
-        {% if c.skeptic_notes %}
-        <p class="counter-evidence"><span class="ce-label">Counter-evidence</span> {{ c.skeptic_notes }}</p>
-        {% endif %}
-      </article>
-      {% endfor %}
+      {% for c in cards %}{{ finding_card(c) }}{% endfor %}
     </div>
     {% else %}
     <div class="empty">
       <p>No active findings yet.</p>
-      <p class="hint">Sync your data, then run analyze to populate this feed.</p>
+      <p class="hint"><a href="/connectors">Sync your sources</a>, then run analyze to populate this feed.</p>
       <div class="btn-row">
-        <form method="post" action="/actions/sync">
-          <button type="submit" class="btn-secondary" {% if not has_connectors %}disabled{% endif %}>Sync now</button>
-        </form>
+        <a class="btn btn-secondary" href="/connectors">Open Connectors</a>
         <form method="post" action="/actions/analyze">
           <button type="submit" {% if below_floor %}disabled{% endif %}>Run analyze</button>
         </form>

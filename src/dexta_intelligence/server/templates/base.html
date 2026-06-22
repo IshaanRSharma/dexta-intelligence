@@ -21,9 +21,17 @@
     <div class="topbar-inner">
       <a class="brand" href="/">dexta</a>
       <nav class="nav">
-        {% for href, label in nav_items %}
+        {% for href, label in nav_primary %}
           <a href="{{ href }}" class="{{ 'on' if active == href else '' }}">{{ label }}</a>
         {% endfor %}
+        <details class="nav-more">
+          <summary class="{{ 'on' if active in nav_more_paths else '' }}">More ▾</summary>
+          <div class="nav-more-panel">
+            {% for href, label in nav_more %}
+              <a href="{{ href }}" class="nav-more-link {{ 'on' if active == href else '' }}">{{ label }}</a>
+            {% endfor %}
+          </div>
+        </details>
       </nav>
       {% if status_pill %}
         <span class="status-pill">{{ status_pill }}</span>

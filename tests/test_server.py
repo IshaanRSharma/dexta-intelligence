@@ -102,8 +102,7 @@ def test_dashboard_lists_active_finding(tmp_path: Path) -> None:
     assert resp.status_code == 200
     body = resp.text
     assert "Overnight lows cluster after evening exercise" in body
-    # confidence 0.82 + n=24 + survived -> strong evidence; seen once -> supported
-    assert "strong evidence" in body
+    assert "strong" in body
     assert "supported" in body
     store.close()
 
@@ -132,7 +131,8 @@ def test_dashboard_empty_state(tmp_path: Path) -> None:
     body = _client(store).get("/").text
     assert "No active findings yet" in body
     assert "Run analyze" in body
-    assert "Sync now" in body
+    assert "Sync in Connectors" in body
+    assert 'action="/actions/sync"' not in body
     store.close()
 
 
@@ -203,6 +203,7 @@ def test_goals_empty_state(tmp_path: Path) -> None:
     assert "No goals yet" in body
     assert "Add goal" in body
     assert 'name="statement"' in body
+    assert "Tick goals now" in body
     store.close()
 
 
@@ -587,80 +588,40 @@ def test_upload_empty_file_flashes(tmp_path: Path) -> None:
     assert "upload_empty" in resp.headers["location"]
 
 
-# ── investigate + lens picker ──────────────────────────────────────────────────
+# ── investigate redirect + lens picker ───────────────────────────────────────
 
 
-class _FakeCoordinator:
-    """Coordinator stand-in - echoes the goal as one finding, no model needed."""
-
-    def __init__(self, *_a: object, **_kw: object) -> None:
-        pass
-
-    def investigate(self, _ctx: object, goal: str | None = None) -> list[Finding]:
-        return [
-            Finding(
-                agent="coordinator",
-                kind="overnight-lows",
-                scope="global",
-                headline=f"Investigated: {goal}",
-                confidence=0.7,
-                status=FindingStatus.ACTIVE,
-            )
-        ]
-
-
-def test_investigate_persists_findings(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_investigate_post_redirects_to_investigations(tmp_path: Path) -> None:
     store = _store(tmp_path)
-    _seed_glucose(store)  # 10 days → above the hard floor
-    monkeypatch.setattr(
-        "dexta_intelligence.agents.coordinator.CoordinatorAgent", _FakeCoordinator
-    )
-    monkeypatch.setattr(
-        "dexta_intelligence.server.app.discovery_model", lambda _cfg: object()
-    )
     resp = _client(store).post(
         "/actions/investigate",
         data={"question": "what drives my overnight lows?"},
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert "investigate_ok:1" in resp.headers["location"]
-    headlines = [f.headline for f in store.get_findings(status=None, limit=100)]
-    assert "Investigated: what drives my overnight lows?" in headlines
+    assert resp.headers["location"] == "/investigations?q=what%20drives%20my%20overnight%20lows%3F"
     store.close()
 
 
-def test_investigate_below_floor_skips(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_investigate_empty_question_redirects(tmp_path: Path) -> None:
     store = _store(tmp_path)
-    _seed_glucose(store, days=1.0)  # below the 3-day hard floor
-    monkeypatch.setattr(
-        "dexta_intelligence.server.app.discovery_model", lambda _cfg: object()
-    )
-    resp = _client(store).post(
-        "/actions/investigate",
-        data={"question": "anything"},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 303
-    assert "investigate_skip" in resp.headers["location"]
-    assert store.get_findings(status=None, limit=100) == []
-    store.close()
-
-
-def test_investigate_empty_question_flashes(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    _seed_glucose(store)
     resp = _client(store).post(
         "/actions/investigate",
         data={"question": "   "},
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert "investigate_empty" in resp.headers["location"]
+    assert resp.headers["location"] == "/investigations"
+    store.close()
+
+
+def test_dashboard_has_investigation_cta_not_form(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    body = _client(store).get("/").text
+    assert "Start an investigation" in body
+    assert "/investigations" in body
+    assert 'action="/actions/investigate"' not in body
+    assert "Ask a question →" not in body
     store.close()
 
 
@@ -701,6 +662,7 @@ def test_investigations_page_lists_runs(tmp_path: Path) -> None:
     assert "Overnight lows cluster after evening exercise" in body
     assert "observation" in body
     assert "Round 1: ran observation, pattern" in body
+    assert "trace-timeline" in body
     store.close()
 
 
@@ -708,6 +670,7 @@ def test_investigations_empty_state(tmp_path: Path) -> None:
     store = _store(tmp_path)
     body = _client(store).get("/investigations").text
     assert "No investigations yet" in body
+    assert "Use the form above" in body
     store.close()
 
 

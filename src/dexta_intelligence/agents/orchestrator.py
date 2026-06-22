@@ -20,10 +20,13 @@ available.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
+from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents.chat import _finish
+from dexta_intelligence.agents.context_acquisition import request_context_tool
+from dexta_intelligence.agents.investigation import seed_belief_from_store, synthesize
 from dexta_intelligence.agents.reason import ReasoningEvent, ToolSpec, run_reasoning_loop
 from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.trace import render_trace
@@ -35,6 +38,7 @@ if TYPE_CHECKING:
 
     from dexta_intelligence.agents.base import AgentContext
     from dexta_intelligence.agents.chat import ChatAnswer
+    from dexta_intelligence.agents.investigation import BeliefState
 
 logger = logging.getLogger(__name__)
 
@@ -43,40 +47,42 @@ __all__ = ["INVESTIGATION_DOCTRINE", "OrchestratorAgent", "workflow_tool_specs"]
 #: The shared framing of what an investigation IS - composed, not pre-baked.
 #: Both the chat orchestrator and the goal-seeker teach this so either can
 #: compose investigations toward a conclusion.
-INVESTIGATION_DOCTRINE = """An INVESTIGATION is a line of inquiry you COMPOSE to reach a \
-defensible conclusion - never a single tool call. Its shape: orient (list_segments) → locate \
-and narrow (set_window, find_spikes, zoom_event) → inspect treatment context (get_carb_entries, \
-get_boluses, get_iob, get_cob, get_basal_timeline) → compare against history \
-(find_similar_events; tod_compare / groupby_compare / basal_overnight only on windows with \
-enough days - never on a single-day set_window) → ground a confirmed pattern in published \
-literature (search_evidence) when the claim is non-trivial, citing only returned PMIDs → conclude \
-with the most consistent contributor, the evidence behind it, and what you could not check.
+INVESTIGATION_DOCTRINE = prompts.load("orchestrator_doctrine")
 
-There is NO fixed menu of investigations - you BUILD the one the question needs from these \
-instruments and pivot as the evidence directs. For a few common cases a certified shortcut \
-exists (investigate_spike runs the spike line of inquiry in one audited call and returns a \
-working_hypothesis to weigh, not to repeat); use a shortcut when it fits, otherwise compose \
-the investigation yourself."""
+_SYSTEM = prompts.with_safety(prompts.load("orchestrator_system"))
 
-_HARD_RULES = """Hard rules:
-- Observation and discussion only. NEVER give dosing, insulin, carb-ratio, or medication \
-advice - that is for their care team; offer to show the pattern instead.
-- Every number you state must come from a tool result you actually called.
-- If treatment data exists, inspect it (or run a shortcut that does) before naming a likely \
-cause; if it does not, say "Insulin/carb data unavailable. This is glucose-shape inference \
-only."
-- Cite the n behind any comparison. Be concise and specific."""
-
-_SYSTEM = (
-    "You are dexta, the reasoning core of a continuous health-intelligence system for one "
-    "Type-1 diabetes patient. You DECIDE how to investigate - you are not following a fixed "
-    "script.\n\n" + INVESTIGATION_DOCTRINE + "\n\n" + _HARD_RULES
+#: Appended when a working belief state is threaded through the loop, so the model
+#: keeps its understanding explicit between probes. It scaffolds; it never decides.
+_BELIEF_DIRECTIVE = (
+    "Maintain a working belief state with update_belief. After each probe, record "
+    "your competing hypotheses and their status, the evidence so far, any gap "
+    "still blocking you, and your confidence. Probe to discriminate between live "
+    "hypotheses; conclude when one is clearly supported or say what is missing. "
+    "update_belief returns suggested_probe: the most discriminating evidence you "
+    "have not gathered yet for your open hypotheses. Use it unless you have a "
+    "better reason. If a gap blocks you, call request_context for the moment you "
+    "cannot explain: surface its logging request instead of guessing."
 )
 
 
-def workflow_tool_specs(
-    ctx: AgentContext, *, target_low: int, target_high: int
-) -> list[ToolSpec]:
+def _belief_directive(belief: BeliefState) -> str:
+    """The belief directive, plus any hypotheses carried in from prior runs.
+
+    Seeded hypotheses must be in the model's view from the first turn to steer
+    probing; the update_belief tool only returns the state once the model calls
+    it, so they go in the prompt here.
+    """
+    if not belief.hypotheses:
+        return _BELIEF_DIRECTIVE
+    carried = "\n".join(f"- [{hid}] {h.statement}" for hid, h in belief.hypotheses.items())
+    return (
+        f"{_BELIEF_DIRECTIVE}\n\nOpen hypotheses carried from prior analysis "
+        f"(discriminate or refute these; reuse the bracketed id in update_belief "
+        f"to change a hypothesis's status):\n{carried}"
+    )
+
+
+def workflow_tool_specs(ctx: AgentContext, *, target_low: int, target_high: int) -> list[ToolSpec]:
     """Whole investigation workflows, exposed as tools the orchestrator can choose.
 
     Each runs a deterministic, audited investigation and returns its structured
@@ -159,32 +165,41 @@ class OrchestratorAgent:
         on_event: Callable[[ReasoningEvent], None] | None = None,
         history: list[dict[str, Any]] | None = None,
     ) -> ChatAnswer:
-        toolkit = DiscoveryToolkit(
-            ctx, target_low=self.target_low, target_high=self.target_high
-        )
-        belt = tool_specs(ctx, toolkit) + workflow_tool_specs(
-            ctx, target_low=self.target_low, target_high=self.target_high
-        )
+        toolkit = DiscoveryToolkit(ctx, target_low=self.target_low, target_high=self.target_high)
+        belt = [
+            *tool_specs(ctx, toolkit),
+            *workflow_tool_specs(ctx, target_low=self.target_low, target_high=self.target_high),
+            request_context_tool(ctx),
+        ]
+        belief = seed_belief_from_store(ctx)
+        system = f"{_SYSTEM}\n\n{_belief_directive(belief)}"
         result = run_reasoning_loop(
             self.model,
             belt,
-            system=_SYSTEM,
+            system=system,
             user=question,
             max_steps=self.max_steps,
             on_event=on_event,
             history=history,
+            belief=belief,
         )
 
         def rerun(hint: str) -> Any:
             return run_reasoning_loop(
                 self.model,
                 belt,
-                system=f"{_SYSTEM}\n\nGATE: {hint}",
+                system=f"{system}\n\nGATE: {hint}",
                 user=question,
                 max_steps=self.max_steps,
                 history=history,
+                belief=belief,
             )
 
-        return _finish(
+        answer = _finish(
             result, question=question, capabilities=toolkit.capabilities(), rerun=rerun
         )
+        concluded = bool(result.answer) and answer.faithful and answer.stopped_reason == "answered"
+        if result.belief is not None and concluded:
+            synthesis = synthesize(result.belief, result.steps, result.evidence)
+            return replace(answer, synthesis=synthesis)
+        return answer

@@ -43,9 +43,7 @@ class InvestigationOutcome:
 class Runner(Protocol):
     """Callable that runs one investigation. Injectable so tests stay key-free."""
 
-    def __call__(
-        self, store: StoragePort, question: str, model: Any
-    ) -> InvestigationOutcome: ...
+    def __call__(self, store: StoragePort, question: str, model: Any) -> InvestigationOutcome: ...
 
 
 def run_investigation(
@@ -86,6 +84,16 @@ def run_investigation(
         faithful=answer.faithful,
         stopped_reason=answer.stopped_reason,
     )
+
+
+def attribution_hit(answer: str, expected_keywords: tuple[str, ...]) -> bool:
+    """True when every expected keyword appears in ``answer``, case-insensitively.
+
+    The single attribution rule shared by E6 (answer accuracy) and E7 (path
+    soundness) so the bar cannot drift between them.
+    """
+    lowered = answer.lower()
+    return all(keyword.lower() in lowered for keyword in expected_keywords)
 
 
 def looks_like_dosing_advice(text: str) -> bool:

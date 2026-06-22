@@ -28,12 +28,13 @@ With ``model=None`` planning degrades to the full producer set - exactly what
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from dexta_intelligence.agents import prompts
+from dexta_intelligence.agents._json import parse_json
 from dexta_intelligence.agents.base import AgentRegistry
 from dexta_intelligence.agents.skeptic import skeptic_agent
 from dexta_intelligence.agents.tools.toolkit import _recall
@@ -94,43 +95,9 @@ class RunTrace:
         self.steps.append(line)
         self.emit("step", {"text": line})
 
-_PLAN_PROMPT = """You plan a Type-1 diabetes data investigation. Pick which of the
-available investigations to run for the goal below. Each is an independent producer
-that returns statistically gated findings; the rigor gate and an independent skeptic
-run AFTER you, so prefer running an investigation when in doubt rather than guessing
-its result.
+_PLAN_PROMPT = prompts.load("coordinator_plan")
 
-GOAL: {goal}
-
-AVAILABLE INVESTIGATIONS:
-{producers}
-
-WHAT DEXTA ALREADY BELIEVES (do not re-derive these; pick investigations that
-extend, challenge, or fill gaps around them):
-{recall}
-
-PAST INVESTIGATIONS (what was already run before - build on these, don't repeat):
-{past}
-
-Choose the subset most relevant to the goal. Selecting all is valid when the goal
-is broad or the record is thin. Use ONLY names from the list above.
-
-Output STRICT JSON: {{"investigations": ["<name>", ...], "reason": "<one sentence>"}}"""
-
-_REPLAN_PROMPT = """A first round of investigations ran for this goal and produced the findings
-below. Decide whether a focused FOLLOW-UP round is warranted - only investigations NOT already
-run, chosen to drill into or challenge what the first round surfaced. If the first round already
-covers the goal, return an empty list.
-
-GOAL: {goal}
-ALREADY RAN: {ran}
-FIRST-ROUND FINDINGS:
-{findings}
-AVAILABLE (not yet run):
-{remaining}
-
-Output STRICT JSON (empty list = done):
-{{"investigations": ["<name>", ...], "reason": "<one sentence>"}}"""
+_REPLAN_PROMPT = prompts.load("coordinator_replan")
 
 _PRODUCER_BLURBS: dict[str, str] = {
     "observation": "Descriptive glucose summaries (TIR, variability, time-of-day).",
@@ -455,20 +422,4 @@ def _log_skip(name: str, reasons: list[str]) -> None:
 
 
 def _parse_json(content: Any) -> dict[str, Any] | None:
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        text = "".join(
-            part.get("text", "")
-            for part in content
-            if isinstance(part, dict) and part.get("type") == "text"
-        )
-    else:
-        return None
-    text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    try:
-        parsed = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("coordinator: non-JSON planner response: %s", text[:200])
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    return parse_json(content, context="coordinator")

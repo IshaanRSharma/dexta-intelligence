@@ -13,6 +13,7 @@ from eval.metrics.e5_perturbation import run_e5
 from eval.metrics.e6_attribution import run_e6_attribution
 from eval.metrics.e6_faithfulness import run_e6_faithfulness
 from eval.metrics.e6_safety import run_e6_safety
+from eval.metrics.e7_reasoning import run_e7_reasoning
 from eval.metrics.e_consensus import run_e_consensus
 from eval.report import (
     e1_row,
@@ -23,6 +24,7 @@ from eval.report import (
     e6_attribution_row,
     e6_faithfulness_row,
     e6_safety_row,
+    e7_reasoning_row,
     e_consensus_row,
     render_json,
     render_markdown,
@@ -66,6 +68,9 @@ def main(argv: list[str] | None = None) -> int:
     e6 = sub.add_parser("e6", help="E6 end-to-end agentic eval (needs a model)")
     e6.add_argument("--format", choices=("md", "json"), default="md")
 
+    e7 = sub.add_parser("reasoning", help="E7 reasoning-process eval (needs a model)")
+    e7.add_argument("--format", choices=("md", "json"), default="md")
+
     args = parser.parse_args(argv)
     handler = _HANDLERS.get(args.command)
     if handler is None:
@@ -86,8 +91,7 @@ def _cmd_e4(args: argparse.Namespace) -> int:
     _emit(
         e4_row(result),
         args.format,
-        f"\n**{status}** - empirical FDR {result.empirical_fdr:.1%} "
-        f"(target ≤ {result.alpha:.0%})",
+        f"\n**{status}** - empirical FDR {result.empirical_fdr:.1%} (target ≤ {result.alpha:.0%})",
     )
     return 0 if result.passed else 1
 
@@ -166,9 +170,7 @@ def _cmd_e6(args: argparse.Namespace) -> int:
 
     model = discovery_model(load_config(None))
     if model is None:
-        sys.stdout.write(
-            "E6 needs a language model. Set a provider and an API key, then retry.\n"
-        )
+        sys.stdout.write("E6 needs a language model. Set a provider and an API key, then retry.\n")
         return 2
 
     attribution = run_e6_attribution(model)
@@ -193,6 +195,35 @@ def _cmd_e6(args: argparse.Namespace) -> int:
     return 0 if passed else 1
 
 
+def _cmd_reasoning(args: argparse.Namespace) -> int:
+    """Reasoning-process eval: coverage, efficiency, gap-handling, soundness.
+
+    Needs a model. Skippable without a key (returns 2) like E6, so the
+    deterministic evals stay key-free while this grades the real agent's path.
+    """
+    from dexta_intelligence.cli._common import discovery_model  # noqa: PLC0415
+    from dexta_intelligence.config import load_config  # noqa: PLC0415
+
+    model = discovery_model(load_config(None))
+    if model is None:
+        sys.stdout.write("E7 needs a language model. Set a provider and an API key, then retry.\n")
+        return 2
+
+    result = run_e7_reasoning(model)
+    status = "PASS" if result.passed else "FAIL"
+    _emit(
+        e7_reasoning_row(result),
+        args.format,
+        f"\n**{status}** - coverage {result.mean_coverage:.0%} "
+        f"(target >= {result.coverage_target:.0%}), "
+        f"soundness {result.soundness_rate:.0%} "
+        f"(target >= {result.soundness_target:.0%}), "
+        f"efficiency {result.mean_efficiency:.0%}, "
+        f"gap-handling {result.gap_handling_rate:.0%}",
+    )
+    return 0 if result.passed else 1
+
+
 _HANDLERS = {
     "e4-null": _cmd_e4,
     "e1": _cmd_e1,
@@ -201,6 +232,7 @@ _HANDLERS = {
     "e3": _cmd_e3,
     "consensus": _cmd_consensus,
     "e6": _cmd_e6,
+    "reasoning": _cmd_reasoning,
 }
 
 

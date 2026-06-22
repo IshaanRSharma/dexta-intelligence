@@ -28,17 +28,8 @@
 
     <p class="stats">{{ c.summary }}</p>
 
-    {% if c.expected_spark and c.actual_spark %}
-    <div class="recon-traces">
-      <div class="recon-trace">
-        <span class="gm-label">expected</span>
-        <div class="arc">{{ c.expected_spark|safe }}</div>
-      </div>
-      <div class="recon-trace">
-        <span class="gm-label">actual</span>
-        <div class="arc">{{ c.actual_spark|safe }}</div>
-      </div>
-    </div>
+    {% if c.overlay_svg %}
+    <div class="recon-overlay">{{ c.overlay_svg|safe }}</div>
     {% endif %}
 
     {% if c.limited %}

@@ -39,6 +39,8 @@ def _file_demo(tmp_path: Path) -> SQLiteStore:
     dst.insert_meals(src.get_meals(*_WIDE))
     dst.insert_predictions(src.get_predictions(*_WIDE))
     src.close()
+    for finding in PredictionReconciliationAgent().run(_ctx(dst)):
+        dst.insert_finding(finding)
     return dst
 
 
@@ -64,8 +66,9 @@ def test_view_model_shapes_a_carb_underestimate_card(tmp_path: Path) -> None:
     assert card["contributor"] == "Carbs underestimated"
     assert "COB" in card["curve"]
     assert "mg/dL" in card["max_error"]
-    # Tier A reconstructs both traces for the sparklines.
-    assert card["expected_spark"] and card["actual_spark"]
+    # Tier A reconstructs the overlaid trace chart.
+    assert card["overlay_svg"]
+    assert "chart-dual" in card["overlay_svg"]
     assert card["limited"] is False
 
 

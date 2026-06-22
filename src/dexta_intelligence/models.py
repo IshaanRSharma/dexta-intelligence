@@ -29,6 +29,7 @@ __all__ = [
     "ActivityEvent",
     "ChatSession",
     "ChatTurn",
+    "ContextRequest",
     "CoverageStats",
     "DeviceEvent",
     "Finding",
@@ -166,6 +167,25 @@ class ManualEvent(_FrozenModel):
     _utc_event = field_validator("event_ts")(_require_utc)
     _utc_created = field_validator("created_at")(_require_utc)
     _utc_end = field_validator("end_ts")(_require_utc_opt)
+
+
+class ContextRequest(_FrozenModel):
+    """A question dexta asks the user to log missing context for an event.
+
+    Active context acquisition: when a deterministic gap is found (an unexplained
+    spike with no logged meal or note nearby), dexta asks the user to record what
+    happened. It never fabricates the missing value; it requests it. ``question``
+    is observation-only (it passes the dosing-advice gate). ``evidence`` holds the
+    deterministic facts behind the request (e.g. ``peak_mg_dl``).
+    """
+
+    kind: str
+    event_ts: datetime
+    question: str
+    suggested_event_type: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+    _utc_event = field_validator("event_ts")(_require_utc)
 
 
 class TherapyProfile(_FrozenModel):
@@ -307,6 +327,7 @@ class FindingStatus(enum.StrEnum):
     REJECTED = "rejected"
     DISMISSED = "dismissed"
     STALE = "stale"
+    CONTRADICTED = "contradicted"
 
 
 class FindingStats(_FrozenModel):

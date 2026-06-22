@@ -5,36 +5,34 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
 (2026-06-20). Deferred cleanups found while polishing are tracked below
 (2026-06-21).
 
-## Open / deferred (2026-06-21)
+## Open / deferred
 
-### #7 Store-layer dedup needs a verifiable Postgres path
+None. All tracked items are resolved.
 
-`store/sqlite.py` (~1410) and `store/postgres.py` (~1436) duplicate several
-helpers (`_opt_json`, `_count`, `_raw_ids`, the `_row_to_*` mappers). Hoisting
-the pure ones into `store/_common.py` is the biggest remaining dedup, but the
-Postgres backend is not verifiable locally (44 of 46 store tests skip without a
-live DB) and the helpers carry real JSONB-vs-TEXT differences. Do this only with
-a live Postgres (or CI matrix) confirming parity; do not refactor it blind.
+## Resolved (2026-06-21, third pass)
 
-### #8 `_text_of` is one name for two different helpers
+- **#7** Store-layer dedup: the two provably-identical pure helpers (`_opt_json`,
+  `_prediction_horizon_min`) are hoisted to `store/_common.py` and shared by both
+  backends. The `_row_to_*` mappers genuinely differ (TEXT-JSON vs JSONB) and
+  stay per-backend by design. A CI "Postgres parity" job now runs the parity
+  suite against a live `postgres:16`, so the backend is tested (it previously
+  skipped without `TEST_DATABASE_URL`).
+- **#9** Near-duplicate helpers consolidated: one `_relative_time`
+  (`server/_format.py`, the `None`-safe superset) replaces the 4 server copies;
+  one `parse_json` (`agents/_json.py`, with an optional logging `context`)
+  backs the 3 former `_parse_json` copies.
 
-Across `agents/reason.py` + `investigations/spike.py` (content-parts extractor)
-vs `agents/brief.py` / `seeker.py` / `router.py`, `workflows/goals.py`,
-`memory/synthesis.py` (markdown code-fence stripper). They cannot be merged
-(different behavior); rename the two variants so the name stops being misleading.
+## Resolved (2026-06-21, second pass)
 
-### #9 Near-duplicate helpers worth consolidating (with care)
-
-`_relative_time` (4 server copies, slightly divergent signatures/bucketing) and
-`_parse_json` (3 copies). Consolidating means reconciling small behavioral
-differences and asserted UI text, so it is not a free dedup.
-
-### #10 Minor items
-
-- MCP server has no `console_scripts` entry point (run only via module).
-- `pattern.py:647` review-flagged "dead confidence branch" (unverified; inspect).
-- `workflows/monitor.py` `_severe_high` does not account for sensor gaps in its
-  duration check.
+- **#8** `_text_of` name collision: renamed by behavior to `_content_text`
+  (extractor in `reason.py` / `spike.py`) and `_strip_code_fence` (fence stripper
+  in `brief`/`seeker`/`router`/`goals`/`synthesis`).
+- **#10a** MCP `console_scripts`: added `dexta-mcp` entry point.
+- **#10b** `pattern.py:647` "dead branch": verified live (both ternary branches
+  reachable, `confidence` is used). False flag, closed.
+- **#10c** `monitor._severe_high` now breaks a sustained-high run on a sensor gap
+  (`SENSOR_GAP_MIN`), so a gap can no longer be counted as sustained
+  (regression test `test_sensor_gap_breaks_sustained_high`).
 
 ## Resolved
 

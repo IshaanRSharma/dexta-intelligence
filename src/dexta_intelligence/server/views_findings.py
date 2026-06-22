@@ -3,22 +3,20 @@
 Pure data shaping: this module reads findings, hypotheses, and investigation
 runs from the store and returns plain dicts the template renders. It produces
 DATA, not HTML (apart from finding bodies, which are pre-rendered Markdown).
-
-The small helpers here are reimplemented locally rather than imported from
-``server.app``: importing private names from ``app`` would create a circular
-dependency.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.models import FindingStatus
+from dexta_intelligence.server._format import _relative_time
 from dexta_intelligence.server.render import markdown_to_html
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from dexta_intelligence.models import Finding, Hypothesis, InvestigationRun
     from dexta_intelligence.store.port import StoragePort
 
@@ -26,29 +24,21 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["evidence_strength", "findings_page_view", "lifecycle_label"]
 
+_FINDINGS_QUERY_CAP = 100
+
 #: Kinds that are bookkeeping artifacts rather than user-facing findings. They
 #: are excluded from both the active and rejected lists on the Findings page.
 INTERNAL_FINDING_KINDS = frozenset({"investigation"})
 
 #: Statuses shown in the rejected ("graveyard") section.
 _REJECTED_STATUSES = frozenset(
-    {FindingStatus.REJECTED, FindingStatus.DISMISSED, FindingStatus.SUPERSEDED}
+    {
+        FindingStatus.REJECTED,
+        FindingStatus.DISMISSED,
+        FindingStatus.SUPERSEDED,
+        FindingStatus.CONTRADICTED,
+    }
 )
-
-
-def _relative_time(ts: datetime, now: datetime) -> str:
-    """Human relative time of ``ts`` against ``now``. Naive ``ts`` is read as UTC."""
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=UTC)
-    delta = now - ts.astimezone(UTC)
-    secs = int(delta.total_seconds())
-    if secs < 60:
-        return "just now"
-    if secs < 3600:
-        return f"{secs // 60}m ago"
-    if secs < 86400:
-        return f"{secs // 3600}h ago"
-    return f"{delta.days}d ago"
 
 
 def _skeptic_survived(finding: Finding) -> bool:
@@ -161,7 +151,7 @@ def findings_page_view(store: StoragePort, *, now: datetime) -> dict[str, Any]:
     rejected lists. STALE findings fall out of the active list naturally because
     they are not ACTIVE.
     """
-    findings = store.get_findings(status=None, limit=1_000_000)
+    findings = store.get_findings(status=None, limit=_FINDINGS_QUERY_CAP)
     user_facing = [f for f in findings if f.kind not in INTERNAL_FINDING_KINDS]
 
     active = [f for f in user_facing if f.status == FindingStatus.ACTIVE]

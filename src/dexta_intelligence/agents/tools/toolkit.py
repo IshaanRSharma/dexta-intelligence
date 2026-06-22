@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
     from dexta_intelligence.agents.base import AgentContext
     from dexta_intelligence.agents.reason import ToolSpec
-    from dexta_intelligence.models import InsulinEvent, ManualEvent, MealEvent
+    from dexta_intelligence.models import Finding, InsulinEvent, ManualEvent, MealEvent
 
 __all__ = [
     "TOOL_SCHEMA_FOR_LLM",
@@ -76,6 +76,14 @@ _SPIKE_THRESHOLD = 200.0
 _MAX_LISTED_EVENTS = 40
 #: Max findings / connections / open-questions recall returns (context budget).
 _MAX_RECALL_ITEMS = 8
+#: Why a non-active finding was withheld from recall (the retrieval-guard label).
+_EXCLUSION_REASON: dict[FindingStatus, str] = {
+    FindingStatus.STALE: "not_used_stale",
+    FindingStatus.REJECTED: "not_used_rejected",
+    FindingStatus.DISMISSED: "not_used_rejected",
+    FindingStatus.SUPERSEDED: "not_used_superseded",
+    FindingStatus.CONTRADICTED: "not_used_contradicted",
+}
 #: Analysis-only oref profile defaults - mirrors the reconciliation agent.
 #: Never used for dosing; tier-B labeling on every result that uses them.
 _ANALYSIS_ISF = 50.0
@@ -1549,16 +1557,26 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
     Findings, connections and open questions are each capped at
     :data:`_MAX_RECALL_ITEMS` with a note.
     """
+    from dexta_intelligence.agents.brief import _ADVICE_RE  # noqa: PLC0415
     from dexta_intelligence.memory import embeddings  # noqa: PLC0415
     from dexta_intelligence.memory.synthesis import load_latest  # noqa: PLC0415
 
-    candidates = [
+    def _reads_as_dosing(f: Finding) -> bool:
+        return bool(_ADVICE_RE.search(f"{f.headline} {f.body_md or ''}"))
+
+    user_facing = [
         f
         for f in ctx.store.get_findings(limit=50)
-        if f.agent != "synthesis"
-        and f.kind != "investigation"
-        and f.status != FindingStatus.STALE
+        if f.agent != "synthesis" and f.kind != "investigation"
     ]
+    # Only ACTIVE, non-dosing beliefs are reusable. Rejected / superseded /
+    # dismissed / contradicted / stale findings, and any memory that reads as
+    # dosing advice, are excluded (and reported with a reason) so an answer never
+    # reasons from a memory the rigor or safety layer would not stand behind.
+    active = [f for f in user_facing if f.status == FindingStatus.ACTIVE]
+    candidates = [f for f in active if not _reads_as_dosing(f)]
+    excluded = [f for f in user_facing if f.status != FindingStatus.ACTIVE]
+    dosing_blocked = [f for f in active if _reads_as_dosing(f)]
     q = query.strip()
     if q and candidates:
         scored = embeddings.rank_findings(q, candidates, top_k=_MAX_RECALL_ITEMS)
@@ -1594,6 +1612,19 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
         "findings": items,
         "open_questions": [h.statement for h in open_q[:_MAX_RECALL_ITEMS]],
     }
+    excluded_items = [
+        {
+            "headline": f.headline,
+            "status": f.status.value,
+            "reason": _EXCLUSION_REASON.get(f.status, "not_used"),
+        }
+        for f in excluded
+    ] + [
+        {"headline": f.headline, "status": f.status.value, "reason": "not_used_safety_blocked"}
+        for f in dosing_blocked
+    ]
+    if excluded_items:
+        payload["excluded"] = excluded_items[:_MAX_RECALL_ITEMS]
     if len(open_q) > _MAX_RECALL_ITEMS:
         payload["open_questions_note"] = (
             f"showing first {_MAX_RECALL_ITEMS} of {len(open_q)}"

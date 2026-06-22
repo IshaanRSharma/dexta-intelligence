@@ -12,6 +12,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents.reason import ReasoningResult, run_reasoning_loop
 from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.trace import TraceLine, render_trace
@@ -28,25 +29,14 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
     from dexta_intelligence.agents.base import AgentContext
+    from dexta_intelligence.agents.investigation import Synthesis
     from dexta_intelligence.coldstart import CapabilitySet
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["ChatAgent", "ChatAnswer", "TraceLine"]
 
-_SYSTEM = """You are dexta, a continuous health-intelligence assistant for one \
-Type-1 diabetes patient. You reason over their real data using the tools \
-provided - you never compute statistics yourself, you call a tool. Decide which \
-tools (if any) a question needs; a question about framing or what you already \
-know may need none.
-
-Hard rules:
-- Observation and discussion only. NEVER give dosing, insulin, carb-ratio, or \
-medication advice. If asked, say that is for their care team and offer to show \
-the relevant pattern instead.
-- Every number you state must come from a tool result you actually called.
-- If the data cannot answer, say so plainly and say what would be needed.
-Be concise and specific. Cite the n behind any comparison."""
+_SYSTEM = prompts.with_safety(prompts.load("chat_system"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +46,9 @@ class ChatAnswer:
     faithful: bool
     stopped_reason: str
     trace: tuple[TraceLine, ...] = ()
+    violations: tuple[str, ...] = ()
+    #: The grounded synthesis of the investigation, when one was run (orchestrator).
+    synthesis: Synthesis | None = None
 
 
 @dataclass
@@ -85,9 +78,7 @@ class ChatAgent:
                 max_steps=self.max_steps,
             )
 
-        return _finish(
-            result, question=question, capabilities=toolkit.capabilities(), rerun=rerun
-        )
+        return _finish(result, question=question, capabilities=toolkit.capabilities(), rerun=rerun)
 
 
 def _finish(
@@ -116,13 +107,18 @@ def _finish(
     report = audit(result.answer, result.evidence)
     if not report.ok:
         logger.warning("chat: %d untraceable number(s) in answer", len(report.violations))
+        violations = tuple(str(v) for v in report.violations)
         warned = (
-            result.answer
-            + "\n\n⚠️ Some figures above could not be traced to your data - "
+            result.answer + "\n\n⚠️ Some figures above could not be traced to your data - "
             "treat them with caution."
         )
         return ChatAnswer(
-            warned, tools_used, faithful=False, stopped_reason=result.stopped_reason, trace=trace
+            warned,
+            tools_used,
+            faithful=False,
+            stopped_reason=result.stopped_reason,
+            trace=trace,
+            violations=violations,
         )
     return ChatAnswer(
         result.answer, tools_used, faithful=True, stopped_reason=result.stopped_reason, trace=trace

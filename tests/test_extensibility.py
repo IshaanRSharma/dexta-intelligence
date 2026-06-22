@@ -1,4 +1,4 @@
-"""Conformance tests for the extension points documented in EXTENDING.md.
+"""Conformance tests for the extension points documented in guide/EXTENDING.md.
 
 Each test is the minimal real example from the guide: a connector, a producer
 agent, and a belt tool. If the seams ever drift, these fail and the guide is

@@ -459,7 +459,7 @@ def _synthesize_headline(
     )
     try:
         response = model.invoke([{"role": "user", "content": prompt}])
-        text = _text_of(response)
+        text = _content_text(response)
     except Exception:
         logger.warning("explain_spike: synthesis failed; keeping deterministic")
         return deterministic
@@ -476,7 +476,7 @@ def _synthesize_headline(
     return text
 
 
-def _text_of(response: Any) -> str:
+def _content_text(response: Any) -> str:
     content = getattr(response, "content", response)
     if isinstance(content, str):
         return content.strip()
