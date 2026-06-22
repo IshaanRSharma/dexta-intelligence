@@ -63,8 +63,9 @@ services:
       - "8787:8787"
     volumes:
       - dexta_demo:/data
+    # --db / --config are global flags, so they precede the subcommand.
     command:
-      ["dexta", "serve", "--demo", "--db", "/data/demo.db", "--host", "0.0.0.0", "--port", "8787"]
+      ["dexta", "--db", "/data/demo.db", "serve", "--demo", "--host", "0.0.0.0", "--port", "8787"]
 
 volumes:
   dexta_pgdata:
