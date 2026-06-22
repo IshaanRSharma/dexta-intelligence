@@ -1,8 +1,14 @@
 # dexta-intelligence: Product Overview and Delivery Summary
 
 Prepared 2026-06-21. For product review. Status: the core arc is merged to
-`main` (PR #1); the latest increment (prompt registry, connector audit, Docker,
-OSS hardening) is on `feat/prompts-registry`, green and demo-ready.
+`main` (PR #1); the latest increment (prompt registry, helper consolidation,
+Postgres CI, Docker, OSS hardening) is on `feat/prompts-registry`, green and
+demo-ready (1289 tests passing, ruff and mypy clean).
+
+Companion docs: [DEMO.md](DEMO.md) (live-walkthrough script),
+[UI-ROADMAP.md](UI-ROADMAP.md) (visualization plan),
+[RELEASE.md](RELEASE.md) (publishing and supply chain),
+[TECHNICAL_REPORT.md](TECHNICAL_REPORT.md) (design depth).
 
 ---
 
@@ -29,6 +35,36 @@ finding is a hypothesis for the person and their care team to review.
 3. **Two hard safety rails, always on.** A faithfulness guard rejects any prose
    whose numbers do not trace to a tool call. A treatment gate blocks dosing,
    basal, carb-ratio, and correction instructions.
+
+## 2a. The novel piece: agentic AI + LLM done right
+
+The differentiator is not "an LLM that reads your data." It is an **agentic
+harness where the LLM is the navigator, never the source of truth**:
+
+- **LLM proposes, determinism disposes.** The model plans an investigation and
+  composes deterministic instruments tool by tool; tested analytics compute every
+  number; permutation tests and false-discovery control gate every claim. The
+  model never computes a statistic itself.
+- **A faithfulness guard enforced in code, not prompted.** Every number in
+  model-authored prose must trace to a tool result, or the prose is rejected.
+  This is a concrete, testable anti-hallucination mechanism, not a system-prompt
+  request.
+- **An adversarial skeptic.** A second agent tries to refute each finding
+  (counter-evidence, confounds) before it is ever shown.
+- **Visible reasoning.** Every serious answer carries a plan, a tool-by-tool
+  trace, the evidence, and what could not be checked. The agentic work is
+  inspectable, not a black box.
+- **Agent interop.** The same tools are exposed over an MCP server, so any agent
+  (Gemini, Copilot, Claude) can query the data with the rails enforced
+  server-side.
+- **Bring your own model, on-device if you want.** Anthropic, OpenAI, Google
+  Gemini, OpenRouter, local Ollama, or a local llama.cpp file. The harness is
+  model-agnostic; the rigor and rails do not depend on which model is used.
+
+The thesis, in one line: **use the LLM well at the propose / plan / critique /
+explain layer, and let determinism own the facts and the gates.** That is what
+makes the output trustworthy over personal health time-series, and it is the
+piece most health-AI tools skip.
 
 ## 3. Feature inventory
 
@@ -135,7 +171,7 @@ validation.
 
 ## 5. Quality bar (current)
 
-- Test suite: 1288 passed, 46 skipped, 0 failed.
+- Test suite: 1289 passed, 46 skipped, 0 failed.
 - Static analysis: ruff clean (0 findings), mypy strict clean (111 files).
 - CI runs lint, types, and tests on Python 3.11 and 3.12.
 - Live verification: `dexta demo` end to end; Tandem and Dexcom syncing; eval
