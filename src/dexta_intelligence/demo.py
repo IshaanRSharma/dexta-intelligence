@@ -22,6 +22,7 @@ import json
 import math
 import random
 from datetime import UTC, date, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from dexta_intelligence.models import (
     ActivityEvent,
@@ -35,6 +36,9 @@ from dexta_intelligence.models import (
     TherapyProfile,
 )
 from dexta_intelligence.store import SQLiteStore
+
+if TYPE_CHECKING:
+    from dexta_intelligence.store.port import StoragePort
 
 __all__ = ["DEMO_SPIKE_DATE", "DEMO_SPIKE_TS", "build_demo_store"]
 
@@ -433,16 +437,15 @@ def _tandem_treatment(rng: random.Random) -> tuple[list[MealEvent], list[Insulin
     return meals, insulin
 
 
-def build_demo_store() -> SQLiteStore:
-    """An in-memory, migrated store loaded with the synthetic patient.
+def seed_demo(store: StoragePort) -> None:
+    """Load the synthetic patient into ``store`` (assumed already migrated).
 
-    Deterministic: repeated calls produce byte-identical timelines. Fast (<2s).
-    Beyond the hero CGM/insulin/meal timeline it adds a full Tandem t:slim X2 /
-    Control-IQ treatment record (multi-segment profile, temp basals, corrections,
-    suspends, three meals a day), sleep, activity, logged forecast curves, two
-    therapy-profile versions, and manual notes - so every surface has data."""
-    store = SQLiteStore(":memory:")
-    store.migrate()
+    Backend-agnostic: works on the in-memory showcase store, a SQLite file, or
+    Postgres. Beyond the hero CGM/insulin/meal timeline it adds a full Tandem
+    t:slim X2 / Control-IQ treatment record (multi-segment profile, temp basals,
+    corrections, suspends, three meals a day), sleep, activity, logged forecast
+    curves, two therapy-profile versions, and manual notes - so every surface has
+    data."""
     glucose, insulin, meals = _patient()
     glucose = _with_prolonged_highs(glucose)
     store.insert_glucose(glucose)
@@ -457,4 +460,24 @@ def build_demo_store() -> SQLiteStore:
         store.add_profile_version(profile)
     for event in _demo_manual():
         store.add_manual_event(event)
+
+
+def seed_demo_if_empty(store: StoragePort) -> bool:
+    """Seed the synthetic patient only when ``store`` has no glucose yet.
+
+    Returns whether it seeded, so a one-command demo is idempotent: the first
+    `serve --demo` populates the database, restarts reuse it untouched."""
+    if store.coverage().first_ts is not None:
+        return False
+    seed_demo(store)
+    return True
+
+
+def build_demo_store() -> SQLiteStore:
+    """An in-memory, migrated store loaded with the synthetic patient.
+
+    Deterministic: repeated calls produce byte-identical timelines. Fast (<2s)."""
+    store = SQLiteStore(":memory:")
+    store.migrate()
+    seed_demo(store)
     return store

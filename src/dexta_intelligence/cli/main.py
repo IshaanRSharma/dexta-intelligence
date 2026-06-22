@@ -189,6 +189,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Re-sync data sources every MIN minutes in the background "
         "(default: the [server] auto_sync_minutes config, or off)",
     )
+    serve_p.add_argument(
+        "--demo",
+        action="store_true",
+        help="Seed a synthetic patient into an empty database first (no data or API key needed)",
+    )
 
     return parser
 
@@ -329,6 +334,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: PLR0911, PLR0912
             port=args.port,
             config_path=args.config,
             sync_every=args.sync_every,
+            demo=args.demo,
         )
 
     if args.command == "upload":

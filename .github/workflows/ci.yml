@@ -77,3 +77,17 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://dexta:dexta@localhost:5432/dexta
         run: uv run pytest tests/test_postgres_store.py -q
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the reference image
+        run: docker build -t dexta-intelligence:ci .
+
+      - name: Smoke the demo seed (no server)
+        run: |
+          docker run --rm dexta-intelligence:ci \
+            python -c "from dexta_intelligence.demo import build_demo_store; s=build_demo_store(); assert s.coverage().first_ts is not None; print('demo store OK')"

@@ -52,5 +52,20 @@ services:
     # Replace with e.g. a cron loop running `dexta goals tick` for ambient operation.
     command: ["sleep", "infinity"]
 
+  # One-command tour: `docker compose up demo` builds the image, seeds a synthetic
+  # patient into a local SQLite file, and serves the web app on http://localhost:8787.
+  # No Postgres, no real data, no API key. The `demo` profile keeps it out of the
+  # default `up`.
+  demo:
+    build: .
+    profiles: ["demo"]
+    ports:
+      - "8787:8787"
+    volumes:
+      - dexta_demo:/data
+    command:
+      ["dexta", "serve", "--demo", "--db", "/data/demo.db", "--host", "0.0.0.0", "--port", "8787"]
+
 volumes:
   dexta_pgdata:
+  dexta_demo:
