@@ -75,6 +75,7 @@ from dexta_intelligence.server.views_findings import (
 from dexta_intelligence.server.views_goals import goal_card_view
 from dexta_intelligence.server.views_goals_sidebar import goals_sidebar_view
 from dexta_intelligence.server.views_hero import hero_chart_view
+from dexta_intelligence.server.views_memory import memory_page_view
 from dexta_intelligence.server.views_reconciliation import reconciliation_page_view
 from dexta_intelligence.server.views_system import system_page_view
 from dexta_intelligence.server.views_trace import (
@@ -186,6 +187,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         ("/system", "System"),
         ("/wiki", "Wiki"),
         ("/reconciliation", "Reconciliation"),
+        ("/memory", "Memory"),
         ("/log", "Log / missing context"),
         ("/evals", "Evals"),
     )
@@ -690,6 +692,15 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
         return _render("reconciliation.html", request, "/reconciliation", **view)
+
+    @app.get("/memory", response_class=HTMLResponse)
+    def memory_page(request: Request) -> Any:
+        store = store_opener(config, None)
+        try:
+            view = memory_page_view(store, config, datetime.now(tz=UTC))
+        finally:
+            _close(store, store_opener)
+        return _render("memory.html", request, "/memory", **view)
 
     @app.get("/context", response_class=HTMLResponse)
     def context_page() -> Any:

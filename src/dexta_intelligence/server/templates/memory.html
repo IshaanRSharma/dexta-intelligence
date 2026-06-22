@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}dexta · memory{% endblock %}
+{% block content %}
+{% from "_components.html" import chip %}
+{% set used = used|default([]) %}
+{% set excluded = excluded|default([]) %}
+{% set reason_labels = {
+  "not_used_stale": "stale",
+  "not_used_rejected": "rejected",
+  "not_used_superseded": "superseded",
+  "not_used_contradicted": "contradicted",
+  "not_used_safety_blocked": "safety blocked: reads as dosing advice",
+} %}
+
+<div class="page-head">
+  <h1>Memory inspector</h1>
+  <p class="page-sub">What the retrieval guard would reuse when answering, and what it withholds and why. Only ACTIVE, non-dosing beliefs are reusable. Stale, rejected, superseded, contradicted, or dosing-phrased memory is held back so an answer never reasons from a belief the rigor or safety layer would not stand behind.</p>
+</div>
+
+<section class="findings-section">
+  <h2 class="section-title">Memory in use</h2>
+  {% if used %}
+  <div class="cards">
+    {% for m in used %}
+    <article class="card finding-card">
+      <div class="card-head">
+        <h2>{{ m.headline }}</h2>
+        <span class="badge ok">{{ m.status }}</span>
+      </div>
+      <div class="chips">
+        {% if m.confidence is not none %}{{ chip("confidence", "%.2f"|format(m.confidence)) }}{% endif %}
+        {% if m.effect_size is not none %}{{ chip("effect", "%.2f"|format(m.effect_size)) }}{% endif %}
+        {% if m.n is not none %}{{ chip("n", m.n) }}{% endif %}
+      </div>
+      {% if m.skeptic_notes %}
+      <p class="counter-evidence"><span class="ce-label">Counter-evidence</span> {{ m.skeptic_notes }}</p>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">
+    <p>No memory in use.</p>
+    <p class="hint">No ACTIVE, non-dosing findings are available to reuse yet. Try <code>dexta demo</code> to see it in action.</p>
+  </div>
+  {% endif %}
+</section>
+
+<section class="findings-section">
+  <h2 class="section-title">Memory excluded</h2>
+  {% if excluded %}
+  <div class="cards">
+    {% for m in excluded %}
+    <article class="card finding-card">
+      <div class="card-head">
+        <h2>{{ m.headline }}</h2>
+        <span class="badge neutral">{{ m.status }}</span>
+      </div>
+      <div class="chips">
+        {{ chip("withheld", reason_labels.get(m.reason, m.reason)) }}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">
+    <p>No memory withheld.</p>
+    <p class="hint">Nothing was excluded by the retrieval guard.</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
