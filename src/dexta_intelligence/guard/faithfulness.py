@@ -137,6 +137,8 @@ def audit(
     violations: list[Violation] = []
     n_checked = 0
     for match in _NUMBER_RE.finditer(text):
+        if _is_clock_fragment(text, match):
+            continue
         cited = abs(float(match.group()))
         n_checked += 1
         if cited.is_integer() and int(cited) in allowed_constants:
@@ -153,3 +155,16 @@ def audit(
     return FaithfulnessReport(
         ok=not violations, violations=tuple(violations), n_numbers_checked=n_checked
     )
+
+
+def _is_clock_fragment(text: str, match: re.Match[str]) -> bool:
+    """True when ``match`` is part of a clock time (``8:43``, ``10:51 AM``), not a claim.
+
+    The guard audits citable figures, not time-of-day formatting. Without this,
+    bolus tables and prose like "8:43 AM" produce spurious ``43`` / ``10`` rejects
+    because ISO timestamps are not flattened into the numeric evidence pool.
+    """
+    start, end = match.span()
+    if start > 0 and text[start - 1] == ":":
+        return True
+    return end < len(text) and text[end] == ":"

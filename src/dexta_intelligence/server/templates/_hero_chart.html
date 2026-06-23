@@ -4,13 +4,21 @@
   <div class="hero-chart-head">
     <div>
       <h2>{{ hero_chart.title }}</h2>
-      {% if hero_chart.subtitle %}<p class="muted small">{{ hero_chart.subtitle }}</p>{% endif %}
+      {% if hero_chart.subtitle %}<p class="muted small hero-chart-sub">{{ hero_chart.subtitle }}</p>{% endif %}
+      {% if hero_chart.annotation %}<p class="hero-chart-note">{{ hero_chart.annotation }}</p>{% endif %}
     </div>
-    {% if hero_chart.annotation %}
-    <span class="badge neutral hero-chart-badge">{{ hero_chart.annotation }}</span>
-    {% endif %}
   </div>
   <div class="hero-chart-body">{{ hero_chart.svg|safe }}</div>
-  <p class="muted small hero-chart-foot">Target band shaded · markers show carb entries and boluses · retrospective only</p>
+  {% if hero_chart.markers %}
+  <div class="hero-chart-legend" aria-label="Carb and bolus markers">
+    {% for m in hero_chart.markers %}
+    <span class="hero-marker hero-marker-{{ m.kind }}">
+      {% if m.time %}<span class="hero-marker-time">{{ m.time }}</span>{% endif %}
+      <span class="hero-marker-label">{{ m.label }}</span>
+    </span>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <p class="muted small hero-chart-foot">Shaded band is in-range target · vertical ticks are carbs and boluses · retrospective only</p>
 </article>
 {% endif %}

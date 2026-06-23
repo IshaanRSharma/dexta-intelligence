@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from dexta_intelligence.agents.base import AgentContext, AgentRegistry
 from dexta_intelligence.agents.skeptic import (
     AGENT_NAME,
+    SkepticAgent,
     confound_hypotheses,
     register_skeptic,
     skeptic_agent,
@@ -201,3 +203,74 @@ def test_confound_hypotheses_none_without_flag(store: SQLiteStore) -> None:
     )
     reviewed = skeptic_agent.review([finding], _ctx(store))
     assert confound_hypotheses(reviewed) == []
+
+
+# ── adversarial LLM critique (optional model) ─────────────────────────────────
+
+
+def _refute_json(verdict: str, counter: str) -> str:
+    return json.dumps({"verdict": verdict, "counter_argument": counter})
+
+
+class _FakeModel:
+    """Returns a fixed response.content for skeptic._llm_refute."""
+
+    def __init__(self, content: str) -> None:
+        self._content = content
+
+    def invoke(self, _messages: list[object]) -> object:
+        return type("_Resp", (), {"content": self._content})()
+
+
+def _surviving(store: SQLiteStore) -> tuple[Finding, AgentContext]:
+    finding = _quantitative_finding(group_a=[200.0] * 12, group_b=[120.0] * 12, effect=80.0)
+    return finding, _ctx(store)
+
+
+def test_llm_skeptic_refuted_lowers_confidence(store: SQLiteStore) -> None:
+    finding, ctx = _surviving(store)
+    model = _FakeModel(_refute_json("refuted", "weekday and sleep are confounded here"))
+    reviewed = SkepticAgent(model=model).review([finding], ctx)
+    assert "LLM skeptic (refuted)" in reviewed[0].skeptic_notes
+    assert reviewed[0].confidence <= 0.35
+    assert reviewed[0].status == FindingStatus.ACTIVE  # critique never flips status
+
+
+def test_llm_skeptic_weakened_caps_confidence(store: SQLiteStore) -> None:
+    finding, ctx = _surviving(store)
+    model = _FakeModel(_refute_json("weakened", "small sample, could be regression to the mean"))
+    reviewed = SkepticAgent(model=model).review([finding], ctx)
+    assert "LLM skeptic (weakened)" in reviewed[0].skeptic_notes
+    assert reviewed[0].confidence <= 0.5
+
+
+def test_llm_skeptic_holds_records_note_without_lowering(store: SQLiteStore) -> None:
+    finding, ctx = _surviving(store)
+    before = skeptic_agent.review([finding], _ctx(store))[0].confidence
+    model = _FakeModel(_refute_json("holds", "no obvious alternative explanation"))
+    reviewed = SkepticAgent(model=model).review([finding], ctx)
+    assert "LLM skeptic (holds)" in reviewed[0].skeptic_notes
+    assert reviewed[0].confidence == before  # holds does not lower confidence
+
+
+def test_llm_skeptic_drops_dosing_critique(store: SQLiteStore) -> None:
+    finding, ctx = _surviving(store)
+    # "increase ... basal" is caught by the treatment gate (_ADVICE_RE).
+    model = _FakeModel(_refute_json("refuted", "you should increase your basal overnight"))
+    reviewed = SkepticAgent(model=model).review([finding], ctx)
+    assert "LLM skeptic" not in reviewed[0].skeptic_notes  # treatment gate dropped it
+    assert reviewed[0].confidence > 0.35
+
+
+def test_llm_skeptic_drops_fabricated_number(store: SQLiteStore) -> None:
+    finding, ctx = _surviving(store)
+    model = _FakeModel(_refute_json("refuted", "the effect was only 37 mg/dL"))
+    reviewed = SkepticAgent(model=model).review([finding], ctx)
+    assert "LLM skeptic" not in reviewed[0].skeptic_notes  # 37 not in evidence -> faithfulness drop
+    assert reviewed[0].confidence > 0.35
+
+
+def test_no_model_runs_no_llm_critique(store: SQLiteStore) -> None:
+    finding, ctx = _surviving(store)
+    reviewed = SkepticAgent(model=None).review([finding], ctx)
+    assert "LLM skeptic" not in (reviewed[0].skeptic_notes or "")

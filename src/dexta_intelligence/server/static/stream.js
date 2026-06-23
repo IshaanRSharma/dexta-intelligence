@@ -58,61 +58,59 @@
     return String(name || "tool").replace(/_/g, " ");
   }
 
-  function traceIcon(icon) {
-    const map = {
-      zoom: "⌖",
-      scope: "◧",
-      compare: "⇔",
-      recall: "◎",
-      scan: "◉",
-      trend: "↗",
-      treatment: "💉",
-      time: "◷",
-    };
-    return map[icon] || "•";
+  function traceDot(icon) {
+    return el("span", "trace-dot trace-dot-" + (icon || "scope"));
   }
 
-  function renderTraceTimeline(container, trace, violations) {
+  function appendTraceLine(container, line) {
+    const text = line.text || line;
+    const icon = (line && line.icon) || "scope";
+    const item = el("div", "trace-item trace-" + icon);
+    item.appendChild(traceDot(icon));
+    item.appendChild(el("span", "trace-text", text));
+    container.appendChild(item);
+  }
+
+  function renderTraceInto(container, trace) {
     container.innerHTML = "";
     container.className = "trace-timeline";
     (trace || []).forEach(function (line) {
-      const item = el("div", "trace-item trace-" + (line.icon || "scope"));
-      item.appendChild(el("span", "trace-icon", traceIcon(line.icon)));
-      item.appendChild(el("span", "trace-text", line.text || ""));
-      container.appendChild(item);
+      appendTraceLine(container, line);
     });
-    if (violations && violations.length) {
-      const row = el("div", "trace-guard-row");
-      violations.forEach(function (v) {
-        row.appendChild(el("span", "trace-guard-chip", "claim rejected: not traceable · " + v));
-      });
-      container.appendChild(row);
-    }
   }
 
-  function collapseRawSteps(view) {
-    if (!view.steps.childElementCount) return;
-    const details = el("details", "steps-collapsed");
-    details.appendChild(el("summary", null, "Raw tool log"));
-    const clone = view.steps.cloneNode(true);
-    clone.className = "steps";
-    details.appendChild(clone);
-    view.steps.replaceWith(details);
-    view.steps = clone;
+  function addFaithfulnessNote(answerBody, violations) {
+    if (!violations || !violations.length) return;
+    const note = el("div", "faithfulness-note");
+    note.textContent =
+      violations.length === 1
+        ? "One figure in this answer could not be traced to tool data."
+        : violations.length +
+          " figures in this answer could not be fully traced to tool data.";
+    answerBody.appendChild(note);
+  }
+
+  function finalizeWorkLog(view) {
+    if (!view.work || !view.work.isConnected) return;
+    const summary = view.work.querySelector("summary");
+    const n = view.steps.childElementCount;
+    if (summary) summary.textContent = n ? "Tool log (" + n + ")" : "Tool log";
   }
 
   function renderRun(question) {
     clearEmptyState();
-    const run = el("article", "card run");
+    const run = el("article", "run");
 
-    const q = el("p", "qline muted", question);
-    run.appendChild(q);
+    run.appendChild(el("p", "qline", question));
 
-    const steps = el("div", "steps");
-    run.appendChild(steps);
-
-    const status = el("p", "run-status muted small", "thinking…");
+    const status = el("p", "run-status muted small", "Checking your data…");
     run.appendChild(status);
+
+    const work = el("details", "run-work");
+    work.appendChild(el("summary", null, "Working…"));
+    const steps = el("div", "steps");
+    work.appendChild(steps);
+    run.appendChild(work);
 
     run._answerBody = null;
     run._answerProse = null;
@@ -120,7 +118,7 @@
 
     root.appendChild(run);
     run.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    return { run, steps, status };
+    return { run, steps, status, work };
   }
 
   function addToolCall(view, payload) {
@@ -162,6 +160,43 @@
     return out;
   }
 
+  function looksLikeTableRow(line) {
+    const stripped = String(line || "").trim();
+    if (stripped.indexOf("|") < 0) return false;
+    const cells = stripped.replace(/^\|/, "").replace(/\|$/, "").split("|");
+    return cells.length >= 2 && cells.some(function (c) {
+      return c.trim();
+    });
+  }
+
+  function isTableDivider(line) {
+    const stripped = String(line || "").trim().replace(/^\|/, "").replace(/\|$/, "");
+    if (!stripped) return false;
+    return stripped.split("|").every(function (cell) {
+      const c = cell.trim();
+      return c && /^[-:]+$/.test(c);
+    });
+  }
+
+  function tableRowHtml(line, header) {
+    const cells = line
+      .trim()
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map(function (c) {
+        return c.trim();
+      });
+    const tag = header ? "th" : "td";
+    return (
+      "<tr>" +
+      cells.map(function (c) {
+        return "<" + tag + ">" + inlineMarkdown(c) + "</" + tag + ">";
+      }).join("") +
+      "</tr>"
+    );
+  }
+
   /** Safe subset renderer - mirrors server ``markdown_to_html`` enough for chat. */
   function renderMarkdown(md) {
     const lines = String(md || "").replace(/\r\n/g, "\n").split("\n");
@@ -173,8 +208,8 @@
         inList = false;
       }
     }
-    for (const raw of lines) {
-      const line = raw.trimEnd();
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trimEnd();
       if (!line.trim()) {
         closeList();
         continue;
@@ -185,6 +220,24 @@
         const level = heading[1].length;
         out.push("<h" + level + ">" + inlineMarkdown(heading[2]) + "</h" + level + ">");
         continue;
+      }
+      if (looksLikeTableRow(line)) {
+        closeList();
+        const rows = [line];
+        let j = i + 1;
+        if (j < lines.length && isTableDivider(lines[j])) j += 1;
+        while (j < lines.length && looksLikeTableRow(lines[j]) && !isTableDivider(lines[j])) {
+          rows.push(lines[j]);
+          j += 1;
+        }
+        if (rows.length >= 2) {
+          out.push('<div class="prose-table-wrap"><table>');
+          out.push("<thead>" + tableRowHtml(rows[0], true) + "</thead><tbody>");
+          for (let r = 1; r < rows.length; r++) out.push(tableRowHtml(rows[r], false));
+          out.push("</tbody></table></div>");
+          i = j - 1;
+          continue;
+        }
       }
       const bullet = line.match(/^\s*-\s+(.*)$/);
       if (bullet) {
@@ -241,21 +294,28 @@
     if (view._answerBody) {
       view._answerBody.classList.remove("answer-streaming");
     }
+    if (view.status && view.status.isConnected) view.status.remove();
+    finalizeWorkLog(view);
     if (payload.trace && payload.trace.length) {
-      renderTraceTimeline(view.steps, payload.trace, payload.violations);
-    } else if (payload.faithful === false && payload.violations && payload.violations.length) {
-      renderTraceTimeline(view.steps, [], payload.violations);
-    } else {
-      collapseRawSteps(view);
+      const details = el("details", "run-trace");
+      details.appendChild(el("summary", null, "How this was checked"));
+      const box = el("div", "trace-timeline");
+      renderTraceInto(box, payload.trace);
+      details.appendChild(box);
+      view.run.appendChild(details);
     }
-    if (payload.faithful === false && !(payload.violations && payload.violations.length)) {
-      view._answerBody.appendChild(
-        el("p", "answer-warn small", "Not all claims could be traced to evidence."),
-      );
+    if (payload.faithful === false) {
+      if (payload.violations && payload.violations.length) {
+        addFaithfulnessNote(view._answerBody, payload.violations);
+      } else {
+        view._answerBody.appendChild(
+          el("p", "faithfulness-note", "Not all claims could be traced to evidence."),
+        );
+      }
     }
     if (payload.tools && payload.tools.length) {
-      const foot = el("footer", "footnote");
-      foot.textContent = "tools: " + payload.tools.join(" · ");
+      const foot = el("footer", "answer-foot muted small");
+      foot.textContent = "Tools used: " + payload.tools.join(", ");
       view._answerBody.appendChild(foot);
     }
     view.run.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -389,11 +449,11 @@
 
   function renderHistoryTurn(question, turn) {
     clearEmptyState();
-    const run = el("article", "card run");
-    run.appendChild(el("p", "qline muted", question));
+    const run = el("article", "run");
+    run.appendChild(el("p", "qline", question));
     const answer = el("div", "answer-body");
     const prose = el("div", "prose");
-    setProseHtml(prose, turn);
+    setProseHtml(prose, { html: turn.html, text: turn.content });
     answer.appendChild(prose);
     run.appendChild(answer);
     root.appendChild(run);

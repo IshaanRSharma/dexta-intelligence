@@ -88,6 +88,24 @@ def _is_table_divider(line: str) -> bool:
     return all(cell and set(cell) <= {"-", ":"} for cell in cells)
 
 
+def _looks_like_table_row(line: str) -> bool:
+    """A pipe row with at least two cells - common in LLM answers."""
+    stripped = line.strip()
+    if "|" not in stripped:
+        return False
+    cells = [c.strip() for c in stripped.strip("|").split("|")]
+    return len(cells) >= 2 and any(cells)
+
+
+def _emit_table(out: list[str], rows: list[str]) -> None:
+    out.append('<div class="prose-table-wrap"><table>')
+    out.append(f"<thead>{_table_row(rows[0], header=True)}</thead>")
+    out.append("<tbody>")
+    for row in rows[1:]:
+        out.append(_table_row(row, header=False))
+    out.append("</tbody></table></div>")
+
+
 _HR = re.compile(r"^(-{3,}|\*{3,}|_{3,})$")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 _BULLET = re.compile(r"^(\s*)[-*+]\s+(.*)$")
@@ -161,18 +179,29 @@ def markdown_to_html(md: str) -> str:  # noqa: PLR0912, PLR0915 - one sequential
             i += 1
             continue
 
-        if "|" in line and i + 1 < n and _is_table_divider(lines[i + 1]):
+        if _looks_like_table_row(line) and i + 1 < n and _is_table_divider(lines[i + 1]):
             flush_para(para)
             close_lists()
-            out.append("<table>")
-            out.append(f"<thead>{_table_row(line, header=True)}</thead>")
-            out.append("<tbody>")
+            table_rows = [line]
             i += 2
-            while i < n and "|" in lines[i] and lines[i].strip():
-                out.append(_table_row(lines[i], header=False))
+            while i < n and _looks_like_table_row(lines[i]):
+                table_rows.append(lines[i])
                 i += 1
-            out.append("</tbody></table>")
+            _emit_table(out, table_rows)
             continue
+
+        if _looks_like_table_row(line):
+            flush_para(para)
+            close_lists()
+            table_rows = []
+            j = i
+            while j < n and _looks_like_table_row(lines[j]) and not _is_table_divider(lines[j]):
+                table_rows.append(lines[j])
+                j += 1
+            if len(table_rows) >= 2:
+                _emit_table(out, table_rows)
+                i = j
+                continue
 
         quote = _BLOCKQUOTE.match(line)
         if quote:

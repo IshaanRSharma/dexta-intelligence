@@ -400,6 +400,14 @@ def test_markdown_escapes_and_renders() -> None:
     assert "<script>" not in html
 
 
+def test_markdown_table_without_divider_row() -> None:
+    md = "| Data stream | Status |\n| Glucose readings | 8 days of data |"
+    html = markdown_to_html(md)
+    assert "<table>" in html
+    assert "Glucose readings" in html
+    assert "8 days" in html
+
+
 def test_emit_toml_is_loadable(tmp_path: Path) -> None:
     config = Config.model_validate({"analysis": {"target_low": 72}})
     out = emit_toml(config)

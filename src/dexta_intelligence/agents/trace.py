@@ -22,7 +22,36 @@ if TYPE_CHECKING:
 __all__ = [
     "TraceLine",
     "render_trace",
+    "trace_icon_for_line",
 ]
+
+_PRODUCERS = frozenset({"observation", "pattern", "reconciliation", "discovery", "insulin"})
+
+_LINE_ICON_HINTS: tuple[tuple[str, str], ...] = (
+    ("planned", "plan"),
+    ("round ", "round"),
+    ("synthesized", "done"),
+    ("skipped", "skip"),
+    ("zoomed", "zoom"),
+    ("excursion", "zoom"),
+    ("spike", "zoom"),
+    ("narrowed to", "scope"),
+    ("scanned", "scan"),
+    ("checked what i already know", "recall"),
+    ("manual context", "recall"),
+    ("literature", "scan"),
+    ("compared", "compare"),
+    ("similar", "compare"),
+    (" vs ", "compare"),
+    ("day-by-day", "trend"),
+    ("bolus", "treatment"),
+    ("carb", "treatment"),
+    ("basal", "treatment"),
+    ("insulin profile", "treatment"),
+    ("anchored 'now'", "time"),
+    ("resolved relative date", "time"),
+    ("weekday", "time"),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +66,22 @@ class TraceLine:
 
     icon: str
     text: str
+
+
+def trace_icon_for_line(text: str) -> str:
+    """Stable CSS category for a trace line (tool narrative or coordinator step)."""
+    low = text.lower().strip()
+    for name in _PRODUCERS:
+        if low.startswith(f"{name}:"):
+            if "skipped" in low:
+                return "skip"
+            if "running" in low:
+                return "run"
+            return "producer"
+    for hint, icon in _LINE_ICON_HINTS:
+        if hint in low:
+            return icon
+    return "scope"
 
 
 def render_trace(steps: Sequence[ToolCall]) -> list[TraceLine]:

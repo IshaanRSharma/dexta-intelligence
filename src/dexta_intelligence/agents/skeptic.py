@@ -1,4 +1,5 @@
-"""Skeptic Agent - independent rigor re-check, memory scan, confound flags.
+"""Skeptic Agent - independent rigor re-check, memory scan, confound flags, and
+an optional adversarial LLM critique.
 
 Consumes candidate findings from the current analysis run (not the timeline
 directly). Re-runs :func:`~dexta_intelligence.stats.rigor.assess` with a
@@ -6,19 +7,28 @@ directly). Re-runs :func:`~dexta_intelligence.stats.rigor.assess` with a
 for contradicting priors, and flags known confound pairs (e.g. weekday vs
 sleep effects competing for the same variance).
 
-Deterministic - no LLM imports in this module.
+The deterministic checks own the verdict (status). When a ``model`` is supplied,
+a final adversarial pass asks the LLM to argue the strongest case that a
+surviving finding is WRONG; that critique is faithfulness-audited and
+treatment-gated, recorded as a note, and may LOWER confidence - it never flips
+status (determinism stays the verifier). With no model the agent is fully
+deterministic.
 """
 
 from __future__ import annotations
 
+import json
 import random
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from dexta_intelligence.agents._json import parse_json
 from dexta_intelligence.agents.base import (
     AgentContext,
     AgentRegistry,
     DataRequirement,
 )
+from dexta_intelligence.agents.brief import _ADVICE_RE
+from dexta_intelligence.guard.faithfulness import audit
 from dexta_intelligence.models import Finding, FindingStatus, Hypothesis
 from dexta_intelligence.stats.rigor import assess
 
@@ -64,9 +74,11 @@ class SkepticAgent:
         *,
         name: str = AGENT_NAME,
         requires: DataRequirement | None = None,
+        model: Any = None,
     ) -> None:
         self.name = name
         self.requires = requires or DataRequirement()
+        self.model = model
 
     def run(self, ctx: AgentContext) -> list[Finding]:
         """Registry hook - reviews active findings already in the store."""
@@ -162,6 +174,11 @@ class SkepticAgent:
             status = FindingStatus.CONTRADICTED
             notes.append("status: contradicted by a prior finding")
 
+        # Adversarial LLM pass: only on a finding that survived the deterministic
+        # checks. It argues against the finding; the critique is gated and can
+        # lower confidence, but never changes the deterministically-set status.
+        confidence = self._maybe_llm_critique(finding, status, confidence, notes)
+
         return finding.model_copy(
             update={
                 "status": status,
@@ -171,12 +188,81 @@ class SkepticAgent:
         )
 
 
+    def _maybe_llm_critique(
+        self, finding: Finding, status: FindingStatus, confidence: float, notes: list[str]
+    ) -> float:
+        """Append an adversarial LLM critique note and lower confidence if it lands.
+
+        No-op unless a model is set and the finding survived the deterministic
+        checks (status still ACTIVE). Status is never changed here."""
+        if self.model is None or status != FindingStatus.ACTIVE:
+            return confidence
+        refute = self._llm_refute(finding)
+        if refute is None:
+            return confidence
+        llm_verdict, counter = refute
+        notes.append(f"LLM skeptic ({llm_verdict}): {counter}")
+        if llm_verdict == "refuted":
+            return min(confidence, 0.35)
+        if llm_verdict == "weakened":
+            return min(confidence, 0.5)
+        return confidence
+
+    def _llm_refute(self, finding: Finding) -> tuple[str, str] | None:
+        """One guarded LLM pass that argues the finding is wrong.
+
+        Returns ``(verdict, counter_argument)`` where verdict is holds/weakened/
+        refuted, or ``None`` on no usable response. The critique is dropped if it
+        reads as dosing advice (treatment gate) or cites a number absent from the
+        finding's evidence (faithfulness guard), so a refutation can never smuggle
+        in a fabricated figure."""
+        stats = finding.stats
+        prompt = (
+            "You are a skeptic reviewing a statistical finding about a Type-1 "
+            "diabetes patient. Argue the STRONGEST case that it is WRONG or "
+            "overstated - the most likely alternative explanation or the key "
+            "statistical weakness (small n, confounding, regression to the mean, "
+            "multiple comparisons).\n\n"
+            f"FINDING: {finding.headline}\n"
+            f"STATS: effect_size={stats.effect_size}, n={stats.n}, "
+            f"p_perm={stats.p_perm}, q_fdr={stats.q_fdr}, replicated={stats.replicated}\n"
+            f"EVIDENCE (cite ONLY numbers that appear here): "
+            f"{json.dumps(finding.evidence, default=str)[:2000]}\n\n"
+            'Respond with ONE JSON object: {"verdict": "holds"|"weakened"|'
+            '"refuted", "counter_argument": "1-2 sentences"}.\n'
+            "Rules: observation only, NO dosing/insulin/treatment advice; cite "
+            "only numbers present in EVIDENCE."
+        )
+        try:
+            response = self.model.invoke(
+                [
+                    {"role": "system", "content": "Respond with ONE JSON object only."},
+                    {"role": "user", "content": prompt},
+                ]
+            )
+        except Exception:
+            return None
+        data = parse_json(getattr(response, "content", response), context=self.name)
+        if not isinstance(data, dict):
+            return None
+        verdict = data.get("verdict")
+        counter = data.get("counter_argument")
+        if verdict not in ("holds", "weakened", "refuted") or not isinstance(counter, str):
+            return None
+        text = counter.strip()
+        # Rails: drop a critique that reads as dosing advice (treatment gate) or
+        # cites a number absent from the evidence (faithfulness guard).
+        if not text or _ADVICE_RE.search(text) or not audit(text, finding.evidence).ok:
+            return None
+        return verdict, text
+
+
 skeptic_agent = SkepticAgent()
 
 
-def register_skeptic(registry: AgentRegistry) -> None:
-    """Register :data:`skeptic_agent` on ``registry``."""
-    registry.register(skeptic_agent)
+def register_skeptic(registry: AgentRegistry, model: Any = None) -> None:
+    """Register a skeptic on ``registry`` (LLM-critique enabled when ``model`` set)."""
+    registry.register(SkepticAgent(model=model) if model is not None else skeptic_agent)
 
 
 def _extract_groups(

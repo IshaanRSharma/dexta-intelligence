@@ -38,6 +38,9 @@ _CONCLUDE_CONFIDENCE = 0.85
 #: Consecutive no-new-information rounds before the loop nudges the model to wrap up.
 _STAGNATION_ROUNDS = 2
 
+#: Meta tools whose output is reasoning scaffolding, not auditable data.
+_META_EVIDENCE_SKIP = frozenset({"update_belief"})
+
 
 @dataclass(frozen=True, slots=True)
 class ReasoningEvent:
@@ -59,9 +62,10 @@ class ToolSpec:
 
     ``parameters`` is a JSON Schema object (OpenAI/Anthropic function-calling
     shape). ``fn`` takes the validated argument dict and returns a
-    JSON-serializable result plus the numbers it produced - the tuple
-    ``(public_result, evidence_numbers)`` so the loop can both show the model
-    the result and accumulate the guard's evidence pool.
+    JSON-serializable result plus a numeric summary - the tuple
+    ``(public_result, evidence_numbers)``. The loop stores the full
+    ``public_result`` in the guard's evidence pool (so ISO timestamps and other
+    tool fields trace in prose), not just ``evidence_numbers``.
     """
 
     name: str
@@ -306,9 +310,9 @@ def _execute_tool(
     if spec is None:
         return {"error": f"unknown tool {name!r}"}, False
     try:
-        result, numbers = spec.fn(args)
+        result, _numbers = spec.fn(args)
         ok = not (isinstance(result, dict) and result.get("error"))
-        _merge_evidence(evidence, name, idx, numbers)
+        _merge_evidence(evidence, name, idx, result)
     except Exception as exc:  # a tool fault must not kill the loop
         logger.debug("reasoning: tool %s raised: %s", name, exc)
         return {"error": f"{type(exc).__name__}: {exc}"}, False
@@ -352,9 +356,18 @@ def _emit(on_event: Callable[[ReasoningEvent], None] | None, event: ReasoningEve
         logger.debug("reasoning: on_event sink raised", exc_info=True)
 
 
-def _merge_evidence(pool: dict[str, Any], name: str, idx: int, numbers: dict[str, Any]) -> None:
-    if numbers:
-        pool[f"{name}_{idx}"] = numbers
+def _merge_evidence(pool: dict[str, Any], name: str, idx: int, result: Any) -> None:
+    """Accumulate one tool result for the faithfulness guard.
+
+    The full JSON-serializable ``result`` is stored so :func:`extract_numbers`
+    sees ISO timestamps, date strings, and nested fields — not just the
+    numeric subset tools also return for legacy callers.
+    """
+    if name in _META_EVIDENCE_SKIP:
+        return
+    if isinstance(result, dict) and result.get("error"):
+        return
+    pool[f"{name}_{idx}"] = result
 
 
 def _chunk_text(chunk: Any) -> str:

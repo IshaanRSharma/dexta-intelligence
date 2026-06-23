@@ -105,7 +105,29 @@ def test_loop_executes_tool_then_answers() -> None:
     assert result.answer == "The value is 42."
     assert [s.name for s in result.steps] == ["echo"]
     assert calls == [{"x": 1}]
-    assert result.evidence  # tool numbers accumulated for the guard
+    assert result.evidence["echo_0"] == {"value": 42}  # full tool result for the guard
+
+
+def test_loop_stores_full_tool_result_not_numeric_subset() -> None:
+    bolus_result = {
+        "n_boluses": 1,
+        "total_units": 5.37,
+        "boluses": [{"ts": "2026-06-22T08:43:00+00:00", "units": 5.37}],
+    }
+    tool = ToolSpec(
+        name="get_boluses",
+        description="list boluses",
+        parameters={"type": "object", "properties": {}},
+        fn=lambda _a: (bolus_result, {"n_boluses": 1, "bolus_0": {"units": 5.37}}),
+    )
+    model = _FakeToolModel(
+        [
+            [{"name": "get_boluses", "args": {}, "id": "c1"}],
+            "One bolus: 5.37 u at 8:43 AM.",
+        ]
+    )
+    result = run_reasoning_loop(model, [tool], system="s", user="u")  # type: ignore[arg-type]
+    assert result.evidence["get_boluses_0"] == bolus_result
 
 
 def test_loop_can_answer_without_any_tool() -> None:

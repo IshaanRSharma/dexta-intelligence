@@ -138,6 +138,8 @@ def test_run_trace_streams_plan_and_per_producer_events(store: SQLiteStore) -> N
     assert "glucose_coverage_pct" in events[0]["payload"]
     assert rec.coverage_summary is not None
     assert rec.tool_calls  # one entry per producer that ran
+    assert any(": running" in step for step in rec.steps)
+    assert any("Round 1:" in step for step in rec.steps)
 
 
 def test_record_run_persists_coverage_and_evidence(store: SQLiteStore) -> None:

@@ -63,13 +63,12 @@ def hero_chart_view(
     if len(readings) < 2:
         return {"has_chart": False}
 
-    threshold = float(spikes.get("threshold", 200.0))
-    highlight_start, highlight_end = _excursion_bounds(readings, threshold)
+    spike_center = _aware_ts(spike.get("ts")) or readings[len(readings) // 2][0]
+    peak = float(spike.get("peak_mg_dl", max(v for _, v in readings)))
+    highlight_start, highlight_end = _peak_highlight(readings, spike_center)
     markers, delays = _collect_markers(tk)
     annotation = _attribution(delays)
 
-    spike_center = _aware_ts(spike.get("ts")) or readings[len(readings) // 2][0]
-    peak = float(spike.get("peak_mg_dl", max(v for _, v in readings)))
     svg = glucose_trace_svg(
         readings,
         target_low=float(config.analysis.target_low),
@@ -77,7 +76,6 @@ def hero_chart_view(
         highlight_start=highlight_start,
         highlight_end=highlight_end,
         markers=markers,
-        annotation=annotation,
     )
     return {
         "has_chart": True,
@@ -85,6 +83,7 @@ def hero_chart_view(
         "title": "Latest excursion",
         "subtitle": f"Peak {peak:.0f} mg/dL · {spike_center.strftime('%b %d %H:%M')} UTC",
         "annotation": annotation,
+        "markers": _marker_legend(markers),
     }
 
 
@@ -129,20 +128,33 @@ def _collect_markers(tk: DiscoveryToolkit) -> tuple[list[TraceMarker], list[int]
     return markers, delays
 
 
-def _excursion_bounds(
-    readings: list[tuple[datetime, float]], threshold: float
+def _peak_highlight(
+    readings: list[tuple[datetime, float]], center: datetime, *, minutes: int = 35
 ) -> tuple[datetime | None, datetime | None]:
-    """First contiguous above-threshold run in the trace."""
-    start: datetime | None = None
-    end: datetime | None = None
-    for ts, val in readings:
-        if val >= threshold:
-            if start is None:
-                start = ts
-            end = ts
-        elif start is not None:
-            break
+    """A tight window around the spike peak — readable without painting the whole climb."""
+    if not readings:
+        return None, None
+    t0, t1 = readings[0][0], readings[-1][0]
+    start = max(t0, center - timedelta(minutes=minutes))
+    end = min(t1, center + timedelta(minutes=minutes))
     return start, end
+
+
+def _marker_legend(markers: list[TraceMarker]) -> list[dict[str, str]]:
+    """HTML legend rows — sorted by time, capped so the card stays scannable."""
+    rows = sorted(markers, key=lambda m: m.ts)
+    out: list[dict[str, str]] = []
+    for marker in rows[:8]:
+        out.append(
+            {
+                "kind": marker.kind,
+                "label": marker.label,
+                "time": marker.ts.strftime("%H:%M"),
+            }
+        )
+    if len(rows) > 8:
+        out.append({"kind": "more", "label": f"+{len(rows) - 8} more", "time": ""})
+    return out
 
 
 def _attribution(delays: list[int]) -> str | None:
@@ -150,5 +162,7 @@ def _attribution(delays: list[int]) -> str | None:
         return None
     delay = delays[0]
     if delay >= LATE_BOLUS_MIN:
-        return f"late bolus, +{delay} min"
-    return f"bolus {delay:+d} min vs carb entry"
+        return f"Late bolus · +{delay} min after carb"
+    if delay < 0:
+        return f"Bolus · {abs(delay)} min before carb"
+    return f"Bolus · +{delay} min after carb"

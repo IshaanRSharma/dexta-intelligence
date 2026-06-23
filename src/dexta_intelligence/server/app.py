@@ -2024,12 +2024,13 @@ def _run_view(run: InvestigationRun, now: datetime) -> dict[str, Any]:
         "answer_html": markdown_to_html(run.answer) if run.answer else "",
         "tool_calls": [
             {
-                "name": c.get("name"),
-                "scope": _scope_label(c.get("scope")),
+                "name": c.get("name") or c.get("producer"),
+                "scope": c.get("skip_reason") or _scope_label(c.get("scope")),
                 "ok": c.get("ok"),
+                "n_findings": c.get("n_findings"),
             }
             for c in run.tool_calls
-            if c.get("name")
+            if c.get("name") or c.get("producer")
         ],
         "findings": [
             {

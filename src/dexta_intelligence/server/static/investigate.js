@@ -29,34 +29,32 @@
     return String(name || "tool").replace(/_/g, " ");
   }
 
-  function traceIcon(icon) {
-    const map = {
-      zoom: "⌖",
-      scope: "◧",
-      compare: "⇔",
-      recall: "◎",
-      scan: "◉",
-      trend: "↗",
-      treatment: "💉",
-      time: "◷",
-    };
-    return map[icon] || "•";
+  function traceDot(icon) {
+    return el("span", "trace-dot trace-dot-" + (icon || "scope"));
+  }
+
+  function appendTraceLine(container, line) {
+    const text = line.text || line;
+    const icon = (line && line.icon) || "scope";
+    const item = el("div", "trace-item trace-" + icon);
+    item.appendChild(traceDot(icon));
+    item.appendChild(el("span", "trace-text", text));
+    container.appendChild(item);
   }
 
   function renderTraceTimeline(container, trace, violations) {
     container.innerHTML = "";
     container.className = "trace-timeline";
     (trace || []).forEach(function (line) {
-      const item = el("div", "trace-item trace-" + (line.icon || "scope"));
-      item.appendChild(el("span", "trace-icon", traceIcon(line.icon)));
-      item.appendChild(el("span", "trace-text", line.text || ""));
-      container.appendChild(item);
+      appendTraceLine(container, line);
     });
     if (violations && violations.length) {
       const row = el("div", "trace-guard-row");
-      violations.forEach(function (v) {
-        row.appendChild(el("span", "trace-guard-chip", "claim rejected: not traceable · " + v));
-      });
+      const label =
+        violations.length === 1
+          ? "One figure could not be traced to tool data."
+          : violations.length + " figures could not be fully traced to tool data.";
+      row.appendChild(el("span", "trace-guard-chip", label));
       container.appendChild(row);
     }
   }
@@ -100,10 +98,9 @@
     const plan = el("div", "steps");
     run.appendChild(plan);
 
-    const traceHead = el("p", "run-section-title", mode === "deep" ? "" : "Trace");
-    if (mode === "deep") traceHead.style.display = "none";
+    const traceHead = el("p", "run-section-title", "Trace");
     run.appendChild(traceHead);
-    const steps = el("div", "steps");
+    const steps = el("div", "trace-timeline");
     run.appendChild(steps);
 
     const evidence = el("div", "cards");
@@ -133,11 +130,12 @@
 
   // ── question mode: per-tool trace (the tool shelf) ──
   function addToolCall(view, payload) {
-    const line = el("div", "step step-call");
-    line.appendChild(el("span", "step-arrow", "→"));
+    view.traceHead.style.display = "";
+    const line = el("div", "trace-item trace-run");
+    line.appendChild(traceDot("run"));
     const scope = summarizeScope(payload.scope || payload.args);
     const label = toolLabel(payload.name);
-    line.appendChild(el("span", "step-name", scope ? `${label} (${scope})` : label));
+    line.appendChild(el("span", "trace-text", scope ? `${label} (${scope})` : label));
     line.appendChild(el("span", "step-mark step-pending", "…"));
     view.steps.appendChild(line);
     view.pending = line;
@@ -222,11 +220,15 @@
     if (typeof n === "number") line.appendChild(el("span", "step-count muted small", n + " finding(s)"));
   }
 
-  function addNote(view, text) {
-    if (!text || /^Planned/.test(text)) return;
+  function addTraceStep(view, payload) {
     view.traceHead.style.display = "";
-    view.traceHead.textContent = "Trace";
-    view.steps.appendChild(el("div", "step step-note muted small", text));
+    appendTraceLine(view.steps, payload);
+  }
+
+  function addNote(view, payload) {
+    const text = typeof payload === "string" ? payload : payload.text;
+    if (!text) return;
+    addTraceStep(view, payload);
   }
 
   function addEvidenceCard(view, f) {

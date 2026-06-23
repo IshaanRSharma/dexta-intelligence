@@ -39,6 +39,7 @@ def glucose_trace_svg(
     highlight_end: datetime | None = None,
     markers: Sequence[TraceMarker] = (),
     annotation: str | None = None,
+    show_marker_labels: bool = False,
     width: int = 640,
     height: int = 220,
 ) -> str:
@@ -56,7 +57,7 @@ def glucose_trace_svg(
         mid = (y_max + y_min) / 2
         y_min, y_max = mid - 40, mid + 40
 
-    pad_l, pad_r, pad_t, pad_b = 44, 12, 18, 28
+    pad_l, pad_r, pad_t, pad_b = 44, 12, 14, 20
     plot_w = width - pad_l - pad_r
     plot_h = height - pad_t - pad_b
 
@@ -102,18 +103,20 @@ def glucose_trace_svg(
         if not (t0 <= marker.ts <= t1):
             continue
         mx = x_of(marker.ts)
+        my = y_of(_nearest_value(pts, marker.ts))
         parts.append(
             f'<line class="chart-marker-line chart-marker-{html.escape(marker.kind)}" '
             f'x1="{mx:.1f}" y1="{pad_t:.1f}" x2="{mx:.1f}" y2="{pad_t + plot_h:.1f}" />'
         )
         parts.append(
             f'<circle class="chart-marker-dot chart-marker-{html.escape(marker.kind)}" '
-            f'cx="{mx:.1f}" cy="{y_of(_nearest_value(pts, marker.ts)):.1f}" r="5" />'
+            f'cx="{mx:.1f}" cy="{my:.1f}" r="4.5" />'
         )
-        parts.append(
-            f'<text class="chart-marker-label" x="{mx:.1f}" y="{pad_t + plot_h + 16:.1f}" '
-            f'text-anchor="middle">{html.escape(marker.label)}</text>'
-        )
+        if show_marker_labels:
+            parts.append(
+                f'<text class="chart-marker-label" x="{mx:.1f}" y="{pad_t + plot_h + 14:.1f}" '
+                f'text-anchor="middle">{html.escape(marker.label)}</text>'
+            )
 
     parts.append(
         f'<text class="chart-axis-label" x="{pad_l - 6:.1f}" y="{y_of(target_high):.1f}" '
@@ -126,8 +129,8 @@ def glucose_trace_svg(
 
     if annotation:
         parts.append(
-            f'<text class="chart-annotation" x="{pad_l:.1f}" y="{pad_t - 4:.1f}">'
-            f'{html.escape(annotation)}</text>'
+            f'<text class="chart-annotation" x="{width - pad_r:.1f}" y="{pad_t - 2:.1f}" '
+            f'text-anchor="end">{html.escape(annotation)}</text>'
         )
 
     parts.append("</svg>")
