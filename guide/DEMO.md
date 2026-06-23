@@ -58,9 +58,11 @@ dexta serve       # http://127.0.0.1:8765
    live dosing red-team scan (target zero).
    - Beat: **eval rigor up front** (DECIDE-AI framing).
 
-7. **Interop and privacy.** Mention the MCP server: dexta exposes its tools over
-   MCP so any agent (Gemini, Copilot, Claude) can query this data with the
-   faithfulness and no-dosing rails enforced server-side. And it can run fully
+7. **Interop and privacy.** Mention the MCP server: dexta exposes its read-only
+   data tools over MCP so any agent (Gemini, Copilot, Claude) can pull this
+   patient's data, each result carrying a no-dosing disclaimer. The faithfulness
+   and treatment rails govern dexta's own answers; over MCP, dexta is the
+   trustworthy read-only data layer other agents build on. And it can run fully
    local on Ollama or a llama.cpp file: PHI never leaves the device.
    - Beat: **agent interop + on-device privacy.**
 
@@ -69,7 +71,7 @@ dexta serve       # http://127.0.0.1:8765
 
 ## What to emphasize per audience
 
-- **Google AI:** the AMIE-grounded advisory architecture; eval rigor; the
+- **Google AI:** the schema-constrained, grounded advisory; eval rigor; the
   reconciliation of a real algorithm's predictions.
 - **Microsoft AI:** MCP / agent interop (Copilot); clinical-LLM evaluation
   (DECIDE-AI); BYOM including Azure-hosted OpenAI.
