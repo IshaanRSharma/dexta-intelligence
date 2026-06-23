@@ -27,8 +27,12 @@ __all__ = ["OpenEvidenceBackend"]
 
 SOURCE: EvidenceSource = "openevidence"
 
+# UNVERIFIED against a live API: OpenEvidence has no public, self-serve REST docs
+# (access is partnership/enterprise-gated). The base URL, the /v1/search path, the
+# request body, and the results[] field names below are a plausible guess. An
+# operator with real access should confirm exactly those four before relying on it.
 API_BASE = "https://api.openevidence.com"
-DOCS_URL = "https://docs.openevidence.com"
+DOCS_URL = "https://www.openevidence.com/policies/api"
 _API_KEY_ENV = "OPENEVIDENCE_API_KEY"
 _TIMEOUT = httpx.Timeout(20.0, connect=5.0)
 

@@ -29,14 +29,22 @@ honest about it. Three principles:
 
 ## Quickstart
 
-```bash
-pip install "dexta-intelligence[gui,llm]"   # or: pip install -e ".[gui,llm]" from source
+One command, just Docker, no data or API key:
 
-dexta demo        # load a synthetic patient and run an investigation end to end, no key needed
-dexta serve       # open the web app at http://127.0.0.1:8765
+```bash
+docker compose up demo      # builds, seeds a synthetic patient, serves http://localhost:8787
 ```
 
-`dexta demo` is the fastest way to see it: it loads ~90 days of a realistic Tandem t:slim X2
+Or from a source checkout:
+
+```bash
+pip install -e ".[gui,llm]"
+
+dexta serve --demo          # seed a synthetic patient (if empty) and open the web app
+dexta demo                  # or: run one investigation end to end in the terminal, no key needed
+```
+
+`dexta demo` / `--demo` is the fastest way to see it: it loads ~90 days of a realistic Tandem t:slim X2
 patient (CGM, boluses, Control-IQ basals, carb entries, two profile versions, logged forecast
 curves, manual notes) with a planted, explainable dinner-spike, then explains it with a visible
 plan and trace.

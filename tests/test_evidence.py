@@ -192,7 +192,7 @@ class TestOpenEvidenceBackend:
         monkeypatch.delenv("OPENEVIDENCE_API_KEY", raising=False)
         with pytest.raises(RuntimeError) as exc:
             OpenEvidenceBackend()
-        assert "docs.openevidence.com" in str(exc.value)
+        assert "openevidence.com/policies/api" in str(exc.value)
         assert "OPENEVIDENCE_API_KEY" in str(exc.value)
 
     def test_env_key_constructs(self, monkeypatch: pytest.MonkeyPatch) -> None:

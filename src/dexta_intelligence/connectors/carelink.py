@@ -15,6 +15,18 @@
    history, backfill through a CareLink CSV export or Nightscout and let this
    connector own the live edge.
 
+.. warning:: **EXPERIMENTAL / UNVERIFIED against the current upstream.** This is
+   written against the pre-October-2023 v1 of ``carelink-python-client`` and is
+   known stale: upstream replaced that wholesale with ``carelink_client2`` (a
+   token-file + browser-captcha login; ``init()`` / ``getRecentData()``), so the
+   session layer here (module ``carelink_client``, username/password constructor,
+   ``login()`` / ``recentData()``) will not connect to the current library. The
+   pure parser also reads some non-canonical marker fields - per the CareLink
+   data model, carbs live in ``value``, bolus units in ``deliveredFastAmount``,
+   duration in ``effectiveDuration``, and the trend in the top-level ``lastSGTrend``.
+   Treat this connector as a sketch pending a v2 rewrite (tracked in the backlog);
+   it is gated behind the ``carelink`` extra and never runs unless explicitly used.
+
 The module follows the house connector split:
 
 - **Pure conversion** (:func:`parse_recent_data`) takes a CareLink

@@ -21,6 +21,7 @@ from dexta_intelligence.cli.intelligence import (
     cmd_explain,
     cmd_goals,
     cmd_monitor,
+    cmd_timing,
     cmd_wiki,
 )
 from dexta_intelligence.cli.research import cmd_nof1
@@ -153,6 +154,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("monitor", help="Scan recent data for anomalies (lows/highs/cliffs/gaps)")
 
+    timing_p = sub.add_parser(
+        "timing", help="Observation-only briefing for a time bucket (no dosing, no API key)"
+    )
+    timing_p.add_argument(
+        "--bucket",
+        default="dinner",
+        help="Preset (overnight/breakfast/lunch/dinner/bedtime) or hour range like 17-22",
+    )
+    timing_p.add_argument(
+        "--intent",
+        choices=("general", "meal", "basal"),
+        default="general",
+        help="general (default), meal (adds timing cards), or basal (adds drift card)",
+    )
+
     daemon_p = sub.add_parser(
         "daemon", help="Run the cadence driver: sync + monitor + goal ticks + periodic deep pass"
     )
@@ -188,6 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="MIN",
         help="Re-sync data sources every MIN minutes in the background "
         "(default: the [server] auto_sync_minutes config, or off)",
+    )
+    serve_p.add_argument(
+        "--demo",
+        action="store_true",
+        help="Seed a synthetic patient into an empty database first (no data or API key needed)",
     )
 
     return parser
@@ -286,6 +307,15 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: PLR0911, PLR0912
             out=sys.stdout,
         )
 
+    if args.command == "timing":
+        return cmd_timing(
+            bucket=args.bucket,
+            intent=args.intent,
+            config=config,
+            db_path=args.db,
+            out=sys.stdout,
+        )
+
     if args.command == "daemon":
         return cmd_daemon(
             config=config,
@@ -329,6 +359,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: PLR0911, PLR0912
             port=args.port,
             config_path=args.config,
             sync_every=args.sync_every,
+            demo=args.demo,
         )
 
     if args.command == "upload":

@@ -27,12 +27,16 @@ def cmd_serve(
     port: int = 8787,
     config_path: Path | None = None,
     sync_every: int | None = None,
+    demo: bool = False,
     opener: StoreOpener = open_sqlite_store,
 ) -> int:
     """Build the GUI app and serve it with uvicorn.
 
     Binds localhost by default; pass ``--host 0.0.0.0`` to deliberately expose
     the GUI to your LAN (there is no auth - only do this on a trusted network).
+
+    ``demo`` seeds the synthetic patient into the served database when it is empty
+    (idempotent), so ``dexta serve --demo`` is a one-command, no-data, no-key tour.
     """
     try:
         import uvicorn  # noqa: PLC0415
@@ -51,6 +55,12 @@ def cmd_serve(
         # Pin the override so every request opens the same database.
         def base_opener(cfg: Config, _db: Path | None = None) -> StoragePort:
             return opener(cfg, db_path)
+
+    if demo:
+        from dexta_intelligence.demo import seed_demo_if_empty  # noqa: PLC0415
+
+        if seed_demo_if_empty(base_opener(config, None)):
+            out.write("seeded the synthetic demo patient (no real data, no API key)\n")
 
     # Capture the launched config path once so the settings panel reads/writes
     # the file the running server actually loaded - not a per-request re-resolve.
