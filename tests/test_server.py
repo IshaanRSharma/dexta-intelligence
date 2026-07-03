@@ -275,6 +275,7 @@ class _FakeAnswer:
     text = "Your time-in-range was 68% over the last 10 days (n=2880)."
     tools_used = ("tir_snapshot",)
     faithful = True
+    violations: tuple[str, ...] = ()
     stopped_reason = "answer"
 
 
@@ -292,7 +293,9 @@ def test_api_ask_with_fake_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(
         "dexta_intelligence.server.app.discovery_model", lambda _cfg: object()
     )
-    monkeypatch.setattr("dexta_intelligence.agents.chat.ChatAgent", _FakeAgent)
+    monkeypatch.setattr(
+        "dexta_intelligence.agents.orchestrator.OrchestratorAgent", _FakeAgent
+    )
     resp = _client(store).post("/api/ask", data={"question": "how is my TIR?"})
     assert resp.status_code == 200
     assert "time-in-range was 68%" in resp.text

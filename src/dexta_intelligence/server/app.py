@@ -835,8 +835,12 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
 
     @app.post("/api/ask", response_class=HTMLResponse)
     def api_ask(request: Request, question: str = Form(...)) -> Any:
+        # The no-JS / htmx fallback for the chat composer. It answers through the
+        # same OrchestratorAgent as the SSE stream path so a chat question is
+        # always handled by the traced, railed agent (guard + treatment gate run
+        # inside ``agent.ask``); ChatAgent is never used to answer a chat box.
         from dexta_intelligence.agents.base import AgentContext  # noqa: PLC0415
-        from dexta_intelligence.agents.chat import ChatAgent  # noqa: PLC0415
+        from dexta_intelligence.agents.orchestrator import OrchestratorAgent  # noqa: PLC0415
 
         model = getattr(request.app.state, "chat_model", None) or discovery_model(config)
         if model is None:
@@ -846,8 +850,6 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             coverage = store.coverage()
             gates = ColdStartReport.from_coverage(coverage)
             end = coverage.last_ts.date() if coverage.last_ts is not None else None
-            from dexta_intelligence.cli._common import _analysis_window  # noqa: PLC0415
-
             ctx = AgentContext(
                 store=store,
                 window=_analysis_window(config, end),
@@ -855,7 +857,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                 run_id="gui",
                 timezone=config.analysis.timezone,
             )
-            agent = ChatAgent(
+            agent = OrchestratorAgent(
                 model=model,
                 max_steps=config.analysis.max_reasoning_steps,
                 target_low=config.analysis.target_low,
@@ -873,6 +875,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             answer_html=markdown_to_html(answer.text),
             tools=list(answer.tools_used),
             faithful=answer.faithful,
+            violations=list(answer.violations),
         )
 
     @app.get("/api/ask/stream")
