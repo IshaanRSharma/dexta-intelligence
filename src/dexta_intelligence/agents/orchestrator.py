@@ -12,9 +12,9 @@ Determinism lives only below the safety line: the instruments the model calls
 (faithfulness guard + treatment gate). The agent decides freely; the rails
 refuse to emit an unsafe or unfaithful answer.
 
-This replaces the family-classifier ``RouterAgent`` as the default ``dexta ask``
-engine. The router remains as the lightweight keyword fallback when no model is
-available.
+This is the default ``dexta ask`` engine. Without a configured model, ``dexta
+ask`` reports that a model is required; the deterministic analytics and
+monitors remain available through their own commands.
 """
 
 from __future__ import annotations
@@ -211,9 +211,11 @@ class OrchestratorAgent:
     max_steps: int = 20
     target_low: int = 70
     target_high: int = 180
-    #: When False, drop the Phase 1-6 reasoning scaffold (belief state, mid-loop
-    #: context tool, synthesis) and run the plain tool-calling loop. For ablation.
-    use_belief: bool = True
+    #: When True, thread the Phase 1-6 reasoning scaffold (belief state, mid-loop
+    #: context tool, synthesis) through the loop; when False, run the plain
+    #: tool-calling loop. Default off: a real-model A/B showed the scaffold does
+    #: not improve answers on a capable model. Kept for ablation.
+    use_belief: bool = False
 
     def ask(
         self,
