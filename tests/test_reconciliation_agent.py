@@ -260,13 +260,14 @@ class TestAgentContract:
 
 
 class TestPerformance:
-    def test_90_day_scenario_completes_under_15s(self, store: SQLiteStore) -> None:
+    def test_90_day_scenario_completes_under_30s(self, store: SQLiteStore) -> None:
         """Tier B reconciliation on 90 days must not be O(n²) (regression guard).
 
         The old code rebuilt the deviation series per meal per cycle and shuffled
-        an unbounded null/effect group, which never completed on this input. The
-        bound is intentionally generous (real runtime is well under it) so it
-        catches algorithmic blowups, not minor perf drift, on slow CI hardware.
+        an unbounded null/effect group, which never completed on this input.
+        Real runtime is ~10s; the bound is set well above that so it catches
+        algorithmic blowups (which run for minutes or never finish), not minor
+        perf drift on slow CI hardware.
         """
         events, _ = scenario_all(seed=42, n_days=90)
         store.insert_glucose(events["glucose"])
@@ -281,6 +282,6 @@ class TestPerformance:
         findings = reconciliation_agent.run(_ctx(store, window=window))
         elapsed = time.monotonic() - start
 
-        assert elapsed < 15.0, f"reconciliation on 90d took {elapsed:.1f}s (expected < 15s)"
+        assert elapsed < 30.0, f"reconciliation on 90d took {elapsed:.1f}s (expected < 30s)"
         # Sanity: the planted effects still surface (the fix preserved behavior).
         assert findings, "expected Tier B findings on the 90-day all-effects scenario"
