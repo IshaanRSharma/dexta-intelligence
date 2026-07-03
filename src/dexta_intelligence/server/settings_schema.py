@@ -26,7 +26,6 @@ __all__ = [
     "PanelSchema",
     "PanelTier",
     "SetupLink",
-    "panel_by_key",
     "source_nav",
 ]
 
@@ -601,10 +600,6 @@ WIKI_FIELDS: tuple[FieldSchema, ...] = (
 )
 
 PANELS_BY_KEY: dict[str, PanelSchema] = {p.key: p for p in SETTINGS_PANELS}
-
-
-def panel_by_key(key: str) -> PanelSchema | None:
-    return PANELS_BY_KEY.get(key)
 
 
 def source_nav() -> tuple[dict[str, Any], ...]:

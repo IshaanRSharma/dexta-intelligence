@@ -1,4 +1,4 @@
-"""Trace timeline view-model — shared by persisted investigation runs and templates."""
+"""Trace timeline view-model, shared by persisted investigation runs and templates."""
 
 from __future__ import annotations
 
@@ -8,13 +8,7 @@ __all__ = [
     "answer_faithfulness_flagged",
     "faithfulness_violations_from_answer",
     "trace_entries_from_lines",
-    "trace_icon_for_text",
 ]
-
-
-def trace_icon_for_text(text: str) -> str:
-    """Best-effort icon for a persisted trace line (stored as plain text)."""
-    return trace_icon_for_line(text)
 
 
 def trace_entries_from_lines(lines: list[str] | None) -> list[dict[str, str]]:

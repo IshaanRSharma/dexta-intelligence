@@ -33,7 +33,6 @@ from dexta_intelligence.agents.reconciliation import (
     reconciliation_agent,
     register_reconciliation,
 )
-from dexta_intelligence.agents.router import Route, RouterAgent
 from dexta_intelligence.agents.seeker import GoalSeekingAgent, Reflection
 from dexta_intelligence.agents.skeptic import (
     SkepticAgent,
@@ -57,8 +56,6 @@ __all__ = [
     "PatternAgent",
     "PredictionReconciliationAgent",
     "Reflection",
-    "Route",
-    "RouterAgent",
     "SkepticAgent",
     "TraceLine",
     "build_brief",

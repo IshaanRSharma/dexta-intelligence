@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import uuid
 from typing import TYPE_CHECKING, TextIO
 
@@ -16,24 +15,14 @@ from dexta_intelligence.cli._common import (
     open_sqlite_store,
 )
 from dexta_intelligence.coldstart import HARD_FLOOR_DAYS, ColdStartReport
-from dexta_intelligence.config import Config
 from dexta_intelligence.workflows import lenses
 from dexta_intelligence.workflows.deep_analysis import persist_findings, run_deep_analysis
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from dexta_intelligence.config import Config
     from dexta_intelligence.models import Finding
-
-
-@functools.lru_cache(maxsize=1)
-def get_registry() -> AgentRegistry:
-    """Cached default registry (the ``analyze`` lens, no LLM) for back-compat."""
-    try:
-        registry, _ = lenses.build_registry("analyze", Config())
-    except Exception:  # best-effort registration; analyze reports emptiness plainly
-        return AgentRegistry()
-    return registry
 
 
 def _run_agents(
