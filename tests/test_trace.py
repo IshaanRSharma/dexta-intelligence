@@ -197,5 +197,5 @@ def test_trace_icon_for_coordinator_lines() -> None:
     assert trace_icon_for_line("Planned: observation, pattern") == "plan"
     assert trace_icon_for_line("Round 1: ran observation -> 0 finding(s)") == "round"
     assert trace_icon_for_line("observation: running") == "run"
-    assert trace_icon_for_line("insulin: skipped — no insulin data") == "skip"
+    assert trace_icon_for_line("insulin: skipped: no insulin data") == "skip"
     assert trace_icon_for_line("pattern: 2 raw finding(s)") == "producer"

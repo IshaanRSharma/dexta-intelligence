@@ -27,6 +27,24 @@ honest about it. Three principles:
 3. Two hard safety rails. A faithfulness guard rejects any prose whose numbers do not trace to a
    tool call. A treatment gate blocks dosing, basal, carb-ratio, and correction instructions. Always.
 
+## The receipt: an external benchmark
+
+Why the harness matters, measured. Same model (`claude-sonnet-4-6`), same 21-day CGM record
+(6,048 readings), same questions from the peer-reviewed LLM-CGM benchmark
+([Healey & Kohane, PSB 2025](https://doi.org/10.1142/9789819807024_0007)). The plain model gets the
+complete raw data in-context; dexta computes through its tools.
+
+![Per-question absolute error, plain model vs dexta harness](bench/figures/llmcgm_error.png)
+
+The plain model confidently narrates computation it cannot do and tells the patient their
+overnight average is 25 mg/dL lower than it is. dexta's every number traces to a tool call:
+mean absolute error **14.7 vs 0.15 (~100x lower)**, and 14/14 on the curated subset. That
+confident, plausible, untraceable error is exactly what the faithfulness rail exists to prevent.
+
+Scope, stated plainly: synthetic data, one patient, single pass, 14 of 30 tasks. A controlled
+probe, not a clinical claim. Scripts, raw dumps, hand-verified tables, and the honest negatives
+are all in [bench/](bench/README.md).
+
 ## Quickstart
 
 One command, just Docker, no data or API key:
@@ -162,7 +180,7 @@ API key in your environment. Without one, the deterministic analytics, stats, an
 ## Testing
 
 ```bash
-.venv/bin/ruff check src/ tests/ eval/
+.venv/bin/ruff check src/ tests/ eval/ bench/
 .venv/bin/mypy src/dexta_intelligence/
 .venv/bin/pytest
 ```

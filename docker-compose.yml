@@ -4,7 +4,7 @@
 # -----------------------------------
 # The zero-setup quick start needs NO containers at all: `dexta init` creates a
 # local SQLite database and you're running. Reach for this compose file only when
-# you want the Postgres *reference* deployment — the same backend used in CI parity
+# you want the Postgres *reference* deployment: the same backend used in CI parity
 # tests, suitable for larger histories and multi-process access.
 #
 # This file is a REFERENCE, not a turnkey product. The `dexta` service is a stub:
@@ -43,7 +43,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      # Single wiring point — the Postgres store reads this as its DSN.
+      # Single wiring point: the Postgres store reads this as its DSN.
       DATABASE_URL: postgresql://dexta:dexta@db:5432/dexta
     volumes:
       - ./:/app

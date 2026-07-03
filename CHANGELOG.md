@@ -8,6 +8,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- External benchmark run in `bench/`: dexta vs the same model with the raw data
+  in-context, on LLM-CGM (Healey & Kohane, PSB 2025). Head-to-head scripts, raw
+  per-question dumps, hand-verified writeups, and the error figure. Mean absolute
+  error ~100x lower through the harness on the exactness-scored questions.
+- Two agent tools: `find_lows` (discrete hypoglycemia episodes with nadir,
+  duration, and clinical significance) and `glucose_extremes` (timestamp, local
+  time, and period of the single highest/lowest reading).
+- Question-type-aware treatment gate: for a lows question, insulin-on-board
+  evidence is the hard requirement and missing carb data becomes an appended
+  caveat instead of muting the answer. The spike path is unchanged.
+
 - Deliberate synthesis pass: a finished investigation now produces a grounded
   synthesis (the leading explanation, the alternatives ruled out, the supporting
   evidence, the cross-modal probes, and the open gaps). Every figure is re-audited
@@ -56,12 +67,28 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- One brain answers the chat box: the no-JS `POST /api/ask` fallback now runs
+  the same traced, railed orchestrator as the streaming path instead of the
+  simpler ChatAgent, and surfaces the same faithfulness note.
+- The belief-layer reasoning scaffold now defaults off; a real-model on/off A/B
+  showed no answer-quality gain on a capable model. The `use_belief` flag stays
+  for ablation.
 - The `/reports` page renders without a network call; literature citations are
   deferred to a cached `/reports/citations` fragment loaded after first paint.
 - The agent tool belt now lives in the `agents/tools/` package.
 
+### Removed
+
+- The superseded keyword `RouterAgent` and its prompt files: the orchestrator
+  has been the only ask engine in practice, and the claimed no-model fallback
+  role did not exist in code. Also removed dead server and CLI accessors
+  (`panel_by_key`, `trace_icon_for_text`, `get_registry`) and an unreferenced
+  template.
+
 ### Fixed
 
+- Faithfulness guard: comma-grouped numbers (`25,920`) no longer split into two
+  claims, removing the main source of false grounding warnings.
 - The project resolves with `uv lock` again: the `carelink` extra no longer pins
   a package that is not published on PyPI.
 - The reports page no longer makes synchronous PubMed calls on load.

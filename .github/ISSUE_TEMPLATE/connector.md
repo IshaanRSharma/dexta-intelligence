@@ -10,14 +10,14 @@ assignees: []
 A connector is one file implementing Connector.pull(since) over a single source.
 Read connectors/base.py (the contract) and connectors/oura.py (the template) first,
 then the "add a connector" recipe in CONTRIBUTING.md. Routing an exotic device through
-the Nightscout meta-driver is often better than a new connector — note if that applies.
+the Nightscout meta-driver is often better than a new connector; note if that applies.
 -->
 
 ## Source
 
 - **Device / service:**
 - **What it provides:** <!-- glucose / insulin / meals / sleep / activity / recovery -->
-- **Already reachable via Nightscout?** <!-- yes/no — if yes, a connector may not be needed -->
+- **Already reachable via Nightscout?** <!-- yes/no; if yes, a connector may not be needed -->
 
 ## API docs
 

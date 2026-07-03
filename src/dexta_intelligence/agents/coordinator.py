@@ -251,7 +251,7 @@ class CoordinatorAgent:
             def on_skip(name: str, reasons: list[str]) -> None:
                 _log_skip(name, reasons)
                 rec.skip(name, reasons)
-                rec.step(f"{name}: skipped — {'; '.join(reasons)}")
+                rec.step(f"{name}: skipped: {'; '.join(reasons)}")
 
             def on_agent_start(name: str) -> None:
                 rec.emit("running", {"producer": name})

@@ -131,7 +131,7 @@ def _collect_markers(tk: DiscoveryToolkit) -> tuple[list[TraceMarker], list[int]
 def _peak_highlight(
     readings: list[tuple[datetime, float]], center: datetime, *, minutes: int = 35
 ) -> tuple[datetime | None, datetime | None]:
-    """A tight window around the spike peak — readable without painting the whole climb."""
+    """A tight window around the spike peak, readable without painting the whole climb."""
     if not readings:
         return None, None
     t0, t1 = readings[0][0], readings[-1][0]
@@ -141,7 +141,7 @@ def _peak_highlight(
 
 
 def _marker_legend(markers: list[TraceMarker]) -> list[dict[str, str]]:
-    """HTML legend rows — sorted by time, capped so the card stays scannable."""
+    """HTML legend rows: sorted by time, capped so the card stays scannable."""
     rows = sorted(markers, key=lambda m: m.ts)
     out: list[dict[str, str]] = []
     for marker in rows[:8]:

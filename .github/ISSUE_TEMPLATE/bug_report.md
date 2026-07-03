@@ -6,7 +6,7 @@ labels: bug
 
 **What happened**
 
-<!-- A clear description of the bug. Never paste real patient health data —
+<!-- A clear description of the bug. Never paste real patient health data:
 sanitize timestamps/values or use synthetic data. -->
 
 **Expected**

@@ -360,7 +360,7 @@ def _merge_evidence(pool: dict[str, Any], name: str, idx: int, result: Any) -> N
     """Accumulate one tool result for the faithfulness guard.
 
     The full JSON-serializable ``result`` is stored so :func:`extract_numbers`
-    sees ISO timestamps, date strings, and nested fields — not just the
+    sees ISO timestamps, date strings, and nested fields, not just the
     numeric subset tools also return for legacy callers.
     """
     if name in _META_EVIDENCE_SKIP:

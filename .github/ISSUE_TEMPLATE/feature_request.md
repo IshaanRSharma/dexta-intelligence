@@ -15,5 +15,5 @@ investigate, describe it as a patient would ask it. -->
 
 **Safety note**
 
-<!-- Confirm this stays observation/discussion only — no dosing or treatment
+<!-- Confirm this stays observation/discussion only: no dosing or treatment
 recommendation. -->
