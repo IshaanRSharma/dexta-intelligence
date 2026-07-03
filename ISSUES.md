@@ -7,6 +7,25 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
 
 ## Open / deferred
 
+- **#13** Faithfulness guard is set-membership, not provenance-aware (2026-07-03,
+  from the LLM-CGM paper study): the guard's own docstring states it does
+  "set-membership checking, not semantic verification. A number can match the
+  pool while being cited in the wrong context." That is exactly the failure
+  class LLM-CGM measured in code-execution agents (SD reported where CV was
+  asked, 0/10 for both code frameworks in their Table 3). Harden the guard to
+  verify number -> computation -> window -> metric -> unit provenance, so it
+  catches "right number, wrong metric" and not just fabricated numbers.
+  Highest-ROI verification hardening; upgrades the safety claim from "we flag
+  fabricated numbers" to "we verify every number is computed and cited
+  correctly."
+- **#14** Structured domain-context layer (2026-07-03, same study): LLM-CGM's
+  top future-work ask is injected domain definitions and analysis conventions
+  (CV is not SD, in-range is 70-180, "today" is the last data day). dexta
+  covers pieces (tool belt, timing_context, coldstart gating) but has no
+  single structured layer that both the agent and the faithfulness guard
+  consult. Also make temporal episodes (excursions, lows, gaps) first-class
+  segmented objects rather than per-tool outputs; the paper's worst code-agent
+  scores were all temporal segmentation tasks.
 - **#11** Tandem connector targets the retired backend (2026-07-02, ecosystem
   survey): `connectors/tandem.py` documents and delegates to tconnectsync
   against the t:connect cloud, which Tandem shut down in the US on 2024-09-30.
