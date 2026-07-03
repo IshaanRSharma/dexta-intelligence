@@ -50,6 +50,13 @@ are all in [bench/](bench/README.md).
 One command, just Docker, no data or API key:
 
 ```bash
+docker run --rm -p 8787:8787 ghcr.io/ishaanrsharma/dexta-intelligence \
+  dexta --db /tmp/demo.db serve --demo --host 0.0.0.0 --port 8787
+```
+
+Or from a clone:
+
+```bash
 docker compose up demo      # builds, seeds a synthetic patient, serves http://localhost:8787
 ```
 
