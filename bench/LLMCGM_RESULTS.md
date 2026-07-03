@@ -118,3 +118,120 @@ for Q18; all three now score correct. dexta: **14/14** on the curated subset.
 - All 30 tasks, multiple patients/seeds, k repeats for variance, with the exactness scorer.
 - A blinded LLM judge as a second scorer on the interpretation questions.
 - Report the plain-vs-dexta error distribution (not just the mean) as the headline figure.
+
+---
+
+# Multi-patient hardening (in progress: run credit-truncated after 2 of 5 patients)
+
+`bench/run_llmcgm_multi.py` -> `bench/results/llmcgm_multi.json`,
+figure `bench/figures/llmcgm_multi.png`.
+
+The n=1 caveat above is the one this targets. What was built, validated, and is
+committed as ready-to-run:
+
+- **Five distinct synthetic patients**, same subject model (`claude-sonnet-4-6`,
+  temp 0), same 21-day window, built with the repo's own generator
+  (`testing.synthetic.generate_dataset`) using **distinct seeds AND distinct
+  physiology profiles** (`BaselineConfig` + planted effects):
+
+  | id | seed | profile | mean | CV | TIR | notes |
+  |----|------|---------|------|----|-----|-------|
+  | P1 | 5  | reference (== the original headline patient) | 135 | 29% | 80% | sensitivity shift e60 |
+  | P2 | 11 | high-variability | 143 | 35% | 70% | wide spread, min 40 / max 300 |
+  | P3 | 21 | flatline-stable | 99  | 19% | 93% | no highs (longest-hyper = 0) |
+  | P4 | 33 | sensor-gap-heavy | 132 | 24% | 89% | ~13% of readings dropped (blackouts + dropout) |
+  | P5 | 42 | hyperglycemic | 178 | 22% | 51% | TAR 48%, TAR>250 ~3% |
+
+- **Exactness coverage extended 15 -> 20 questions** (added SD, TAR>180, TAR>250,
+  TBR<54, time-of-lowest), all with a deterministically computable ground truth.
+- **Ground truth recomputed independently with numpy** straight from each record
+  (`ground_truth_np`), and asserted equal to the ported LLM-CGM `get_answers`
+  formulas for every patient (`_crosscheck`), so dexta never grades itself.
+- Cost preflighted: baseline (full-CSV) arm estimated at **4.1M input tokens**
+  total for the cohort (well under the 30M budget); a one-call credit preflight
+  and `--resume` were added so a rerun finishes the cohort in one command.
+
+**Status: honest and incomplete.** The live run exhausted the Anthropic account's
+API credits partway through patient 2. Only **P1 (both arms, all 15 shared numeric
+questions) and P2 (12 of 15; Q18/Q19/Q22 hit the credit wall)** have subject-model
+answers. **P3-P5 are built and validated but have no model answers yet** (re-run
+with `--resume` once credits exist). So this is a **two-patient** hand-verified
+result, not the five-patient distribution, and it is labelled as such everywhere.
+
+## Hand-verified, the two patients that completed
+Auto-parse is only a floor here and a *weak* one on the dexta arm: dexta answers
+are discursive and multi-numbered, so the parser sometimes grabs the wrong figure
+(e.g. "100% coverage" for a TBR question), inflating dexta's *auto* MAE to ~20-35.
+Every numeric cell below is **read from the raw answer by hand** (dumps in the
+JSON). "trunc" = the plain model ran out of its (identical, 1800-token) budget
+enumerating readings and produced no final number.
+
+**P1 reference** (dexta answered 15/15, plain 11/15):
+
+| Q | truth | dexta | plain |
+|---|-------|-------|-------|
+| mean | 135.2 | **135.2** (0.04) | 131.9 (3.3) |
+| max | 224 | **224** (0) | **224** (0) |
+| SD | 38.8 | **38.8** (0.0) | 44.8 (6.0) |
+| min | 43 | **43** (0) | **43** (0) |
+| TIR% | 79.9 | **81.1** (1.2 bd) | trunc |
+| TAR180% | 14.6 | **14.6** (0.05) | trunc |
+| TBR70% | 4.35 | **4.3** (0.05) | 2.3 (2.0) |
+| CV% | 28.7 | **28.7** (0.01) | 30.9 (2.2) |
+| TAR250% | 0.0 | **0** (0) | **0** (0) |
+| eA1c | 6.34 | 6.5 GMI (0.16) | 6.5 (0.16) |
+| TBR54% | 0.26 | **0.3** (0.04) | **0.17** (0.09) |
+| longest-hyper min | 330 | **330** (0) | trunc |
+| # hypo episodes | 65 | **65** (0) | 25 (40) |
+| overnight mean | 148.6 | **148.6** (0.04) | trunc |
+| dinner max | 210 | **210** (0) | **210** (0) |
+
+**P1 hand MAE: dexta 0.10 (15/15 answered) vs plain 4.90 (11/15 answered).**
+
+**P2 high-variability** (dexta 12/12 valid, plain 7/12; Q18/Q19/Q22 both arms
+credit-failed and are excluded):
+
+| Q | truth | dexta | plain |
+|---|-------|-------|-------|
+| mean | 143.4 | **143.4** (0.03) | 141.6 (1.8) |
+| max | 300 | **300** (0) | **300** (0) |
+| SD | 49.5 | **49.5** (0.01) | 41.6 (7.9) |
+| min | 40 | **40** (0) | **40** (0) |
+| TIR% | 70.0 | **70.8** (0.8 bd) | trunc |
+| TAR180% | 22.2 | **22.2** (0.02) | trunc |
+| TBR70% | 6.94 | **6.9** (0.04) | trunc |
+| CV% | 34.5 | **34.5** (0.02) | 39 (4.5) |
+| TAR250% | 1.95 | **2.0** (0.05) | trunc |
+| eA1c | 6.62 | 6.7 GMI (0.08) | 6.9 (0.28) |
+| TBR54% | 3.57 | **3.6** (0.03) | 3.3 (0.27) |
+| longest-hyper min | 320 | 315 (5.0) | trunc |
+
+**P2 hand MAE: dexta 0.51 (12/12 answered) vs plain 2.11 (7/12 answered).**
+
+## What the two patients show (and what they don't)
+- **The pattern held on a second, harder patient.** On the high-variability P2,
+  dexta stayed near-exact (MAE 0.51; its only non-trivial miss is longest-hyper
+  off by one 5-min slot, 315 vs 320). dexta's numbers did **not** get worse going
+  from the reference patient to the harder one - reported faithfully as asked.
+- **The plain failure mode is two-headed:** it is confidently *wrong* on aggregates
+  it answers concisely (SD off 6-8, CV off 2-4.5, episode count off 40), and it
+  simply **does not finish** the enumeration-heavy questions (TIR, TAR, TBR>250,
+  overnight mean, longest run), truncating with no answer. dexta answered every
+  question; plain answered 11/15 and 7/12. The coverage gap is as much the story
+  as the error gap.
+- **The auto-scorer is not even a usable floor for the dexta arm here** - it needs
+  hand-verification, consistent with this project's standing finding that auto
+  metrics are a floor and hand/judge verification is the truth.
+
+## Honest limitations (multi-patient section)
+- **Two patients, not five.** The credit exhaustion is real; P3-P5 (flatline,
+  sensor-gap, hyperglycemic) have ground truth and CSVs but no model answers. No
+  median/IQR/worst-case distribution claim is made on n=2.
+- Still **synthetic**, **single pass**, curated exactness subset. Same scope caveats
+  as the n=1 section.
+- The plain **truncations are partly a max_tokens artifact** (1800, kept identical
+  to the original run for comparability). A larger budget would convert some
+  truncations into (likely still wrong) numbers; it would not give the plain arm
+  exact arithmetic over 6,048 readings. Worth noting, not worth hiding.
+- Reproduce / finish: `python bench/run_llmcgm_multi.py --resume` (needs credits),
+  then re-render `bench/render_figure.py`.

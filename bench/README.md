@@ -28,8 +28,9 @@ at clinical stakes, and that a verification harness removes it.
 
 | File | What it is |
 | --- | --- |
-| `run_llmcgm.py` | dexta arm: the orchestrator answers 15 LLM-CGM questions, scored against the benchmark's own `get_answers` formulas (ported to pure Python, MIT). |
+| `run_llmcgm.py` | dexta arm: the orchestrator answers the LLM-CGM questions (20 exactness tasks), scored against the benchmark's own `get_answers` formulas (ported to pure Python, MIT). |
 | `run_llmcgm_baseline.py` | plain-model arm: same model, full CGM CSV in-context, no tools, same questions and scoring. Reads the dexta arm's dump for the side-by-side. |
+| `run_llmcgm_multi.py` | multi-patient hardening: 5 distinct synthetic patients (distinct seeds + physiology profiles), both arms, ground truth recomputed independently with numpy. `--estimate-only` prints the token cost; `--resume` reuses completed patients. See the multi-patient section of `LLMCGM_RESULTS.md` (the live run is credit-truncated at 2/5 patients). |
 | `run_ladder.py` | the three-rung ladder (raw model vs tools vs tools+rails) on dexta's own scenarios, plus a dosing red team. |
 | `render_figure.py` | renders `figures/llmcgm_error.{png,svg}` from the hand-verified errors. |
 | `LLMCGM_RESULTS.md` | hand-verified results and the head-to-head writeup (the source of truth; the auto-scorer is only a floor). |
@@ -45,9 +46,18 @@ minutes each). Run from the repo root:
 ```bash
 python bench/run_llmcgm.py            # dexta arm  -> results/llmcgm_raw.json
 python bench/run_llmcgm_baseline.py   # plain arm  -> results/llmcgm_baseline.json (needs the dexta dump first)
+python bench/run_llmcgm_multi.py      # 5 patients, both arms -> results/llmcgm_multi.json
+python bench/run_llmcgm_multi.py --estimate-only   # token-cost estimate, no API calls
+python bench/run_llmcgm_multi.py --resume          # finish a credit-truncated cohort
 python bench/run_ladder.py            # ladder     -> results/ladder_raw.json
-python bench/render_figure.py         # figure     -> figures/llmcgm_error.{png,svg} (no key needed)
+python bench/render_figure.py         # figures    -> figures/llmcgm_error.{png,svg} + llmcgm_multi.{png,svg} (no key needed)
 ```
+
+The multi-patient run builds 5 patients with distinct seeds and physiology
+(reference, high-variability, flatline-stable, sensor-gap-heavy, hyperglycemic),
+scores both arms against an independent numpy ground truth, and estimates cost
+before spending (the full-CSV baseline arm is ~4.1M input tokens). The committed
+run is truncated at 2 of 5 patients by an API credit limit; `--resume` completes it.
 
 `render_figure.py` additionally needs `matplotlib` (not a project dependency: `pip install matplotlib`).
 

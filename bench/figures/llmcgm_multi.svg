@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="590.4pt" height="360pt" viewBox="0 0 590.4 360" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-07-02T21:20:40.234322</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.0, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 360 
+L 590.4 360 
+L 590.4 0 
+L 0 0 
+z
+" style="fill: #fcfcfb"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 44.454 304.8965 
+L 579.6 304.8965 
+L 579.6 56.43125 
+L 44.454 56.43125 
+z
+" style="fill: #fcfcfb"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1"/>
+     <g id="text_1">
+      <text style="font-size: 9.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #0b0b0b" transform="translate(143.771334 317.5735)">P1 reference</text>
+      <text style="font-size: 9.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #0b0b0b" transform="translate(146.729693 328.907)">(TIR ~80%)</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_2"/>
+     <g id="text_2">
+      <text style="font-size: 9.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #0b0b0b" transform="translate(415.535713 317.5735)">P2 high-variability</text>
+      <text style="font-size: 9.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #0b0b0b" transform="translate(430.455908 328.907)">(CV ~35%)</text>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_3">
+      <path d="M 44.454 304.8965 
+L 579.6 304.8965 
+" clip-path="url(#p4cd57671a0)" style="fill: none; stroke: #e1e0d9; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_4"/>
+     <g id="text_3">
+      <text style="font-size: 8.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #898781" x="40.954" y="308.9425" transform="rotate(-0 40.954 308.9425)">0</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_5">
+      <path d="M 44.454 265.281505 
+L 579.6 265.281505 
+" clip-path="url(#p4cd57671a0)" style="fill: none; stroke: #e1e0d9; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_6"/>
+     <g id="text_4">
+      <text style="font-size: 8.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #898781" x="40.954" y="269.327505" transform="rotate(-0 40.954 269.327505)">1</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_7">
+      <path d="M 44.454 225.66651 
+L 579.6 225.66651 
+" clip-path="url(#p4cd57671a0)" style="fill: none; stroke: #e1e0d9; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_8"/>
+     <g id="text_5">
+      <text style="font-size: 8.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #898781" x="40.954" y="229.71251" transform="rotate(-0 40.954 229.71251)">2</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_9">
+      <path d="M 44.454 186.051514 
+L 579.6 186.051514 
+" clip-path="url(#p4cd57671a0)" style="fill: none; stroke: #e1e0d9; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_10"/>
+     <g id="text_6">
+      <text style="font-size: 8.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #898781" x="40.954" y="190.097514" transform="rotate(-0 40.954 190.097514)">3</text>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_11">
+      <path d="M 44.454 146.436519 
+L 579.6 146.436519 
+" clip-path="url(#p4cd57671a0)" style="fill: none; stroke: #e1e0d9; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_12"/>
+     <g id="text_7">
+      <text style="font-size: 8.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #898781" x="40.954" y="150.482519" transform="rotate(-0 40.954 150.482519)">4</text>
+     </g>
+    </g>
+    <g id="ytick_6">
+     <g id="line2d_13">
+      <path d="M 44.454 106.821524 
+L 579.6 106.821524 
+" clip-path="url(#p4cd57671a0)" style="fill: none; stroke: #e1e0d9; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_14"/>
+     <g id="text_8">
+      <text style="font-size: 8.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #898781" x="40.954" y="110.867524" transform="rotate(-0 40.954 110.867524)">5</text>
+     </g>
+    </g>
+    <g id="ytick_7">
+     <g id="line2d_15">
+      <path d="M 44.454 67.206529 
+L 579.6 67.206529 
+" clip-path="url(#p4cd57671a0)" style="fill: none; stroke: #e1e0d9; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_16"/>
+     <g id="text_9">
+      <text style="font-size: 8.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: end; fill: #898781" x="40.954" y="71.252529" transform="rotate(-0 40.954 71.252529)">6</text>
+     </g>
+    </g>
+    <g id="text_10">
+     <text style="font-size: 9px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #898781" transform="translate(19.448531 272.593953) rotate(-90)">mean absolute error over answered questions</text>
+     <text style="font-size: 9px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #898781" transform="translate(30.185531 225.339734) rotate(-90)">(native unit per metric)</text>
+    </g>
+   </g>
+   <g id="patch_3">
+    <path d="M 44.454 304.8965 
+L 579.6 304.8965 
+" style="fill: none; stroke: #c3c2b7; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 68.778818 304.8965 
+L 170.603638 304.8965 
+L 170.603638 110.783023 
+L 68.778818 110.783023 
+z
+" clip-path="url(#p4cd57671a0)" style="fill: #2a78d6"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 351.625541 304.8965 
+L 453.450362 304.8965 
+L 453.450362 221.30886 
+L 351.625541 221.30886 
+z
+" clip-path="url(#p4cd57671a0)" style="fill: #2a78d6"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 170.603638 304.8965 
+L 272.428459 304.8965 
+L 272.428459 300.935 
+L 170.603638 300.935 
+z
+" clip-path="url(#p4cd57671a0)" style="fill: #1baf7a"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 453.450362 304.8965 
+L 555.275182 304.8965 
+L 555.275182 284.692852 
+L 453.450362 284.692852 
+z
+" clip-path="url(#p4cd57671a0)" style="fill: #1baf7a"/>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 8px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #52514e" transform="translate(114.131853 99.423023)">4.9</text>
+    <text style="font-size: 8px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #52514e" transform="translate(91.020603 108.967023)">11/15 answered</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 8px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #52514e" transform="translate(394.754826 209.94886)">2.11</text>
+    <text style="font-size: 8px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #52514e" transform="translate(376.091076 219.49286)">7/12 answered</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 8px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #1baf7a" transform="translate(215.956674 289.575)">0.1</text>
+    <text style="font-size: 8px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #1baf7a" transform="translate(192.845424 299.119)">15/15 answered</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 8px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #1baf7a" transform="translate(496.579647 273.332852)">0.51</text>
+    <text style="font-size: 8px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #1baf7a" transform="translate(475.692147 282.876852)">12/12 answered</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 9px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #52514e" x="44.454" y="46.49264" transform="rotate(-0 44.454 46.49264)">claude-sonnet-4-6, 21 days synthetic CGM/patient, LLM-CGM tasks. Hand-verified (auto-scorer is a floor).</text>
+   </g>
+   <g id="text_16">
+    <text style="font-weight: 700; font-size: 12.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #0b0b0b" transform="translate(44.454 23.16875)">Multi-patient hardening: dexta stays near-exact across patient profiles</text>
+    <text style="font-weight: 700; font-size: 12.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; fill: #0b0b0b" transform="translate(44.454 38.43125)"/>
+   </g>
+   <g id="legend_1">
+    <g id="patch_8">
+     <path d="M 414.296719 73.09925 
+L 432.296719 73.09925 
+L 432.296719 66.79925 
+L 414.296719 66.79925 
+z
+" style="fill: #2a78d6"/>
+    </g>
+    <g id="text_17">
+     <text style="font-size: 9px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #52514e" x="439.496719" y="73.09925" transform="rotate(-0 439.496719 73.09925)">plain model (raw CSV in-context)</text>
+    </g>
+    <g id="patch_9">
+     <path d="M 414.296719 88.08425 
+L 432.296719 88.08425 
+L 432.296719 81.78425 
+L 414.296719 81.78425 
+z
+" style="fill: #1baf7a"/>
+    </g>
+    <g id="text_18">
+     <text style="font-size: 9px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #52514e" x="439.496719" y="88.08425" transform="rotate(-0 439.496719 88.08425)">dexta harness (tools + rails)</text>
+    </g>
+   </g>
+  </g>
+  <g id="text_19">
+   <text style="font-size: 7.5px; font-family: 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #898781" x="7.0848" y="355.68" transform="rotate(-0 7.0848 355.68)">2 of 5 patients completed before an API credit limit; P3-P5 are built and re-runnable via --resume. Plain truncates several questions unanswered.</text>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p4cd57671a0">
+   <rect x="44.454" y="56.43125" width="535.146" height="248.46525"/>
+  </clipPath>
+ </defs>
+</svg>
