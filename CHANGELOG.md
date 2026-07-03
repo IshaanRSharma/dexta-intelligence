@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Provenance layer on the faithfulness guard: a deterministic metric ontology
+  (`guard/metrics.py`) binds evidence numbers to the metric they describe, and
+  an opt-in provenance pass catches "right number, wrong metric" citations
+  (the standard deviation presented as the coefficient of variation), the
+  exact failure LLM-CGM measured in code-execution agents. Wired into the
+  chat answer surface; all other audit callers unchanged (ISSUES #13).
 - Nightscout API v3 support with v1 fallback: the connector prefers the
   secured `/api/v3/*` interface (JWT bearer token minted from the configured
   access token) and falls back to the legacy v1 query API on older servers.

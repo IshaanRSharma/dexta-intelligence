@@ -16,7 +16,7 @@ from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents.reason import ReasoningResult, run_reasoning_loop
 from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.trace import TraceLine, render_trace
-from dexta_intelligence.guard.faithfulness import Violation, audit
+from dexta_intelligence.guard.faithfulness import ProvenanceViolation, Violation, audit
 from dexta_intelligence.guard.treatment_gate import (
     NO_TREATMENT_DISCLAIMER,
     SAFE_SENTENCE,
@@ -104,10 +104,16 @@ def _finish(
             fallback, tools_used, faithful=True, stopped_reason=result.stopped_reason, trace=trace
         )
 
-    report = audit(result.answer, result.evidence)
+    report = audit(result.answer, result.evidence, check_provenance=True)
     if not report.ok:
-        logger.warning("chat: %d untraceable number(s) in answer", len(report.violations))
-        violations = tuple(_violation_summary(v) for v in report.violations)
+        logger.warning(
+            "chat: %d untraceable + %d wrong-metric number(s) in answer",
+            len(report.violations), len(report.provenance_violations),
+        )
+        violations = (
+            tuple(_violation_summary(v) for v in report.violations)
+            + tuple(_provenance_summary(v) for v in report.provenance_violations)
+        )
         warned = (
             result.answer + "\n\n⚠️ Some figures above could not be traced to your data - "
             "treat them with caution."
@@ -130,6 +136,11 @@ def _violation_summary(v: Violation) -> str:
     if v.nearest_pool_value is not None:
         return f"{v.number:g} (nearest evidence {v.nearest_pool_value:g})"
     return f"{v.number:g}"
+
+
+def _provenance_summary(v: ProvenanceViolation) -> str:
+    """Short UI string for a wrong-metric citation."""
+    return f"{v.number:g} cited as {v.claimed_metric} but matches {v.matched_metric}"
 
 
 def _apply_gate(  # noqa: PLR0911 - one return per gate outcome

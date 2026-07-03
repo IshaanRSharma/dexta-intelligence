@@ -18,6 +18,14 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
   Highest-ROI verification hardening; upgrades the safety claim from "we flag
   fabricated numbers" to "we verify every number is computed and cited
   correctly."
+  LARGELY RESOLVED (2026-07-03): `guard/metrics.py` adds a deterministic
+  metric ontology (evidence keys + prose aliases per metric), and the guard's
+  new opt-in provenance pass (`check_provenance=True`, wired into the chat
+  answer surface) fires only when a sentence names a metric we hold, the
+  number mismatches it, and matches a different held metric. SD-cited-as-CV
+  is now caught and surfaced. Remaining: thread ProvenanceViolation into
+  trace.py, extend the ontology beyond the core metric set, and the #14
+  episode layer.
 - **#14** Structured domain-context layer (2026-07-03, same study): LLM-CGM's
   top future-work ask is injected domain definitions and analysis conventions
   (CV is not SD, in-range is 70-180, "today" is the last data day). dexta
