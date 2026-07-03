@@ -104,6 +104,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The reports page no longer makes synchronous PubMed calls on load.
 - Stream errors and the storage panel no longer expose internal detail (DB path,
   database credentials) to the client.
+- PostgresStore no longer closes its connection after the first write. It used
+  `with self._conn:` for per-operation transactions (psycopg2 semantics), but in
+  psycopg 3 that context manager closes the connection on exit, so every call
+  after `migrate()` failed with "the connection is closed". Switched to
+  `self._conn.transaction()`, which commits/rolls back without closing.
 
 ## [0.1.0]
 

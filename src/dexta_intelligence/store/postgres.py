@@ -451,7 +451,7 @@ class PostgresStore:
 
     def migrate(self) -> None:
         """Create or upgrade the schema. Idempotent (IF NOT EXISTS throughout)."""
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(_SCHEMA)
             # Additive column upgrades for DBs created before these columns existed.
             cur.execute(
@@ -483,7 +483,7 @@ class PostgresStore:
             (e.source, e.source_id, _to_utc(e.source_ts), self._jsonb(e.payload))
             for e in events
         ]
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.executemany(
                 "INSERT INTO raw_events (source, source_id, source_ts, payload) "
                 "VALUES (%s, %s, %s, %s) ON CONFLICT (source, source_id) DO NOTHING",
@@ -498,7 +498,7 @@ class PostgresStore:
             (e.source, e.source_id, _to_utc(e.source_ts), self._jsonb(e.payload))
             for e in events
         ]
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.executemany(
                 "INSERT INTO raw_events (source, source_id, source_ts, payload) "
                 "VALUES (%s, %s, %s, %s) ON CONFLICT (source, source_id) DO UPDATE SET "
@@ -860,7 +860,7 @@ class PostgresStore:
             for r in rollups
         ]
         before = self._count("rollups")
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.executemany(
                 "INSERT INTO rollups (period, period_start, n, mean, sd, cv, tir, tar, tar2, "
                 "tbr, tbr2, gmi, excursion_count, bolus_units, basal_units, carbs_g) "
@@ -913,7 +913,7 @@ class PostgresStore:
     def insert_finding(self, finding: Finding) -> int:
         """Persist a finding with a freshly assigned id (any incoming id is ignored)."""
         last_verified = finding.last_verified or datetime.now(tz=UTC)
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO findings (agent, kind, scope, headline, body_md, evidence, stats, "
                 "confidence, status, skeptic_notes, window_start, window_end, superseded_by, "
@@ -942,14 +942,14 @@ class PostgresStore:
         return int(row[0])
 
     def supersede_finding(self, old_id: int, new_id: int) -> None:
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(
                 "UPDATE findings SET status = %s, superseded_by = %s WHERE id = %s",
                 (FindingStatus.SUPERSEDED.value, new_id, old_id),
             )
 
     def set_finding_status(self, finding_id: int, status: FindingStatus) -> None:
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(
                 "UPDATE findings SET status = %s WHERE id = %s", (status.value, finding_id)
             )
@@ -1008,7 +1008,7 @@ class PostgresStore:
 
     def insert_hypothesis(self, hypothesis: Hypothesis) -> int:
         """Persist a hypothesis with a freshly assigned id (any incoming id is ignored)."""
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO hypotheses (statement, status, source_finding_id, tests) "
                 "VALUES (%s, %s, %s, %s) RETURNING id",
@@ -1051,7 +1051,7 @@ class PostgresStore:
     # ── goals ────────────────────────────────────────────────────────────────
 
     def insert_goal(self, goal: Goal) -> int:
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO goals "
                 "(statement, metric, direction, target, tools, cadence_days, status, created_at) "
@@ -1087,11 +1087,11 @@ class PostgresStore:
         return [_row_to_goal(r) for r in fetched]
 
     def set_goal_status(self, goal_id: int, status: GoalStatus) -> None:
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute("UPDATE goals SET status = %s WHERE id = %s", (status.value, goal_id))
 
     def insert_goal_checkpoint(self, checkpoint: GoalCheckpoint) -> int:
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO goal_checkpoints (goal_id, ts, metric_value, note) "
                 "VALUES (%s, %s, %s, %s) RETURNING id",
@@ -1124,7 +1124,7 @@ class PostgresStore:
     # ── chat history ─────────────────────────────────────────────────────────
 
     def append_chat_turn(self, turn: ChatTurn) -> int:
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO chat_turns (session_id, role, content, ts) "
                 "VALUES (%s, %s, %s, %s) RETURNING id",
@@ -1174,7 +1174,7 @@ class PostgresStore:
         ]
 
     def delete_chat_session(self, session_id: str) -> int:
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute("DELETE FROM chat_turns WHERE session_id = %s", (session_id,))
             deleted = cur.rowcount
         return int(deleted)
@@ -1182,7 +1182,7 @@ class PostgresStore:
     # ── investigation runs ─────────────────────────────────────────────────────
 
     def insert_investigation_run(self, run: InvestigationRun) -> int:
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO investigation_runs "
                 "(run_id, kind, status, question, window_start, window_end, plan, trace, "
@@ -1234,7 +1234,7 @@ class PostgresStore:
     # ── open investigations ─────────────────────────────────────────────────────
 
     def insert_open_investigation(self, inv: OpenInvestigation) -> int:
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO open_investigations "
                 "(question, condition_type, subject, target, current, status, "
@@ -1277,7 +1277,7 @@ class PostgresStore:
         status: str,
         promoted_run_id: str | None = None,
     ) -> None:
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(
                 "UPDATE open_investigations "
                 "SET current = %s, status = %s, promoted_run_id = %s WHERE id = %s",
@@ -1287,7 +1287,7 @@ class PostgresStore:
     # ── manual context ───────────────────────────────────────────────────────
 
     def add_manual_event(self, event: ManualEvent) -> int:
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO manual_events "
                 "(event_type, event_ts, end_ts, title, description, tags, intensity, "
@@ -1321,7 +1321,7 @@ class PostgresStore:
     # ── therapy profile versions ─────────────────────────────────────────────
 
     def add_profile_version(self, profile: TherapyProfile) -> int:
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_THERAPY_PROFILE_COLUMNS} FROM therapy_profiles "
                 "ORDER BY active_from DESC, id DESC LIMIT 1"
@@ -1377,7 +1377,7 @@ class PostgresStore:
         """Run a batched conflict-ignoring insert; return the number of new rows."""
         if not rows:
             return 0
-        with self._conn, self._conn.cursor() as cur:
+        with self._conn.transaction(), self._conn.cursor() as cur:
             cur.executemany(sql, rows)
             inserted = cur.rowcount
         return int(inserted)
