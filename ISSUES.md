@@ -40,8 +40,11 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
   (per-kind reach windows), thresholds aligned to the LLM-CGM ground-truth
   definitions, and `summarize()` emitting ontology-aligned keys. Validated
   against the P1 bench ground truth (65 hypo episodes, 25 clinically
-  significant). Remaining: wire `summarize()` into the faithfulness guard as
-  episode-scoped evidence, thread episodes into trace.py, and the broader
+  significant). Episodes are now addressable (stable ids, `EpisodeGraph.node`
+  / `.at` traversal) and on the reasoning belt as two tools: `episodes` and
+  `explain_episode` (by id or timestamp, returning the node with its typed
+  context edges, numbers fed to the faithfulness evidence pool). Remaining:
+  thread episodes and ProvenanceViolation into trace.py, and the broader
   definitions layer both agent and guard consult.
 - **#11** Tandem connector targets the retired backend (2026-07-02, ecosystem
   survey): `connectors/tandem.py` documents and delegates to tconnectsync

@@ -297,6 +297,14 @@ class DiscoveryToolkit:
             return self._daily_full
         return {d: v for d, v in self._daily_full.items() if lo <= d <= hi}
 
+    def active_window(self) -> tuple[datetime, datetime]:
+        """The active sub-window (UTC) the episode-graph tools segment over."""
+        return (self._active_start, self._active_end)
+
+    def target_range(self) -> tuple[int, int]:
+        """The (low, high) in-range thresholds this toolkit was built with."""
+        return self._target
+
     def _active_glucose(self) -> tuple[list[datetime], list[float]]:
         """(timestamps, values) sliced to the active sub-window via bisect."""
         lo = bisect.bisect_left(self._glucose_ts, self._active_start)

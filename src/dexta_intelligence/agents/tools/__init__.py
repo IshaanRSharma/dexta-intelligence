@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from dexta_intelligence.agents.tools.compare import compare_specs
+from dexta_intelligence.agents.tools.episodes import episode_specs
 from dexta_intelligence.agents.tools.glucose import glucose_specs
 from dexta_intelligence.agents.tools.literature import literature_specs
 from dexta_intelligence.agents.tools.manual import manual_specs
@@ -42,6 +43,7 @@ def build_belt(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
     specs = [
         *recall_specs(ctx),
         *glucose_specs(ctx, toolkit),
+        *episode_specs(ctx, toolkit),
         *compare_specs(toolkit),
         *treatment_specs(toolkit),
         *similar_specs(toolkit),

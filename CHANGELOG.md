@@ -13,7 +13,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   activity, and sleep around each episode. Deterministic, model-free, aligned
   to the LLM-CGM ground-truth definitions; `summarize()` emits ontology-keyed
   rollups ready for the faithfulness guard (ISSUES #14). Plus a timeline
-  renderer in `bench/render_episodes.py`.
+  renderer in `bench/render_episodes.py`. Episodes carry stable ids and are
+  exposed on the agent belt as two tools: `episodes` (all nodes plus rollups)
+  and `explain_episode` (traverse one node's context edges by id or
+  timestamp), so the model reasons over the graph instead of re-deriving
+  segmentation per question.
 - Provenance layer on the faithfulness guard: a deterministic metric ontology
   (`guard/metrics.py`) binds evidence numbers to the metric they describe, and
   an opt-in provenance pass catches "right number, wrong metric" citations

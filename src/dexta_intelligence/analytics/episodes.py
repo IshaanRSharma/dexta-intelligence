@@ -35,6 +35,8 @@ __all__ = [
     "CLINICAL_MIN_MINUTES",
     "ContextLink",
     "Episode",
+    "EpisodeGraph",
+    "build_graph",
     "detect_episodes",
     "summarize",
 ]
@@ -80,8 +82,14 @@ class ContextLink:
 
 @dataclass(frozen=True, slots=True)
 class Episode:
-    """One contiguous glycemic excursion or sensor gap, with its context edges."""
+    """One contiguous glycemic excursion or sensor gap, with its context edges.
 
+    ``id`` is a stable, human-legible node handle (``hyper:2025-01-16T03:10:00+00:00``)
+    so the graph is addressable: an agent can name an episode and traverse to the
+    context around it rather than re-deriving it from a trace.
+    """
+
+    id: str
     kind: str  # "hypo" | "hyper" | "sensor_gap"
     start: datetime
     end: datetime
@@ -95,13 +103,18 @@ class Episode:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "kind": self.kind, "start": self.start.isoformat(), "end": self.end.isoformat(),
-            "duration_min": self.duration_min, "n_readings": self.n_readings,
-            "severe": self.severe, "clinically_significant": self.clinically_significant,
+            "id": self.id, "kind": self.kind, "start": self.start.isoformat(),
+            "end": self.end.isoformat(), "duration_min": self.duration_min,
+            "n_readings": self.n_readings, "severe": self.severe,
+            "clinically_significant": self.clinically_significant,
             "extreme_mg_dl": self.extreme_mg_dl,
             "extreme_ts": self.extreme_ts.isoformat() if self.extreme_ts else None,
             "links": [link.to_dict() for link in self.links],
         }
+
+
+def _episode_id(kind: str, start: datetime) -> str:
+    return f"{kind}:{start.isoformat()}"
 
 
 def _minutes(a: datetime, b: datetime) -> float:
@@ -128,8 +141,8 @@ def _excursions(
             ext_ts, ext = max(run, key=lambda r: r[1])
             severe = ext > SEVERE_HIGH
         episodes.append(Episode(
-            kind=run_kind, start=start, end=end, duration_min=round(dur, 1),
-            n_readings=len(run), severe=severe,
+            id=_episode_id(run_kind, start), kind=run_kind, start=start, end=end,
+            duration_min=round(dur, 1), n_readings=len(run), severe=severe,
             clinically_significant=dur >= CLINICAL_MIN_MINUTES,
             extreme_mg_dl=float(ext), extreme_ts=ext_ts,
         ))
@@ -152,9 +165,9 @@ def _sensor_gaps(readings: list[tuple[datetime, int]], gap_min: float) -> list[E
         dur = _minutes(t1, t0)
         if dur > gap_min:
             gaps.append(Episode(
-                kind="sensor_gap", start=t0, end=t1, duration_min=round(dur, 1),
-                n_readings=0, severe=False, clinically_significant=False,
-                extreme_mg_dl=None, extreme_ts=None,
+                id=_episode_id("sensor_gap", t0), kind="sensor_gap", start=t0, end=t1,
+                duration_min=round(dur, 1), n_readings=0, severe=False,
+                clinically_significant=False, extreme_mg_dl=None, extreme_ts=None,
             ))
     return gaps
 
@@ -204,8 +217,8 @@ def _attach_context(episodes: list[Episode], store: StoragePort,
                 links.append(_link(ep, "sleep", s.ts_start, {"score": s.score}))
         links.sort(key=lambda link: link.offset_min)
         out.append(Episode(
-            kind=ep.kind, start=ep.start, end=ep.end, duration_min=ep.duration_min,
-            n_readings=ep.n_readings, severe=ep.severe,
+            id=ep.id, kind=ep.kind, start=ep.start, end=ep.end,
+            duration_min=ep.duration_min, n_readings=ep.n_readings, severe=ep.severe,
             clinically_significant=ep.clinically_significant,
             extreme_mg_dl=ep.extreme_mg_dl, extreme_ts=ep.extreme_ts, links=tuple(links),
         ))
@@ -231,6 +244,51 @@ def detect_episodes(
     episodes += _sensor_gaps(readings, gap_min)
     episodes.sort(key=lambda e: e.start)
     return episodes
+
+
+@dataclass(frozen=True, slots=True)
+class EpisodeGraph:
+    """An addressable, traversable view over a window's episodes.
+
+    Nodes are :class:`Episode` objects keyed by ``id``; edges are their
+    :class:`ContextLink`\\ s. ``node`` and ``at`` are the two entry points an agent
+    uses: name a node, or find the one covering a moment, then read its edges.
+    """
+
+    episodes: tuple[Episode, ...]
+
+    def node(self, episode_id: str) -> Episode | None:
+        return next((e for e in self.episodes if e.id == episode_id), None)
+
+    def at(self, ts: datetime) -> Episode | None:
+        """The excursion covering ``ts``, else the nearest excursion by start time.
+
+        Reverse traversal: from a moment (or a context event's time) to the episode
+        it belongs to. Sensor gaps are skipped; they are not excursions to explain.
+        """
+        excursions = [e for e in self.episodes if e.kind != "sensor_gap"]
+        covering = [e for e in excursions if e.start <= ts <= e.end]
+        if covering:
+            return covering[0]
+        return min(excursions, key=lambda e: abs(_minutes(e.start, ts)), default=None)
+
+    def summary(self) -> dict[str, Any]:
+        return summarize(list(self.episodes))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"summary": self.summary(), "nodes": [e.to_dict() for e in self.episodes]}
+
+
+def build_graph(
+    store: StoragePort, start: datetime, end: datetime, *,
+    target_low: int = TARGET_LOW, target_high: int = TARGET_HIGH,
+    gap_min: float = GAP_MIN_MINUTES,
+) -> EpisodeGraph:
+    """Detect episodes over ``[start, end]`` and wrap them as a traversable graph."""
+    episodes = detect_episodes(
+        store, start, end, target_low=target_low, target_high=target_high, gap_min=gap_min
+    )
+    return EpisodeGraph(episodes=tuple(episodes))
 
 
 def summarize(episodes: list[Episode]) -> dict[str, Any]:

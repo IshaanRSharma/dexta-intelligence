@@ -11,7 +11,18 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 
-from dexta_intelligence.analytics.episodes import Episode, detect_episodes, summarize
+from dexta_intelligence.agents.base import AgentContext
+from dexta_intelligence.agents.tools import build_belt
+from dexta_intelligence.agents.tools.episodes import episode_specs
+from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit
+from dexta_intelligence.analytics.episodes import (
+    Episode,
+    EpisodeGraph,
+    build_graph,
+    detect_episodes,
+    summarize,
+)
+from dexta_intelligence.coldstart import ColdStartReport
 from dexta_intelligence.models import (
     ActivityEvent,
     GlucoseEvent,
@@ -205,3 +216,95 @@ def test_to_dict_is_json_serializable() -> None:
     )
     payload = [e.to_dict() for e in _detect(store)]
     assert json.loads(json.dumps(payload))
+
+
+# ── addressable graph ─────────────────────────────────────────────────────────
+
+
+def _graph(store: SQLiteStore) -> EpisodeGraph:
+    return build_graph(store, _ts(-500), _ts(100000))
+
+
+def test_episode_ids_are_stable_and_unique() -> None:
+    store = _store([(0, 200), (5, 220), (10, 120), (15, 60), (20, 50), (25, 120)])
+    a = [e.id for e in _graph(store).episodes]
+    b = [e.id for e in _graph(store).episodes]
+    assert a == b  # stable
+    assert len(a) == len(set(a))  # unique
+    assert all(":" in eid for eid in a)
+
+
+def test_graph_node_lookup() -> None:
+    graph = _graph(_store([(0, 200), (5, 220), (10, 120)]))
+    target = graph.episodes[0]
+    assert graph.node(target.id) is target
+    assert graph.node("missing:2025-01-06T00:00:00+00:00") is None
+
+
+def test_graph_at_covering_and_nearest() -> None:
+    store = _store([(0, 200), (5, 220), (10, 120), (60, 60), (65, 55), (70, 120)])
+    graph = _graph(store)
+    covering = graph.at(_ts(5))
+    assert covering is not None and covering.kind == "hyper"
+    # a moment between episodes resolves to the nearest excursion, never a gap
+    near = graph.at(_ts(40))
+    assert near is not None and near.kind != "sensor_gap"
+
+
+# ── belt tools: query and traverse ────────────────────────────────────────────
+
+
+def _ctx_toolkit(store: SQLiteStore) -> tuple[AgentContext, DiscoveryToolkit]:
+    cov = store.coverage()
+    assert cov.first_ts is not None and cov.last_ts is not None
+    ctx = AgentContext(
+        store=store, window=(cov.first_ts.date(), cov.last_ts.date()),
+        gates=ColdStartReport.from_coverage(cov), run_id="test", timezone="UTC",
+    )
+    return ctx, DiscoveryToolkit(ctx, target_low=70, target_high=180)
+
+
+def test_episodes_tool_lists_nodes_and_summary() -> None:
+    store = _store([(0, 200), (5, 220), (10, 120), (15, 60), (20, 50), (25, 120)])
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    result, numbers = specs["episodes"].fn({"kind": "hyper"})
+    assert result["summary"]["num_hyper"] == 1
+    assert len(result["episodes"]) == 1
+    assert result["episodes"][0]["kind"] == "hyper"
+    assert numbers["num_hyper"] == 1  # numbers surface to the faithfulness guard
+
+
+def test_explain_episode_traverses_to_context() -> None:
+    meals = [MealEvent(ts=_ts(-20), carbs_g=45.0, note="breakfast")]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals)
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    node_id = specs["episodes"].fn({})[0]["episodes"][0]["id"]
+    result, numbers = specs["explain_episode"].fn({"episode_id": node_id})
+    meal_edges = [link for link in result["links"] if link["kind"] == "meal"]
+    assert meal_edges and meal_edges[0]["detail"]["carbs_g"] == 45.0
+    assert numbers["meal_carbs_g"] == 45.0
+
+
+def test_explain_episode_by_timestamp() -> None:
+    store = _store([(0, 200), (5, 220), (10, 120)])
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    result, _ = specs["explain_episode"].fn({"timestamp": _ts(5).isoformat()})
+    assert result["kind"] == "hyper"
+
+
+def test_explain_episode_unknown_id_errors() -> None:
+    store = _store([(0, 200), (5, 220), (10, 120)])
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    result, _ = specs["explain_episode"].fn({"episode_id": "nope"})
+    assert "error" in result
+
+
+def test_episode_tools_registered_on_belt() -> None:
+    store = _store([(0, 200), (5, 220), (10, 120)])
+    ctx, tk = _ctx_toolkit(store)
+    names = {s.name for s in build_belt(ctx, tk)}
+    assert {"episodes", "explain_episode"} <= names
