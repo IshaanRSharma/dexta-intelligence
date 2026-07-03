@@ -86,6 +86,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The `/reports` page renders without a network call; literature citations are
   deferred to a cached `/reports/citations` fragment loaded after first paint.
 - The agent tool belt now lives in the `agents/tools/` package.
+- The oref insulin-curve math is memoized and skips fully-decayed doses. The
+  exponential IOB/activity/constant functions are pure over a handful of
+  integer-minute arguments, so they are `lru_cache`d, and `insulin_totals` now
+  skips doses past DIA (which contribute exactly zero). Results are byte-for-byte
+  unchanged; curve evaluations on the 90-day reconciliation drop from ~4.7M to
+  ~700k.
 
 ### Removed
 
