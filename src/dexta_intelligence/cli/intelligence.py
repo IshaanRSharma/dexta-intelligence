@@ -37,7 +37,7 @@ def cmd_ask(
     model: Any = None,
     seek: bool = False,
 ) -> int:
-    """Answer a question: the router picks the tool family, the loop reasons.
+    """Answer a question with the orchestrator's reasoning loop.
 
     Default uses the orchestrator: the model decides the approach (a whole
     investigation workflow, granular tools, or a chain) over the full belt.

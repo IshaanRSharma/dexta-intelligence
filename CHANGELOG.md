@@ -7,6 +7,27 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Nightscout API v3 support with v1 fallback: the connector prefers the
+  secured `/api/v3/*` interface (JWT bearer token minted from the configured
+  access token) and falls back to the legacy v1 query API on older servers.
+  The dialect is detected once per connector instance; v3 documents are
+  normalized to the exact v1 event shape, so downstream code is unchanged
+  (ISSUES #12).
+- Tandem connector retargeted at the Tandem Source API: docstrings and
+  user-facing strings updated, a runtime guard requires tconnectsync >= 2 (v1
+  spoke to the retired t:connect cloud), and the `[tandem]` extra now pins
+  `tconnectsync>=2.0`. Live-account verification still open (ISSUES #11).
+
+- External benchmark run in `bench/`: dexta vs the same model with the raw data
+  in-context, on LLM-CGM (Healey & Kohane, PSB 2025). Head-to-head scripts, raw
+  per-question dumps, hand-verified writeups, and the error figure. Mean absolute
+  error ~100x lower through the harness on the exactness-scored questions.
+- Two agent tools: `find_lows` (discrete hypoglycemia episodes with nadir,
+  duration, and clinical significance) and `glucose_extremes` (timestamp, local
+  time, and period of the single highest/lowest reading).
+- Question-type-aware treatment gate: for a lows question, insulin-on-board
+  evidence is the hard requirement and missing carb data becomes an appended
+  caveat instead of muting the answer. The spike path is unchanged.
 
 - Deliberate synthesis pass: a finished investigation now produces a grounded
   synthesis (the leading explanation, the alternatives ruled out, the supporting
@@ -56,17 +77,44 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- One brain answers the chat box: the no-JS `POST /api/ask` fallback now runs
+  the same traced, railed orchestrator as the streaming path instead of the
+  simpler ChatAgent, and surfaces the same faithfulness note.
+- The belief-layer reasoning scaffold now defaults off; a real-model on/off A/B
+  showed no answer-quality gain on a capable model. The `use_belief` flag stays
+  for ablation.
 - The `/reports` page renders without a network call; literature citations are
   deferred to a cached `/reports/citations` fragment loaded after first paint.
 - The agent tool belt now lives in the `agents/tools/` package.
+- The oref insulin-curve math is memoized and skips fully-decayed doses. The
+  exponential IOB/activity/constant functions are pure over a handful of
+  integer-minute arguments, so they are `lru_cache`d, and `insulin_totals` now
+  skips doses past DIA (which contribute exactly zero). Results are byte-for-byte
+  unchanged; curve evaluations on the 90-day reconciliation drop from ~4.7M to
+  ~700k.
+
+### Removed
+
+- The superseded keyword `RouterAgent` and its prompt files: the orchestrator
+  has been the only ask engine in practice, and the claimed no-model fallback
+  role did not exist in code. Also removed dead server and CLI accessors
+  (`panel_by_key`, `trace_icon_for_text`, `get_registry`) and an unreferenced
+  template.
 
 ### Fixed
 
+- Faithfulness guard: comma-grouped numbers (`25,920`) no longer split into two
+  claims, removing the main source of false grounding warnings.
 - The project resolves with `uv lock` again: the `carelink` extra no longer pins
   a package that is not published on PyPI.
 - The reports page no longer makes synchronous PubMed calls on load.
 - Stream errors and the storage panel no longer expose internal detail (DB path,
   database credentials) to the client.
+- PostgresStore no longer closes its connection after the first write. It used
+  `with self._conn:` for per-operation transactions (psycopg2 semantics), but in
+  psycopg 3 that context manager closes the connection on exit, so every call
+  after `migrate()` failed with "the connection is closed". Switched to
+  `self._conn.transaction()`, which commits/rolls back without closing.
 
 ## [0.1.0]
 

@@ -17,7 +17,6 @@ from dexta_intelligence.cli._common import logger as logger
 from dexta_intelligence.cli._common import open_sqlite_store as open_sqlite_store
 from dexta_intelligence.cli._common import resolve_config_path as resolve_config_path
 from dexta_intelligence.cli.analysis import cmd_analyze as cmd_analyze
-from dexta_intelligence.cli.analysis import get_registry as get_registry
 from dexta_intelligence.cli.data import cmd_doctor as cmd_doctor
 from dexta_intelligence.cli.data import cmd_init as cmd_init
 from dexta_intelligence.cli.data import cmd_sync as cmd_sync

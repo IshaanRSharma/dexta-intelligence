@@ -11,3 +11,4 @@ dist/
 .env 
 docs/
 .claude/.claude/settings.local.json
+bench/*.log

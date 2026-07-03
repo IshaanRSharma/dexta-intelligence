@@ -54,9 +54,10 @@ harness where the LLM is the navigator, never the source of truth**:
 - **Visible reasoning.** Every serious answer carries a plan, a tool-by-tool
   trace, the evidence, and what could not be checked. The agentic work is
   inspectable, not a black box.
-- **Agent interop.** The same tools are exposed over an MCP server, so any agent
-  (Gemini, Copilot, Claude) can query the data with the rails enforced
-  server-side.
+- **Agent interop.** The same read-only data tools are exposed over an MCP server,
+  so any agent (Gemini, Copilot, Claude) can pull this patient's data, each result
+  carrying a no-dosing disclaimer. The faithfulness and treatment rails govern
+  dexta's own answers; over MCP, dexta is the trustworthy read-only data layer.
 - **Bring your own model, on-device if you want.** Anthropic, OpenAI, Google
   Gemini, OpenRouter, local Ollama, or a local llama.cpp file. The harness is
   model-agnostic; the rigor and rails do not depend on which model is used.

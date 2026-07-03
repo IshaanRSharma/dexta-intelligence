@@ -4,15 +4,19 @@
 <div class="trace-timeline">
   {% for e in entries %}
   <div class="trace-item trace-{{ e.icon|default('scope') }}">
-    <span class="trace-icon">{{ e.glyph|default('•') }}</span>
+    <span class="trace-dot trace-dot-{{ e.icon|default('scope') }}" aria-hidden="true"></span>
     <span class="trace-text">{{ e.text }}</span>
   </div>
   {% endfor %}
   {% if violations %}
   <div class="trace-guard-row">
-    {% for v in violations %}
-    <span class="trace-guard-chip">claim rejected: not traceable · {{ v }}</span>
-    {% endfor %}
+    <span class="trace-guard-chip">
+      {% if violations|length == 1 %}
+      One figure could not be traced to tool data.
+      {% else %}
+      {{ violations|length }} figures could not be fully traced to tool data.
+      {% endif %}
+    </span>
   </div>
   {% endif %}
 </div>

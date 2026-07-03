@@ -149,3 +149,11 @@ def test_use_belief_false_drops_the_reasoning_scaffold() -> None:
     assert "update_belief" not in model.seen_tools
     assert "request_context" not in model.seen_tools
     assert answer.synthesis is None
+
+
+def test_belief_scaffold_is_off_by_default() -> None:
+    model = _FakeToolModel(["All looks steady."])
+    answer = OrchestratorAgent(model=model).ask(_ctx("late_bolus"), "how am I?")
+    assert "update_belief" not in model.seen_tools
+    assert "request_context" not in model.seen_tools
+    assert answer.synthesis is None

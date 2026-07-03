@@ -150,7 +150,8 @@ def test_orchestrator_attaches_synthesis_to_a_faithful_answer() -> None:
         }
     ]
     model = _FakeToolModel([update, "Your mornings look steady overall."])
-    answer = OrchestratorAgent(model=model).ask(_ctx(), "how am I doing this month?")
+    agent = OrchestratorAgent(model=model, use_belief=True)
+    answer = agent.ask(_ctx(), "how am I doing this month?")
     assert answer.synthesis is not None
     assert answer.synthesis.leading == "late bolus"
     assert answer.synthesis.confidence == 0.8
@@ -159,14 +160,16 @@ def test_orchestrator_attaches_synthesis_to_a_faithful_answer() -> None:
 def test_no_synthesis_when_the_answer_is_not_a_clean_conclusion() -> None:
     # model errors out (no tools, empty) -> fallback answer, no synthesis attached.
     model = _FakeToolModel([""])
-    answer = OrchestratorAgent(model=model).ask(_ctx(), "how am I doing this month?")
+    agent = OrchestratorAgent(model=model, use_belief=True)
+    answer = agent.ask(_ctx(), "how am I doing this month?")
     assert answer.synthesis is None
 
 
 def test_no_synthesis_when_the_answer_is_unfaithful() -> None:
     # an answer with an untraceable number is flagged unfaithful; no synthesis attaches.
     model = _FakeToolModel(["Your average was 142 mg/dL this month."])
-    answer = OrchestratorAgent(model=model).ask(_ctx(), "how am I doing this month?")
+    agent = OrchestratorAgent(model=model, use_belief=True)
+    answer = agent.ask(_ctx(), "how am I doing this month?")
     assert answer.faithful is False
     assert answer.synthesis is None
 
@@ -174,6 +177,7 @@ def test_no_synthesis_when_the_answer_is_unfaithful() -> None:
 def test_no_synthesis_when_the_answer_fades_to_safety() -> None:
     # a cause claim with no investigation fades to the safe sentence; nothing to synthesize.
     model = _FakeToolModel(["It was your dinner.", "Still a cause claim, still no tools."])
-    answer = OrchestratorAgent(model=model).ask(_ctx(), "Why did I spike on March 14?")
+    agent = OrchestratorAgent(model=model, use_belief=True)
+    answer = agent.ask(_ctx(), "Why did I spike on March 14?")
     assert answer.text == SAFE_SENTENCE
     assert answer.synthesis is None

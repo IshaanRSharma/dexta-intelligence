@@ -82,13 +82,15 @@
     </div>
 
     {% if r.tool_calls %}
-    <details class="run-section">
-      <summary>Tools called ({{ r.tool_calls|length }})</summary>
+    <details class="run-section run-producers" open>
+      <summary>Producers ({{ r.tool_calls|length }})</summary>
       <ul class="run-tools">
         {% for t in r.tool_calls %}
         <li>
           <span class="step-mark {{ 'step-ok' if t.ok else 'step-bad' if t.ok is false else 'step-pending' }}">{{ '✓' if t.ok else '✗' if t.ok is false else '·' }}</span>
-          <span class="mono">{{ t.name }}</span>{% if t.scope %} <span class="muted small">{{ t.scope }}</span>{% endif %}
+          <span class="mono">{{ t.name }}</span>
+          {% if t.n_findings is not none %}<span class="muted small">{{ t.n_findings }} raw finding(s)</span>{% endif %}
+          {% if t.scope %}<span class="muted small">{{ t.scope }}</span>{% endif %}
         </li>
         {% endfor %}
       </ul>

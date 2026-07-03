@@ -100,6 +100,22 @@ def glucose_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec
         numbers.update(_item_numbers(result.get("spikes", []), "spike"))
         return result, numbers
 
+    def find_lows(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        result = toolkit.find_lows(
+            float(args.get("threshold", 70.0)), int(args.get("top_n", 15))
+        )
+        numbers = _numbers(result, ("threshold", "n_lows", "n_clinically_significant"))
+        numbers.update(_item_numbers(result.get("lows", []), "low"))
+        return result, numbers
+
+    def glucose_extremes(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        result = toolkit.glucose_extremes()
+        numbers: dict[str, Any] = {}
+        for key in ("highest", "lowest"):
+            if isinstance(result.get(key), dict):
+                numbers[f"{key}_mg_dl"] = result[key].get("mg_dl")
+        return result, numbers
+
     return [
         ToolSpec(
             name="coverage",
@@ -206,5 +222,35 @@ def glucose_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec
                 },
             },
             fn=find_spikes,
+        ),
+        ToolSpec(
+            name="find_lows",
+            description=(
+                "Hypoglycemic excursions below threshold (default 70) in the ACTIVE "
+                "window: contiguous low runs with nadir + duration_min + a "
+                "clinically_significant flag (>= 15 min), plus n_lows (total count) and "
+                "n_clinically_significant. The hypo analog of find_spikes - use for 'how "
+                "many times / how long did I go low' instead of estimating from a trace."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "threshold": {"type": "number", "minimum": 40, "maximum": 100},
+                    "top_n": {"type": "integer", "minimum": 1, "maximum": 50},
+                },
+            },
+            fn=find_lows,
+        ),
+        ToolSpec(
+            name="glucose_extremes",
+            description=(
+                "The single highest and lowest reading in the ACTIVE window, each with "
+                "its exact timestamp, local time, and time-of-day period (morning/"
+                "afternoon/evening/night). Use for 'what time was my glucose highest/"
+                "lowest' or 'which period had my highest reading' - the literal extreme "
+                "point, not a band average."
+            ),
+            parameters={"type": "object", "properties": {}},
+            fn=glucose_extremes,
         ),
     ]

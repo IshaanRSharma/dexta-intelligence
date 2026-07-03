@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import math
 from datetime import timedelta
+from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
@@ -141,6 +142,7 @@ class PredictionCurves(NamedTuple):
 # ── insulin activity curves (lib/iob/calculate.js) ───────────────────────────
 
 
+@lru_cache(maxsize=128)
 def exponential_constants(dia_min: float, peak_min: float) -> tuple[float, float, float]:
     """Return ``(tau, a, S)`` for the oref0 exponential insulin curve.
 
@@ -165,6 +167,7 @@ def exponential_constants(dia_min: float, peak_min: float) -> tuple[float, float
     return tau, a, s
 
 
+@lru_cache(maxsize=4096)
 def exponential_activity(minutes_since: float, dia_min: float, peak_min: float) -> float:
     """Fraction of a dose used per minute, ``minutes_since`` minutes after delivery.
 
@@ -182,6 +185,7 @@ def exponential_activity(minutes_since: float, dia_min: float, peak_min: float) 
     return (s / tau**2) * t * (1 - t / dia_min) * math.exp(-t / tau)
 
 
+@lru_cache(maxsize=4096)
 def exponential_iob(minutes_since: float, dia_min: float, peak_min: float) -> float:
     """Fraction of a dose still on board ``minutes_since`` minutes after delivery.
 
@@ -251,6 +255,7 @@ def bilinear_iob(minutes_since: float, dia_min: float) -> float:
 # ── totals over a dose schedule (lib/iob/total.js) ───────────────────────────
 
 
+@lru_cache(maxsize=128)
 def _resolve_curve(curve: str, dia_min: float, peak_min: float | None) -> tuple[str, float, float]:
     """Apply oref0's DIA/peak clamping rules; return ``(curve, dia_min, peak_min)``.
 
@@ -299,6 +304,11 @@ def insulin_totals(
         if units == 0.0 or ts > at:
             continue
         mins_ago = round((at - ts).total_seconds() / 60.0)
+        if mins_ago >= dia:
+            # Fully decayed: both curves return exactly 0 past DIA. Skipping here
+            # keeps the memoized curve functions to their ~DIA distinct integer
+            # minute keys instead of one per (dose, cycle) age.
+            continue
         if curve == "bilinear":
             iob += units * bilinear_iob(mins_ago, dia)
             activity += units * bilinear_activity(mins_ago, dia)

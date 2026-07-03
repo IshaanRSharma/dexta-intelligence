@@ -34,7 +34,7 @@ jobs:
         run: uv sync --all-extras --python ${{ matrix.python-version }}
 
       - name: Ruff (lint + import order)
-        run: uv run ruff check src tests eval
+        run: uv run ruff check src tests eval bench
 
       - name: Mypy (strict)
         run: uv run mypy

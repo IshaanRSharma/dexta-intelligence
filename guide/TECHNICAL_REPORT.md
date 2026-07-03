@@ -131,9 +131,8 @@ every number traces to a tool call, every citation traces to a retrieved article
 
 ## 9. Clinical advisory
 
-The advisory layer adapts the structure of Google's AMIE disease-management work (analyze, set
-goals, produce a schema-constrained plan where every item is grounded) while keeping dexta's
-boundary. The output is a clinician discussion brief: what to review, what to monitor, and what to
+The advisory layer uses a schema-constrained, grounded structure (analyze, set goals, produce a
+plan where every item is grounded) while keeping dexta's boundary. The output is a clinician discussion brief: what to review, what to monitor, and what to
 ask, with each item grounded in the patient's own findings and, where available, a guideline or
 PMID. The treatment gate removes anything imperative. It is decision support for a visit, exportable
 as Markdown, not a treatment recommendation.

@@ -1,4 +1,4 @@
-# UI fix plan — phased execution
+# UI fix plan: phased execution
 
 Ordered by demo ROI and dependency. Each phase is independently shippable; stop after each for a UI review before continuing.
 
@@ -6,7 +6,7 @@ Ordered by demo ROI and dependency. Each phase is independently shippable; stop 
 
 ---
 
-## Phase 1 — Unify investigate (P0)
+## Phase 1: Unify investigate (P0)
 
 **Problem:** Dashboard “Investigate” runs `CoordinatorAgent` (blocking deep sweep). Investigations + Chat run `OrchestratorAgent` (streaming tool trace). Same label, different engines.
 
@@ -28,7 +28,7 @@ Ordered by demo ROI and dependency. Each phase is independently shippable; stop 
 
 ---
 
-## Phase 2 — Consolidate sync (P0)
+## Phase 2: Consolidate sync (P0)
 
 **Problem:** Six sync entry points (dashboard ×2, Connectors ×2, Settings per-source, sidebar copy).
 
@@ -49,7 +49,7 @@ Ordered by demo ROI and dependency. Each phase is independently shippable; stop 
 
 ---
 
-## Phase 3 — Dashboard diet (P0)
+## Phase 3: Dashboard diet (P0)
 
 **Problem:** Seven action-bar CTAs; findings feed uncapped; card markup differs from Findings page.
 
@@ -65,11 +65,11 @@ Ordered by demo ROI and dependency. Each phase is independently shippable; stop 
 - [x] Finding cards match Findings page vocabulary (scope, strength, lifecycle)
 
 **UI review checklist:**
-- First screenful: metrics, chart, 2 buttons, top findings — no action-bar wrap on 1280px
+- First screenful: metrics, chart, 2 buttons, top findings: no action-bar wrap on 1280px
 
 ---
 
-## Phase 4 — Nav tiering (P1)
+## Phase 4: Nav tiering (P1)
 
 **Problem:** Nine flat nav tabs; orphan pages (Log, Context, Wiki, Reconciliation, Evals).
 
@@ -90,7 +90,7 @@ Ordered by demo ROI and dependency. Each phase is independently shippable; stop 
 
 ---
 
-## Phase 5 — Trace + cards consistency (P1)
+## Phase 5: Trace + cards consistency (P1)
 
 **Problem:** Live streams have timeline; persisted investigation runs use plain `<ol>`. Faithfulness chips only on stream answer.
 
@@ -104,11 +104,11 @@ Ordered by demo ROI and dependency. Each phase is independently shippable; stop 
 - [x] No regression on investigate.js streaming
 
 **UI review checklist:**
-- Run an investigation, refresh page — trace styling matches live run
+- Run an investigation, refresh page: trace styling matches live run
 
 ---
 
-## Phase 6 — Performance (P2)
+## Phase 6: Performance (P2)
 
 **Problem:** `coverage()` on every page for status pill; reconciliation agent on GET; unbounded findings fetch.
 
@@ -128,7 +128,7 @@ Ordered by demo ROI and dependency. Each phase is independently shippable; stop 
 
 ---
 
-## Phase 7 — Goals + context polish (P2)
+## Phase 7: Goals + context polish (P2)
 
 **Deliverables:**
 1. Dashboard sidebar strip: active goals count + link to Goals; next check if due.

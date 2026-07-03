@@ -155,8 +155,8 @@ def test_persisted_question_run_renders_answer_and_tools(
     client.get("/api/investigate/stream?q=worst high")
     body = client.get("/investigations").text
     assert "late bolus" in body
-    assert "find_spikes" in body  # the real tool, not a producer name
-    assert "Tools called" in body
+    assert "find_spikes" in body  # the granular tool, shown in the live trace
+    assert "Producers" in body  # the producer roll-up section (renamed from "Tools called")
     store.close()
 
 

@@ -16,7 +16,7 @@ from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents.reason import ReasoningResult, run_reasoning_loop
 from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.trace import TraceLine, render_trace
-from dexta_intelligence.guard.faithfulness import audit
+from dexta_intelligence.guard.faithfulness import Violation, audit
 from dexta_intelligence.guard.treatment_gate import (
     NO_TREATMENT_DISCLAIMER,
     SAFE_SENTENCE,
@@ -107,7 +107,7 @@ def _finish(
     report = audit(result.answer, result.evidence)
     if not report.ok:
         logger.warning("chat: %d untraceable number(s) in answer", len(report.violations))
-        violations = tuple(str(v) for v in report.violations)
+        violations = tuple(_violation_summary(v) for v in report.violations)
         warned = (
             result.answer + "\n\n⚠️ Some figures above could not be traced to your data - "
             "treat them with caution."
@@ -123,6 +123,13 @@ def _finish(
     return ChatAnswer(
         result.answer, tools_used, faithful=True, stopped_reason=result.stopped_reason, trace=trace
     )
+
+
+def _violation_summary(v: Violation) -> str:
+    """Short UI string, not the debug ``Violation.__str__`` with prose context."""
+    if v.nearest_pool_value is not None:
+        return f"{v.number:g} (nearest evidence {v.nearest_pool_value:g})"
+    return f"{v.number:g}"
 
 
 def _apply_gate(  # noqa: PLR0911 - one return per gate outcome
@@ -152,6 +159,13 @@ def _apply_gate(  # noqa: PLR0911 - one return per gate outcome
             stopped_reason=result.stopped_reason,
         )
     if report.compliant:
+        if report.caveat and report.caveat not in result.answer:
+            return ReasoningResult(
+                answer=f"{result.answer}\n\n{report.caveat}",
+                steps=result.steps,
+                evidence=result.evidence,
+                stopped_reason=result.stopped_reason,
+            )
         return result
     steps = list(result.steps)
     evidence = {f"try0_{k}": v for k, v in result.evidence.items()}

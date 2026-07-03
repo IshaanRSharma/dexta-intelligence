@@ -81,8 +81,8 @@ def _register_insulin(registry: AgentRegistry, config: Config, model: Any) -> No
 def _register_skeptic(registry: AgentRegistry, config: Config, model: Any) -> None:
     from dexta_intelligence.agents import register_skeptic  # noqa: PLC0415
 
-    del config, model
-    register_skeptic(registry)
+    del config
+    register_skeptic(registry, model)
 
 
 # Producer name → register fn. The skeptic lives in SKEPTIC, not here: it is

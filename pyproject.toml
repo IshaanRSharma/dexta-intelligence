@@ -47,7 +47,7 @@ dexcom = ["pydexcom>=0.4"]
 libre = ["pylibrelinkup>=0.10"]
 whoop = ["httpx>=0.27"]
 oura = ["httpx>=0.27"]
-tandem = ["tconnectsync>=1.0"]
+tandem = ["tconnectsync>=2.0"]
 # carelink_client is not on PyPI; install from upstream (the connector's
 # import error has the command). Empty so the project stays resolvable.
 carelink = []
@@ -101,8 +101,8 @@ select = [
   "TCH",  # type-checking imports
 ]
 ignore = [
-  "PLR0913", # too many arguments — protocols and stats functions legitimately take several
-  "PLR2004", # magic values — clinical thresholds are documented inline, not hidden in constants
+  "PLR0913", # too many arguments: protocols and stats functions legitimately take several
+  "PLR2004", # magic values: clinical thresholds are documented inline, not hidden in constants
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -119,7 +119,7 @@ packages = ["dexta_intelligence"]
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-# Optional [llm] extra — lazily imported in llm/factory.py, not installed in
+# Optional [llm] extra, lazily imported in llm/factory.py, not installed in
 # the base dev environment.
 module = ["langchain.*", "langchain_core.*"]
 ignore_missing_imports = true
@@ -130,13 +130,13 @@ module = ["langchain_community.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# Optional [postgres] extra — lazily imported in store/postgres.py, not
+# Optional [postgres] extra, lazily imported in store/postgres.py, not
 # installed in the base dev environment.
 module = ["psycopg", "psycopg.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# Optional [gui] extra — lazily imported in server/ + cli/serve.py, not
+# Optional [gui] extra, lazily imported in server/ + cli/serve.py, not
 # guaranteed in the base dev environment.
 module = ["fastapi", "fastapi.*", "uvicorn", "uvicorn.*"]
 ignore_missing_imports = true

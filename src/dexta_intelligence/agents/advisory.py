@@ -1,8 +1,8 @@
-"""Clinical Advisory - an AMIE-style discussion brief for the clinician.
+"""Clinical Advisory - a schema-constrained, grounded discussion brief for the clinician.
 
-Adopts Google AMIE's disease-management architecture (analyze -> set goals ->
-structured plan, every item grounded, schema-constrained generation) but NOT its
-output class. dexta is patient-facing, so the "plan" is DISCUSSION options for
+Uses a generate-then-ground structure (analyze -> set goals -> structured plan,
+every item grounded, schema-constrained generation), not a treatment-plan output
+class. dexta is patient-facing, so the "plan" is DISCUSSION options for
 the clinician -- what to review, monitor, and ask -- never patient dosing. Two
 groundings make each item defensible: the patient's own findings AND, when a
 literature backend is available, published evidence (PubMed PMIDs). The treatment
@@ -63,7 +63,7 @@ class DiscussionItem(_FrozenModel):
 
 
 class DiscussionBrief(_FrozenModel):
-    """AMIE-shaped output: reasoning (analysis + goals) plus a discussion plan
+    """Schema-constrained output: reasoning (analysis + goals) plus a discussion plan
     (discuss now / monitoring / questions). Discussion support, not dosing."""
 
     question: str | None = None

@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents._json import parse_json
 from dexta_intelligence.agents.base import AgentRegistry
-from dexta_intelligence.agents.skeptic import skeptic_agent
+from dexta_intelligence.agents.skeptic import SkepticAgent
 from dexta_intelligence.agents.tools.toolkit import _recall
 from dexta_intelligence.config import Config
 from dexta_intelligence.models import Finding, FindingStatus, InvestigationRun, RunFinding
@@ -88,12 +88,26 @@ class RunTrace:
         self.emit("coverage", summary)
 
     def producer_done(self, name: str, n_findings: int) -> None:
-        self.tool_calls.append({"producer": name, "n_findings": n_findings})
+        self.tool_calls.append(
+            {"name": name, "producer": name, "n_findings": n_findings, "ok": True}
+        )
         self.emit("producer_done", {"producer": name, "n_findings": n_findings})
 
+    def skip(self, name: str, reasons: list[str]) -> None:
+        self.tool_calls.append(
+            {
+                "name": name,
+                "producer": name,
+                "ok": False,
+                "skip_reason": "; ".join(reasons),
+            }
+        )
+
     def step(self, line: str) -> None:
+        from dexta_intelligence.agents.trace import trace_icon_for_line  # noqa: PLC0415
+
         self.steps.append(line)
-        self.emit("step", {"text": line})
+        self.emit("step", {"text": line, "icon": trace_icon_for_line(line)})
 
 _PLAN_PROMPT = prompts.load("coordinator_plan")
 
@@ -229,14 +243,32 @@ class CoordinatorAgent:
         When ``rec`` streams events, each producer's start and result is emitted
         live so the Investigations page narrates the round as it runs."""
         registry = self._build_registry(names)
-        on_start = on_done = None
+        on_skip: Callable[[str, list[str]], None] = _log_skip
+        on_agent_start: Callable[[str], None] | None = None
+        on_agent_done: Callable[[str, int], None] | None = None
         if rec is not None:
-            on_start = lambda name: rec.emit("running", {"producer": name})  # noqa: E731
-            on_done = rec.producer_done
+
+            def on_skip(name: str, reasons: list[str]) -> None:
+                _log_skip(name, reasons)
+                rec.skip(name, reasons)
+                rec.step(f"{name}: skipped: {'; '.join(reasons)}")
+
+            def on_agent_start(name: str) -> None:
+                rec.emit("running", {"producer": name})
+                rec.step(f"{name}: running")
+
+            def on_agent_done(name: str, n: int) -> None:
+                rec.producer_done(name, n)
+                detail = "no raw findings" if n == 0 else f"{n} raw finding(s)"
+                rec.step(f"{name}: {detail}")
+
         raw = registry.run_all(
-            ctx, on_skip=_log_skip, on_agent_start=on_start, on_agent_done=on_done
+            ctx,
+            on_skip=on_skip,
+            on_agent_start=on_agent_start,
+            on_agent_done=on_agent_done,
         )
-        return skeptic_agent.review(raw, ctx)
+        return SkepticAgent(model=self.model).review(raw, ctx)
 
     # ── plan ─────────────────────────────────────────────────────────────────
 

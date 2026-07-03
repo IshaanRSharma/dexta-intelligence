@@ -138,13 +138,13 @@ def test_seeded_hypotheses_reach_the_model_prompt() -> None:
     ctx = _ctx("late_bolus")
     ctx.store.insert_hypothesis(StoredHypothesis(statement="basal is too low overnight"))
     model = _CapturingModel()
-    OrchestratorAgent(model=model).ask(ctx, "why am I high in the morning?")
+    OrchestratorAgent(model=model, use_belief=True).ask(ctx, "why am I high in the morning?")
     assert "Open hypotheses carried from prior analysis" in model.seen_system
     assert "basal is too low overnight" in model.seen_system
 
 
 def test_no_seed_means_no_carried_section() -> None:
     model = _CapturingModel()
-    OrchestratorAgent(model=model).ask(_ctx("late_bolus"), "how am I doing?")
+    OrchestratorAgent(model=model, use_belief=True).ask(_ctx("late_bolus"), "how am I doing?")
     assert "Open hypotheses carried from prior analysis" not in model.seen_system
     assert "Maintain a working belief state" in model.seen_system

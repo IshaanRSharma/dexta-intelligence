@@ -1207,6 +1207,88 @@ class DiscoveryToolkit:
             out["note"] = f"no readings ≥ {threshold:.0f} in the active window"
         return out
 
+    def find_lows(self, threshold: float = 70.0, top_n: int = 15) -> dict[str, Any]:
+        """Hypoglycemic excursions below ``threshold`` in the ACTIVE window: each
+        contiguous below-threshold run as one nadir with its duration, plus the
+        total count. The hypo analog of find_spikes - the instrument for 'how many
+        times / how long did I go low'. ``clinically_significant`` flags runs of
+        >= 15 continuous minutes (the consensus hypo-event definition)."""
+        threshold = max(40.0, min(float(threshold), 100.0))
+        top_n = max(1, min(int(top_n), 50))
+        ts_list, vals_list = self._active_glucose()
+        lows: list[dict[str, Any]] = []
+        run_start: datetime | None = None
+        run_nadir: float = 1000.0
+        run_nadir_ts: datetime | None = None
+        prev_ts: datetime | None = None
+
+        def _close() -> None:
+            nonlocal run_start, run_nadir, run_nadir_ts
+            assert run_nadir_ts is not None and prev_ts is not None and run_start is not None
+            dur = round((prev_ts - run_start).total_seconds() / 60)
+            lows.append(
+                {
+                    "ts": run_nadir_ts.isoformat(),
+                    "nadir_mg_dl": round(run_nadir, 1),
+                    "duration_min": dur,
+                    "clinically_significant": dur >= 15,
+                }
+            )
+            run_start, run_nadir, run_nadir_ts = None, 1000.0, None
+
+        for ts, v in zip(ts_list, vals_list, strict=True):
+            if v < threshold:
+                if run_start is None:
+                    run_start, run_nadir, run_nadir_ts = ts, v, ts
+                elif v < run_nadir:
+                    run_nadir, run_nadir_ts = v, ts
+                prev_ts = ts
+            elif run_start is not None:
+                _close()
+        if run_start is not None:
+            _close()
+        lows.sort(key=lambda low: float(low["nadir_mg_dl"]))
+        out: dict[str, Any] = {
+            "threshold": threshold,
+            "n_lows": len(lows),
+            "n_clinically_significant": sum(1 for low in lows if low["clinically_significant"]),
+            "lows": lows[:top_n],
+        }
+        if not lows:
+            out["note"] = f"no readings < {threshold:.0f} in the active window"
+        return out
+
+    def glucose_extremes(self) -> dict[str, Any]:
+        """The single highest and lowest reading in the ACTIVE window, each with its
+        exact timestamp, local clock time, and time-of-day period. The instrument for
+        'what time was my glucose highest/lowest' and 'which period had my highest
+        reading' - the literal extreme point, not a band average."""
+        ts_list, vals_list = self._active_glucose()
+        if not vals_list:
+            return {"note": "no readings in the active window"}
+
+        def _period(h: int) -> str:
+            if 6 <= h < 12:
+                return "morning"
+            if 12 <= h < 18:
+                return "afternoon"
+            if 18 <= h < 24:
+                return "evening"
+            return "night"
+
+        def _describe(i: int) -> dict[str, Any]:
+            local = ts_list[i].astimezone(self._tz)
+            return {
+                "ts": ts_list[i].isoformat(),
+                "mg_dl": round(vals_list[i], 1),
+                "time": local.strftime("%H:%M"),
+                "period": _period(local.hour),
+            }
+
+        imax = max(range(len(vals_list)), key=lambda i: vals_list[i])
+        imin = min(range(len(vals_list)), key=lambda i: vals_list[i])
+        return {"highest": _describe(imax), "lowest": _describe(imin)}
+
     def find_similar_events(
         self, timestamp_iso: str, threshold: float = _SPIKE_THRESHOLD
     ) -> dict[str, Any]:

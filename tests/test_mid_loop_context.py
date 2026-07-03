@@ -118,7 +118,8 @@ def test_orchestrator_belt_includes_request_context() -> None:
             return type("_Msg", (), {"content": "ok", "tool_calls": []})()
 
     model = _Model()
-    OrchestratorAgent(model=model).ask(_ctx(make_store("late_bolus")), "how am I doing?")
+    agent = OrchestratorAgent(model=model, use_belief=True)
+    agent.ask(_ctx(make_store("late_bolus")), "how am I doing?")
     assert "request_context" in model.seen_tools
 
 

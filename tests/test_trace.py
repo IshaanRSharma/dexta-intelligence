@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dexta_intelligence.agents.reason import ToolCall
-from dexta_intelligence.agents.trace import TraceLine, render_trace
+from dexta_intelligence.agents.trace import TraceLine, render_trace, trace_icon_for_line
 
 
 def _typical_path() -> list[ToolCall]:
@@ -191,3 +191,11 @@ def test_missing_key_degrades_gracefully() -> None:
         ToolCall(name="daily_series", args={}, ok=True, result="oops")
     ])
     assert weird.icon == "trend"
+
+
+def test_trace_icon_for_coordinator_lines() -> None:
+    assert trace_icon_for_line("Planned: observation, pattern") == "plan"
+    assert trace_icon_for_line("Round 1: ran observation -> 0 finding(s)") == "round"
+    assert trace_icon_for_line("observation: running") == "run"
+    assert trace_icon_for_line("insulin: skipped: no insulin data") == "skip"
+    assert trace_icon_for_line("pattern: 2 raw finding(s)") == "producer"

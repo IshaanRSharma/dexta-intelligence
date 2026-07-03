@@ -24,24 +24,36 @@ def test_glucose_trace_renders_target_band_and_line() -> None:
     assert 'aria-label="glucose trace"' in svg
 
 
-def test_glucose_trace_marks_spike_and_annotation() -> None:
+def test_glucose_trace_marks_spike_and_optional_annotation() -> None:
     readings = _series()
     t0 = readings[0][0]
     svg = glucose_trace_svg(
         readings,
         highlight_start=readings[4][0],
         highlight_end=readings[8][0],
-        annotation="late bolus, +22 min",
+        annotation="Late bolus · +22 min after carb",
+        show_marker_labels=True,
         markers=[
             TraceMarker(t0 + timedelta(minutes=30), "carb", "60g"),
             TraceMarker(t0 + timedelta(minutes=52), "bolus", "4.5U"),
         ],
     )
     assert "chart-band-spike" in svg
-    assert "late bolus, +22 min" in svg
+    assert "Late bolus · +22 min after carb" in svg
     assert "chart-marker-carb" in svg
     assert "chart-marker-bolus" in svg
     assert "60g" in svg
+
+
+def test_glucose_trace_hides_marker_labels_by_default() -> None:
+    readings = _series()
+    t0 = readings[0][0]
+    svg = glucose_trace_svg(
+        readings,
+        markers=[TraceMarker(t0 + timedelta(minutes=30), "carb", "60g")],
+    )
+    assert "chart-marker-dot" in svg
+    assert "60g" not in svg
 
 
 def test_glucose_trace_empty_for_sparse_data() -> None:

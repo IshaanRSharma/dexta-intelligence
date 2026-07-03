@@ -25,7 +25,7 @@ def test_hero_chart_on_late_bolus_golden(late_bolus_store) -> None:
     assert view["has_chart"] is True
     assert "chart-glucose" in view["svg"]
     assert "246" in view["subtitle"] or "Peak" in view["subtitle"]
-    assert view.get("annotation") == "late bolus, +22 min"
+    assert view.get("annotation") == "Late bolus · +22 min after carb"
 
 
 def test_hero_chart_absent_below_floor(tmp_path) -> None:

@@ -156,7 +156,7 @@ class TestPostgresContract:
         assert _DSN is not None
         s = PostgresStore(_DSN)
         s.migrate()
-        with s._conn, s._conn.cursor() as cur:
+        with s._conn.transaction(), s._conn.cursor() as cur:
             cur.execute(f"TRUNCATE {', '.join(_TABLES)} RESTART IDENTITY CASCADE")
         yield s
         s.close()
@@ -464,7 +464,12 @@ class TestPostgresContract:
         finding = _finding()
         fid = store.insert_finding(finding)
         (got,) = store.get_findings()
-        assert got == finding.model_copy(update={"id": fid})
+        # last_verified is stamped at insert when absent; normalize it out of the
+        # structural round-trip and assert it was populated separately.
+        assert got.last_verified is not None
+        assert got.model_copy(update={"last_verified": None}) == finding.model_copy(
+            update={"id": fid}
+        )
         assert got.window_start is not None
         assert got.window_start.utcoffset() == timedelta(0)
 

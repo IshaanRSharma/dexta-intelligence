@@ -19,6 +19,7 @@ from dexta_intelligence.connectors.base import Connector, RealtimeConnector
 from dexta_intelligence.connectors.tandem import (
     PROFILE_SOURCE_ID,
     TandemConnector,
+    _check_tconnectsync_version,
     basal_to_event,
     bolus_to_events,
     format_insulin_profile,
@@ -382,7 +383,7 @@ class TestTandemConnector:
         assert connector.source == "tandem"
 
     def test_is_not_realtime(self) -> None:
-        # t:connect is batch-only, no live current() surface.
+        # Tandem Source is batch-only, no live current() surface.
         assert not isinstance(_connector(_client()), RealtimeConnector)
 
     # -- check -----------------------------------------------------------------
@@ -551,3 +552,24 @@ class TestTandemConnector:
     def test_missing_dependency_raises_install_hint(self) -> None:
         with pytest.raises(RuntimeError, match=r"dexta-intelligence\[tandem\]"):
             TandemConnector(CONFIG).check()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# tconnectsync version guard - v2+ targets the Tandem Source API
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestTconnectsyncVersion:
+    @pytest.mark.parametrize("raw", ["2.0", "2.3.1", "3.0.0", "10.1"])
+    def test_v2_and_newer_pass(self, raw: str) -> None:
+        _check_tconnectsync_version(raw)
+
+    @pytest.mark.parametrize("raw", ["0.9", "1.0", "1.9.2"])
+    def test_v1_and_older_rejected(self, raw: str) -> None:
+        with pytest.raises(RuntimeError, match="Tandem Source API"):
+            _check_tconnectsync_version(raw)
+
+    def test_error_names_version_and_upgrade_hint(self) -> None:
+        with pytest.raises(RuntimeError, match=r"1\.0.*tconnectsync >= 2") as exc:
+            _check_tconnectsync_version("1.0")
+        assert "dexta-intelligence[tandem]" in str(exc.value)
