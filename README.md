@@ -27,7 +27,7 @@ honest about it. Three principles:
 3. Two hard safety rails. A faithfulness guard rejects any prose whose numbers do not trace to a
    tool call. A treatment gate blocks dosing, basal, carb-ratio, and correction instructions. Always.
 
-## The receipt: an external benchmark
+## External benchmark
 
 Why the harness matters, measured. Same model (`claude-sonnet-4-6`), same 21-day CGM record
 (6,048 readings), same questions from the peer-reviewed LLM-CGM benchmark
