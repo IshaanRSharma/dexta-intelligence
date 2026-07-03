@@ -316,3 +316,168 @@ class TestNightscoutConnector:
             assert event.ts.tzinfo == UTC
         for raw in batch.raw:
             assert raw.source_ts.tzinfo == UTC
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Connector - mocked transport emulating the secured Nightscout v3 API
+# ─────────────────────────────────────────────────────────────────────────────
+
+V3_JWT = "v3-jwt-header-token"
+
+
+def _to_v3(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """v1 fixture docs as v3 documents: ``_id`` becomes ``identifier`` + srv meta."""
+    out: list[dict[str, Any]] = []
+    for doc in docs:
+        v3 = dict(doc)
+        v3["identifier"] = v3.pop("_id")
+        v3["srvModified"] = v3.get("date", 0)
+        v3["srvCreated"] = v3.get("date", 0)
+        out.append(v3)
+    return out
+
+
+ENTRIES_V3 = _to_v3(ENTRIES)
+TREATMENTS_V3 = _to_v3(TREATMENTS)
+DEVICESTATUS_V3 = _to_v3(DEVICESTATUS)
+
+
+def _v3_filter(
+    field: str, docs: list[dict[str, Any]], params: httpx.QueryParams, *, numeric: bool
+) -> list[dict[str, Any]]:
+    out = sorted(docs, key=lambda d: d[field], reverse=True)
+    if (gt := params.get(f"{field}$gt")) is not None:
+        bound = int(gt) if numeric else gt
+        out = [d for d in out if d[field] > bound]
+    if (lt := params.get(f"{field}$lt")) is not None:
+        bound = int(lt) if numeric else lt
+        out = [d for d in out if d[field] < bound]
+    if (type_eq := params.get("type$eq")) is not None:
+        out = [d for d in out if d.get("type") == type_eq]
+    return out[: int(params.get("limit", "10"))]
+
+
+def _v3_handler(request: httpx.Request) -> httpx.Response:
+    path = request.url.path
+    params = request.url.params
+    if path == "/api/v3/version":
+        return httpx.Response(200, json={"version": "15.0.3", "apiVersion": "3.0.3"})
+    if path.startswith("/api/v2/authorization/request/"):
+        if path == f"/api/v2/authorization/request/{TOKEN}":
+            return httpx.Response(200, json={"token": V3_JWT})
+        return httpx.Response(401, json={"status": 401, "message": "Unauthorized"})
+    if request.headers.get("Authorization") != f"Bearer {V3_JWT}":
+        return httpx.Response(401, json={"status": 401, "message": "Unauthorized"})
+    if path == "/api/v3/entries":
+        result = _v3_filter("date", ENTRIES_V3, params, numeric=True)
+        return httpx.Response(200, json={"status": 200, "result": result})
+    if path == "/api/v3/treatments":
+        result = _v3_filter("created_at", TREATMENTS_V3, params, numeric=False)
+        return httpx.Response(200, json={"status": 200, "result": result})
+    if path == "/api/v3/devicestatus":
+        result = _v3_filter("created_at", DEVICESTATUS_V3, params, numeric=False)
+        return httpx.Response(200, json={"status": 200, "result": result})
+    return httpx.Response(404)
+
+
+def _v1_only_handler(request: httpx.Request) -> httpx.Response:
+    """v3 endpoints 404 (pre-v3 server); v1 query API answers normally."""
+    path = request.url.path
+    if path == "/api/v3/version" or path.startswith("/api/v2/authorization/request/"):
+        return httpx.Response(404)
+    return _handler(request)
+
+
+def _v3_connector(page_size: int = 1000, token: str = TOKEN) -> NightscoutConnector:
+    config = NightscoutConfig(url="https://ns.example.com/", token=token)
+    client = httpx.Client(transport=httpx.MockTransport(_v3_handler))
+    return NightscoutConnector(config, client=client, page_size=page_size)
+
+
+def _fallback_connector(page_size: int = 1000) -> NightscoutConnector:
+    config = NightscoutConfig(url="https://ns.example.com/", token=TOKEN)
+    client = httpx.Client(transport=httpx.MockTransport(_v1_only_handler))
+    return NightscoutConnector(config, client=client, page_size=page_size)
+
+
+def _signatures(events: list[Any]) -> list[str]:
+    return sorted(str(event) for event in events)
+
+
+class TestNightscoutV3:
+    def test_check_detects_v3(self) -> None:
+        connector = _v3_connector()
+        report = connector.check()
+        assert report.ok is True
+        assert connector._api_version == "v3"
+        assert "3.0.3" in report.detail
+        assert report.latest_data_ts == datetime(2026, 6, 10, 16, 10, tzinfo=UTC)
+
+    def test_pull_v3_happy_path(self) -> None:
+        since = datetime(2026, 6, 10, 11, 0, tzinfo=UTC)
+        batch = _v3_connector().pull(since)
+        assert len(batch.glucose) == 5
+        assert len(batch.insulin) == 5
+        assert len(batch.meals) == 2
+        assert len(batch.predictions) == 5
+        assert len(batch.raw) == 16
+        assert all(r.source == "nightscout" for r in batch.raw)
+        assert all(r.source_id for r in batch.raw)
+
+    def test_v3_normalizes_to_the_same_events_as_v1(self) -> None:
+        since = datetime(2026, 6, 10, 11, 0, tzinfo=UTC)
+        v3_batch = _v3_connector().pull(since)
+        v1_batch = _connector().pull(since)
+        assert _signatures(v3_batch.glucose) == _signatures(v1_batch.glucose)
+        assert _signatures(v3_batch.insulin) == _signatures(v1_batch.insulin)
+        assert _signatures(v3_batch.meals) == _signatures(v1_batch.meals)
+        assert _signatures(v3_batch.predictions) == _signatures(v1_batch.predictions)
+
+    def test_v3_source_id_backfilled_from_identifier(self) -> None:
+        since = datetime(2026, 6, 10, 11, 0, tzinfo=UTC)
+        batch = _v3_connector().pull(since)
+        identifiers = {d["identifier"] for d in ENTRIES_V3 + TREATMENTS_V3 + DEVICESTATUS_V3}
+        assert all(r.source_id in identifiers for r in batch.raw)
+        assert not any(r.source_id.startswith("synthetic:") for r in batch.raw)
+
+    def test_v3_paginates(self) -> None:
+        since = datetime(2026, 6, 10, 11, 0, tzinfo=UTC)
+        small_pages = _v3_connector(page_size=2).pull(since)
+        one_page = _v3_connector().pull(since)
+        assert {e.ts for e in small_pages.glucose} == {e.ts for e in one_page.glucose}
+        assert len(small_pages.raw) == len(one_page.raw)
+        assert len(small_pages.insulin) == len(one_page.insulin)
+        assert len(small_pages.predictions) == len(one_page.predictions)
+
+    def test_v3_never_leaks_token_in_authorization_path(self) -> None:
+        # The access token rides in the JWT-request path; a failed mint must not
+        # surface it in the health-check detail.
+        report = _v3_connector(token="super-secret-xyz").check()
+        assert "super-secret-xyz" not in (report.detail or "")
+
+
+class TestNightscoutV1Fallback:
+    def test_pull_falls_back_to_v1_when_v3_unavailable(self) -> None:
+        since = datetime(2026, 6, 10, 11, 0, tzinfo=UTC)
+        connector = _fallback_connector()
+        batch = connector.pull(since)
+        assert connector._api_version == "v1"
+        assert len(batch.glucose) == 5
+        assert len(batch.insulin) == 5
+        assert len(batch.meals) == 2
+        assert len(batch.raw) == 16
+
+    def test_check_falls_back_to_v1_when_v3_unavailable(self) -> None:
+        connector = _fallback_connector()
+        report = connector.check()
+        assert report.ok is True
+        assert connector._api_version == "v1"
+        assert "15.0.3" in report.detail
+
+    def test_dialect_is_latched_once(self) -> None:
+        since = datetime(2026, 6, 10, 11, 0, tzinfo=UTC)
+        connector = _v3_connector()
+        connector.check()
+        assert connector._api_version == "v3"
+        connector.pull(since)  # must not re-detect or downgrade
+        assert connector._api_version == "v3"

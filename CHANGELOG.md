@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Nightscout API v3 support with v1 fallback: the connector prefers the
+  secured `/api/v3/*` interface (JWT bearer token minted from the configured
+  access token) and falls back to the legacy v1 query API on older servers.
+  The dialect is detected once per connector instance; v3 documents are
+  normalized to the exact v1 event shape, so downstream code is unchanged
+  (ISSUES #12).
 - Tandem connector retargeted at the Tandem Source API: docstrings and
   user-facing strings updated, a runtime guard requires tconnectsync >= 2 (v1
   spoke to the retired t:connect cloud), and the `[tandem]` extra now pins

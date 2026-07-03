@@ -18,7 +18,13 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
   Source account (all tests run on stubs).
 - **#12** Nightscout connector speaks legacy API v1 only (2026-07-02):
   `connectors/nightscout.py` uses `/api/v1/*` throughout. v1 still works, but
-  API v3 is the secured, documented interface. Add v3 support with v1 fallback.
+  API v3 is the secured, documented interface.
+  RESOLVED (2026-07-02): the connector now prefers v3 (`/api/v3/*` with a JWT
+  bearer token minted from the configured access token) and automatically
+  falls back to the v1 query API on servers without v3. The dialect is
+  detected once per connector instance, and v3 responses are normalized to
+  the identical event shape v1 produces, so no downstream code or config
+  changes are required.
 
 ## Resolved (2026-06-21, third pass)
 
