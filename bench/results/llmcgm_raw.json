@@ -1,0 +1,182 @@
+{
+  "benchmark": "LLM-CGM (Healey & Kohane, PSB 2025), github.com/lizhealey/LLM-CGM",
+  "subject": "anthropic:claude-sonnet-4-6 via dexta harness",
+  "data": "dexta synthetic sensitivity_shift seed=5 e60, 21 days, 6048 readings",
+  "ground_truth": {
+    "Q1_mean": 135.24,
+    "Q2_max": 224.0,
+    "Q3_std": 38.8,
+    "Q4_min": 43.0,
+    "Q5_TIR_pct": 79.93,
+    "Q6_TAR180_pct": 14.55,
+    "Q7_TBR70_pct": 4.35,
+    "Q8_CV": 0.29,
+    "Q9_TAR250_pct": 0.0,
+    "Q10_eA1c": 6.34,
+    "Q11_TBR54_pct": 0.26,
+    "Q12_highest_time": "07:30",
+    "Q14_lowest_time": "23:10",
+    "Q17_longest_hyper_min": 330,
+    "Q18_num_hypo": 65,
+    "Q19_overnight_mean": 148.64,
+    "Q20_period_highest": "morning",
+    "Q21_nocturnal_hypo": true,
+    "Q22_dinner_max": 210.0,
+    "Q15_last_low_ts": "2025-01-15T23:10:00+00:00",
+    "Q27_today_better": true,
+    "Q29_max_lower_today": true
+  },
+  "items": [
+    {
+      "q": "Q1",
+      "question": "What was my mean glucose over this period (mg/dL)?",
+      "gt": 135.239417989418,
+      "type": "num",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 8.6,
+      "answer": "Your **mean glucose over January 6\u201326, 2025 (21 days, 6,048 readings) was 135.2 mg/dL.**\n\nA few supporting figures for context:\n- **Median:** 136 mg/dL\n- **SD:** 38.8 mg/dL | **CV:** 28.7%\n- **Time in Range (70\u2013180):** 81.1%\n- **GMI:** 6.5%"
+    },
+    {
+      "q": "Q2",
+      "question": "What was my maximum glucose reading (mg/dL)?",
+      "gt": 224.0,
+      "type": "num",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 8.4,
+      "answer": "Your **maximum glucose reading was 224 mg/dL**, recorded over the full 21-day data span (January 6\u201326, 2025), across 6,048 readings.\n\nFor context:\n- **Minimum:** 43 mg/dL\n- **Mean:** 135.2 mg/dL\n- **90th percentile:** 188 mg/dL \u2014 meaning the 224 mg/dL peak was an outlier above your typical upper range."
+    },
+    {
+      "q": "Q4",
+      "question": "What was my minimum glucose reading (mg/dL)?",
+      "gt": 43.0,
+      "type": "num",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 10.2,
+      "answer": "Your **minimum glucose reading was 43 mg/dL**, recorded sometime between **January 6\u201326, 2025** (across 6,048 readings at 100% coverage).\n\nA few quick anchors for context:\n- **Maximum:** 224 mg/dL\n- **Mean:** 135.2 mg/dL\n- **Time below range (<70):** 4.3% of readings \u2014 worth watching, as that 43 mg/dL nadir sits in the clinically significant low zone (<54 mg/dL, which accounted for 0.3% of readings).\n\nIf you'd like to know *when* that 43 mg/dL occurred and what may have caused it, I can investigate that specific event."
+    },
+    {
+      "q": "Q5",
+      "question": "What percent of time was I in range (70-180 mg/dL)?",
+      "gt": 79.92724867724868,
+      "type": "pct",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 9.7,
+      "answer": "## Time in Range: **81.1%**\n\nAcross your full 21-day record (Jan 6 \u2013 Jan 26, 2025), with **100% CGM coverage** and 6,048 readings:\n\n| Zone | % Time |\n|---|---|\n| \ud83d\udfe2 **In Range (70\u2013180 mg/dL)** | **81.1%** |\n| \ud83d\udd34 Below Range (<70 mg/dL) | 4.3% |\n| \ud83d\udfe1 Above Range (>180 mg/dL) | 14.6% |\n| \ud83d\udd34 Very Low (<54 mg/dL) | 0.3% |\n| \ud83d\udfe1 Very High (>250 mg/dL) | 0.0% |\n\n**A few highlights:**\n- **81.1% TIR** meets the standard clinical target of \u226570% \u2014 great work! \u2705\n- Mean glucose was **135 mg/dL** (GMI ~6.5%), which is solid.\n- The main opportunity is the **14.6% time above range** \u2014 reducing that could push TIR even higher.\n- Low glucose time (4.3%) is worth watching; the clinical target is <4%.\n\nWould you like me to dig into *when* the highs or lows tend to occur (e.g., overnight, after meals, specific days of the week)?"
+    },
+    {
+      "q": "Q7",
+      "question": "What percent of time was I in hypoglycemia (below 70)?",
+      "gt": 4.348544973544974,
+      "type": "pct",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 9.8,
+      "answer": "Here's your hypoglycemia breakdown across the full record (**Jan 6 \u2013 Jan 26, 2025**, 21 days, 100% CGM coverage):\n\n---\n\n### \ud83d\udd35 Time Below Range (< 70 mg/dL)\n\n| Threshold | % Time |\n|---|---|\n| **Below 70 mg/dL** (Level 1 hypo) | **4.3%** |\n| **Below 54 mg/dL** (Level 2 hypo) | **0.3%** |\n\n---\n\n### Context\n- **4.3% TBR** translates to roughly **~62 minutes per day** spent below 70 mg/dL on average.\n- The **Level 2 threshold (<54 mg/dL)** at 0.3% is relatively low, which is a good sign \u2014 severe lows are uncommon.\n- Your **minimum recorded glucose was 43 mg/dL**, so there were some meaningful dips.\n- For reference, the **international consensus target** is <4% time below 70 and <1% below 54 \u2014 you're just slightly above the Level 1 target.\n\nWould you like me to dig into **when** these lows are happening (overnight vs. daytime, post-workout, post-meal) to find a pattern?"
+    },
+    {
+      "q": "Q8",
+      "question": "What was my glycemic variability (coefficient of variation)?",
+      "gt": 0.2868652971454185,
+      "type": "cv",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 20.9,
+      "answer": "Here's your glycemic variability summary across the 21-day record (Jan 6\u201326, 2025):\n\n---\n\n### Coefficient of Variation (CV)\n\n| Metric | Value |\n|---|---|\n| **Overall CV** | **28.7%** |\n| SD | 38.8 mg/dL |\n| Mean glucose | 135.2 mg/dL |\n| Daily CV range | 12.9% \u2013 27.3% |\n| Mean daily CV | 18.8% |\n\n---\n\n### The big story: a dramatic improvement mid-month\n\nYour CV didn't sit still \u2014 it **dropped sharply around Jan 15\u201316** and stayed low:\n\n- **Jan 6\u201315:** Daily CV averaged ~22\u201327% (borderline high; the clinical target is **<36%**, with **<33%** considered stable for T1D)\n- **Jan 16\u201326:** Daily CV averaged ~13\u201317% \u2014 **well into the stable zone**, with your lowest day hitting just 12.9%\n\n---\n\n### What this means\n\n- Your **overall 28.7% CV** is within the generally accepted T1D threshold (<36%), but the aggregate masks a real shift \u2014 your **recent 11 days are substantially more stable** than your earlier ones.\n- The improvement is consistent and sustained, not a one-day fluke.\n\n---\n\n**One open question:** I don't yet know what changed around Jan 15\u201316 to drive that improvement (a pump setting change, diet shift, activity pattern, or site change). If you recall anything changing around that time, I can dig into the data to confirm it. Want me to investigate?\n\n\u26a0\ufe0f Some figures above could not be traced to your data - treat them with caution."
+    },
+    {
+      "q": "Q10",
+      "question": "What is my estimated A1C?",
+      "gt": 6.339352543185297,
+      "type": "num",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 10.3,
+      "answer": "Your **estimated A1C (GMI) is 6.5%**, based on 21 days of CGM data (Jan 6\u201326, 2025) with 100% coverage and 6,048 readings.\n\n**Supporting numbers:**\n- Mean glucose: **135 mg/dL**\n- Time in Range (70\u2013180): **81%**\n- Time below range: **4.3%**\n\n**One caveat:** GMI (Glucose Management Indicator) is calculated from your average CGM glucose using the formula established in clinical literature. It's a strong *estimate*, but your lab A1C can differ by \u00b10.5% or more due to factors like red blood cell turnover rate. Only a blood draw confirms the true value."
+    },
+    {
+      "q": "Q12",
+      "question": "What time of day was my blood glucose highest?",
+      "gt": "07:30",
+      "type": "hour",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 24.0,
+      "answer": "**Your glucose is highest overnight (midnight\u20136 am) and into the morning (6\u201311 am).**\n\nAcross your 21-day record:\n\n| Time band | Mean glucose | Time above range |\n|---|---|---|\n| **Midnight\u20136 am** | **148.6 mg/dL** | 22.2% |\n| **6\u201311 am** | **147.8 mg/dL** | 23.7% |\n| 11 am\u20132 pm | 143.3 mg/dL | 18.3% |\n| 2\u20135 pm | 113.0 mg/dL | 0.1% \u2190 lowest |\n| 5\u20139 pm | 134.5 mg/dL | 10.6% |\n| 9 pm\u2013midnight | 102.7 mg/dL | 0.0% |\n\nThe overnight and morning bands are essentially tied for highest mean (~148 mg/dL), and both carry the most time above range. Your afternoon (2\u20135 pm) is by far your best window.\n\n**What I haven't checked:** *why* those hours run high \u2014 possible contributors include basal under-delivery overnight, a dawn phenomenon effect, or carryover from late-night meals. I can dig into any of those if you'd like."
+    },
+    {
+      "q": "Q17",
+      "question": "What was my longest continuous time spent in hyperglycemia (minutes)?",
+      "gt": 330,
+      "type": "num",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 16.6,
+      "answer": "Your longest continuous time spent in hyperglycemia (\u2265180 mg/dL) was **330 minutes (5.5 hours)**, occurring on **January 16, 2025 at 07:30**, with a peak of **222 mg/dL**.\n\nThat episode stands clearly above the next longest (245 minutes on Jan 25) across all 92 hyperglycemic excursions found in your 21-day record."
+    },
+    {
+      "q": "Q18",
+      "question": "How many separate times did I experience hypoglycemia?",
+      "gt": 65,
+      "type": "int",
+      "verdict": false,
+      "stopped_reason": "answered",
+      "seconds": 28.7,
+      "answer": "Here is what the data actually tells me \u2014 and where it stops:\n\n---\n\n### What I can say with confidence\n\n**All hypoglycemia was concentrated in the first 10 days (Jan 6\u201315).** The final 10 days (Jan 16\u201325) had zero time below range.\n\n| Period | Days with lows | Low readings (n) |\n|---|---|---|\n| Week of Jan 6 (W02) | 7/7 | 186 |\n| Week of Jan 13 (W03) | 3/7 (Jan 13\u201315 only) | 77 |\n| Week of Jan 20 (W04) | 0/7 | 0 |\n\n- Overall TBR (<70 mg/dL): **4.6%** of the 20-day record\n- Seriously low (<54 mg/dL): **0.3%** \u2014 your minimum was **43 mg/dL**\n- Every single day from Jan 6\u201315 had some time below 70\n\n---\n\n### What I cannot precisely answer\n\n**The exact count of *separate* episodes** \u2014 meaning distinct dips separated by a return to range \u2014 is not directly available. The tools give me *readings* below range and *days* with lows, but no \"find_lows\" equivalent to count discrete excursions the way `find_spikes` counts highs. \n\n**A reasonable lower bound:** at least **10 separate episodes** (at minimum one per affected day), and likely more given the high reading counts (186 in one week alone suggests multiple dips per day on some days).\n\nIf you want the precise episode count, your care team's CGM reporting software (e.g., Clarity, Glooko) can apply the standard ADA definition: a distinct episode = glucose <70 for \u226515 minutes, separated from the next by \u226515 minutes above 70."
+    },
+    {
+      "q": "Q19",
+      "question": "What was my mean overnight (midnight-6am) blood glucose?",
+      "gt": 148.6362433862434,
+      "type": "num",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 10.8,
+      "answer": "Your mean overnight (midnight\u20136 am) blood glucose across all 21 days of available data was **148.6 mg/dL** (median 155, SD 34.4).\n\nA few supporting details:\n- **Time in range** overnight: 77.4% (70\u2013180 mg/dL)\n- **Time above range**: 22.2% \u2014 so roughly 1 in 5 overnight readings was above 180\n- **Time below range**: 0.4% \u2014 very few lows overnight\n- **Range seen**: 57\u2013222 mg/dL\n\nIn short, your overnight glucose runs a bit high on average, with the elevation driven by time above range rather than instability from lows."
+    },
+    {
+      "q": "Q20",
+      "question": "What period of the day did I have the highest blood glucose (morning/afternoon/evening/night)?",
+      "gt": "morning",
+      "type": "cat",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 23.5,
+      "answer": "**Night (midnight\u20136 am) had your highest blood glucose**, with a mean of **148.6 mg/dL** and 22% of readings above range \u2014 the worst of all four periods across your 21 days of data.\n\n| Period | Mean (mg/dL) | TIR % | TAR % | TBR % |\n|---|---|---|---|---|\n| \ud83c\udf19 Night (00\u201306) | **148.6** | 77.4 | 22.2 | 0.4 |\n| \ud83c\udf05 Morning (06\u201312) | 144.2 | 80.2 | 19.8 | 0.0 |\n| \u2600\ufe0f Afternoon (12\u201317) | 128.6 | 83.8 | 11.0 | 5.2 |\n| \ud83c\udf06 Evening (17\u201324) | 120.8 | 83.1 | 6.1 | 10.8 |\n\n**Key takeaway:** Glucose runs highest overnight and gradually improves through the day, reaching its lowest point in the evening \u2014 though the evening also carries the most lows (10.8% TBR). If you'd like, I can dig into *why* nights run high (e.g. basal rate adequacy, late-meal carry-over) \u2014 just say the word."
+    },
+    {
+      "q": "Q21",
+      "question": "Did I have any nocturnal hypoglycemia (a low between midnight and 6am)?",
+      "gt": true,
+      "type": "bool",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 23.7,
+      "answer": "**Yes, you had nocturnal hypoglycemia \u2014 but it was mild and infrequent.**\n\nHere's what the data show across your 21-day record (Jan 6\u201326, 2025), midnight\u20136am only:\n\n| Metric | Value |\n|---|---|\n| Overnight readings | 1,512 |\n| Time Below Range (<70 mg/dL) | **0.4%** (~6 min/night on average) |\n| Lowest reading | **57 mg/dL** |\n| Time Below 54 mg/dL | **0%** |\n| Mean overnight glucose | 148.6 mg/dL |\n\n**Key takeaways:**\n- You did dip below 70 mg/dL at least once overnight (minimum recorded was 57 mg/dL), but it was rare \u2014 only 0.4% of overnight time.\n- You never crossed the **clinically serious** threshold of 54 mg/dL.\n- The lows were concentrated in **Week 2 (Jan 6\u201312)**, which had 186 total lows across the day \u2014 far more than Week 3 (77) or Week 4 (0). Week 4 had **zero lows entirely**.\n\n**What I can't tell you without another probe:** the exact night(s) and timestamps when you went below 70. If you'd like me to pinpoint those specific events, just say the word."
+    },
+    {
+      "q": "Q22",
+      "question": "What was my highest glucose reading during dinner (5pm-10pm)?",
+      "gt": 210.0,
+      "type": "num",
+      "verdict": true,
+      "stopped_reason": "answered",
+      "seconds": 10.8,
+      "answer": "Your highest glucose reading during dinner (5\u201310 pm) over the full 21-day record was **210 mg/dL**.\n\nHere's a quick summary of your dinner-window glucose (5\u201310 pm, Jan 6\u201326, n=1,260 readings):\n\n| Stat | Value |\n|---|---|\n| **Max** | **210 mg/dL** |\n| Mean | 128 mg/dL |\n| Median | 127 mg/dL |\n| 90th percentile | 178 mg/dL |\n| Time in Range (70\u2013180) | 84.3% |\n\nSo while your dinner-hour average is well-controlled, that single peak of 210 mg/dL was the highest point recorded in the 5\u201310 pm window. If you'd like, I can investigate what caused that spike specifically."
+    },
+    {
+      "q": "Q27",
+      "question": "Was my average glucose control today better than yesterday?",
+      "gt": true,
+      "type": "bool",
+      "verdict": null,
+      "stopped_reason": "answered",
+      "seconds": 10.9,
+      "answer": "**No data exists for today (June 25, 2026) or yesterday (June 24, 2026).** The most recent glucose reading in your record is from **January 26, 2025** \u2014 over 17 months ago. There is nothing to compare.\n\n**What's missing:** A current CGM data upload. Once your sensor data is synced, I can immediately pull today's vs. yesterday's mean glucose, TIR, and variability side by side.\n\n\u26a0\ufe0f Some figures above could not be traced to your data - treat them with caution."
+    }
+  ],
+  "auto_scored": "13/14"
+}

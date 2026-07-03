@@ -31,6 +31,11 @@ def test_extract_ignores_non_finite() -> None:
     assert extract_numbers(float("inf")) == []
 
 
+def test_extract_parses_thousands_separators() -> None:
+    # "25,920" is one figure (25920), not 25 and 920
+    assert 25920.0 in extract_numbers({"note": "across 25,920 readings"})
+
+
 # ── audit: the gate ───────────────────────────────────────────────────────────
 
 
@@ -93,7 +98,7 @@ def test_list_of_texts_is_joined_and_audited() -> None:
 
 
 def test_clock_times_are_not_audited_as_claims() -> None:
-    """Bolus tables format times like 8:43 AM — not numeric claims."""
+    """Bolus tables format times like 8:43 AM, not numeric claims."""
     report = audit(
         "| 1 | 8:43 AM | 5.37 u | correction |",
         {"bolus_0": {"units": 5.37}},
@@ -120,3 +125,15 @@ def test_iso_timestamps_in_tool_results_trace_in_prose() -> None:
 def test_report_is_falsy_when_unfaithful() -> None:
     assert not audit("999", {"peak": 246})
     assert audit("246", {"peak": 246})
+
+
+def test_comma_grouped_citation_traces_to_pool() -> None:
+    # the model writes "25,920" while the tool returned n=25920 - must not
+    # split into a phantom 920 that fails to trace
+    assert audit("across 25,920 readings", {"n": 25920}).ok
+
+
+def test_comma_grouped_citation_still_flagged_when_fabricated() -> None:
+    report = audit("across 25,920 readings", {"n": 12345})
+    assert not report.ok
+    assert report.violations[0].number == 25920.0

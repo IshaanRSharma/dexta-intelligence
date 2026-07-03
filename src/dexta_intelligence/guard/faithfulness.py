@@ -33,7 +33,15 @@ __all__ = [
     "extract_numbers",
 ]
 
-_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+#: A number, tolerating thousands separators so "25,920" parses as one figure
+#: (25920) rather than splitting into 25 and 920. The grouped alternative is
+#: tried first; a bare run of digits is the fallback.
+_NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
+
+
+def _to_float(token: str) -> float:
+    """Parse a numeric token, dropping thousands separators (``25,920`` -> 25920)."""
+    return float(token.replace(",", ""))
 
 #: Integers that may appear in clinical prose without tracing to evidence.
 #: Each entry is a convention, not data: clock arithmetic (0-24, 30, 60, 90),
@@ -101,7 +109,7 @@ def _extract_into(obj: Any, out: list[float]) -> None:
             out.append(float(obj))
     elif isinstance(obj, str):
         for match in _NUMBER_RE.findall(obj):
-            out.append(float(match))
+            out.append(_to_float(match))
 
 
 def audit(
@@ -139,7 +147,7 @@ def audit(
     for match in _NUMBER_RE.finditer(text):
         if _is_clock_fragment(text, match):
             continue
-        cited = abs(float(match.group()))
+        cited = abs(_to_float(match.group()))
         n_checked += 1
         if cited.is_integer() and int(cited) in allowed_constants:
             continue
@@ -149,7 +157,7 @@ def audit(
         context = text[max(0, start - _CONTEXT_CHARS) : end + _CONTEXT_CHARS].replace("\n", " ")
         nearest = min(pool, key=lambda p: abs(cited - p)) if pool else None
         violations.append(
-            Violation(number=float(match.group()), context=context, nearest_pool_value=nearest)
+            Violation(number=_to_float(match.group()), context=context, nearest_pool_value=nearest)
         )
 
     return FaithfulnessReport(

@@ -130,6 +130,61 @@ def test_no_insulin_is_compliant_but_flagged() -> None:
     assert report.applies and report.compliant and not report.insulin_available
 
 
+# ── lows path: insulin-on-board is the spine, carbs are a caveat ──────────────
+
+_LOW_Q = "Why do I tend to go low in the hours after exercise?"
+
+
+def test_low_question_credits_iob_and_proximity_without_highs_finder() -> None:
+    # a lows investigation: localize with event_proximity, inspect insulin-on-board.
+    # find_spikes (a highs tool) is NOT required for a low.
+    steps = [_ok_step(n) for n in ("event_proximity", "get_iob", "get_carb_entries")]
+    report = assess_trace(_LOW_Q, steps, _FULL_CAPS)
+    assert report.applies and report.compliant and not report.missing and not report.caveat
+
+
+def test_low_question_classic_bolus_basal_pair_also_satisfies() -> None:
+    steps = [_ok_step(n) for n in
+             ("event_proximity", "get_boluses", "get_basal_timeline", "get_cob")]
+    assert assess_trace(_LOW_Q, steps, _FULL_CAPS).compliant
+
+
+def test_low_question_without_insulin_inspection_fades() -> None:
+    report = assess_trace(_LOW_Q, [_ok_step("event_proximity")], _FULL_CAPS)
+    assert not report.compliant
+    assert "get_iob" in report.missing
+
+
+def test_low_question_missing_carbs_is_a_caveat_not_a_fade() -> None:
+    # insulin + localization done, carbs not - compliant WITH a caveat, not faded
+    steps = [_ok_step(n) for n in ("event_proximity", "get_iob")]
+    report = assess_trace(_LOW_Q, steps, _FULL_CAPS)
+    assert report.compliant
+    assert "carb" in report.caveat.lower()
+
+
+def test_low_question_research_only_still_fades() -> None:
+    report = assess_trace(_LOW_Q, [_ok_step("search_evidence")], _FULL_CAPS)
+    assert report.research_only and not report.compliant
+
+
+def test_apply_gate_appends_low_carb_caveat() -> None:
+    from dexta_intelligence.agents.chat import _apply_gate  # noqa: PLC0415
+    from dexta_intelligence.agents.reason import ReasoningResult  # noqa: PLC0415
+
+    steps = [_ok_step("event_proximity"), _ok_step("get_iob")]
+    result = ReasoningResult(
+        answer="Your post-exercise lows track insulin-on-board in the sensitized window.",
+        steps=steps,
+        evidence={},
+        stopped_reason="answered",
+    )
+    out = _apply_gate(result, _LOW_Q, _FULL_CAPS, None)
+    assert "insulin-on-board" in out.answer
+    assert "carb" in out.answer.lower()
+    assert out.stopped_reason == "answered"
+
+
 def test_research_only_is_non_compliant() -> None:
     report = assess_trace(_CAUSE_Q, [_ok_step("search_evidence")], _FULL_CAPS)
     assert report.research_only and not report.compliant

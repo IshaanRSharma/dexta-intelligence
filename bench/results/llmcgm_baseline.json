@@ -1,0 +1,158 @@
+{
+  "baseline": "plain claude-sonnet-4-6, full CGM CSV in-context, NO tools",
+  "data": "sensitivity_shift seed=5 e60, 21 days, 6048 readings (125778 chars CSV)",
+  "items": [
+    {
+      "q": "Q1",
+      "question": "What was my mean glucose over this period (mg/dL)?",
+      "gt": 135.239417989418,
+      "type": "num",
+      "raw_verdict": true,
+      "harness_verdict": true,
+      "raw_seconds": 4.3,
+      "raw_answer": "I'll compute the mean by summing all glucose values and dividing by the total count.\n\nLet me tally up all the readings across the full dataset (2025-01-06 00:00 through 2025-01-26 23:55).\n\nAfter summing all values and counting all readings:\n\n**Total readings: 6,048**\n**Sum of all glucose values: 797,818 mg/dL**\n\n**Mean glucose: 131.9 mg/dL**"
+    },
+    {
+      "q": "Q2",
+      "question": "What was my maximum glucose reading (mg/dL)?",
+      "gt": 224.0,
+      "type": "num",
+      "raw_verdict": true,
+      "harness_verdict": true,
+      "raw_seconds": 2.6,
+      "raw_answer": "Looking through the complete dataset, the maximum glucose reading was **224 mg/dL**, recorded at **2025-01-25 07:30**."
+    },
+    {
+      "q": "Q4",
+      "question": "What was my minimum glucose reading (mg/dL)?",
+      "gt": 43.0,
+      "type": "num",
+      "raw_verdict": true,
+      "harness_verdict": true,
+      "raw_seconds": 1.9,
+      "raw_answer": "Looking through the complete dataset, the minimum glucose reading was **43 mg/dL**, recorded at **2025-01-11 23:10**."
+    },
+    {
+      "q": "Q5",
+      "question": "What percent of time was I in range (70-180 mg/dL)?",
+      "gt": 79.92724867724868,
+      "type": "pct",
+      "raw_verdict": true,
+      "harness_verdict": true,
+      "raw_seconds": 28.6,
+      "raw_answer": "I need to count all readings, then count those within 70-180 mg/dL inclusive.\n\nLet me work through this systematically by going through all the data.\n\n**Total readings:** The data spans from 2025-01-06 00:00 to 2025-01-26 23:55, with 5-minute intervals.\n\nThat's 21 days \u00d7 288 readings/day = 6,048 readings. Let me verify the actual count matches.\n\nFrom Jan 6 (288) + Jan 7 (288) + Jan 8 (288) + Jan 9 (288) + Jan 10 (288) + Jan 11 (288) + Jan 12 (288) + Jan 13 (288) + Jan 14 (288) + Jan 15 (288) + Jan 16 (288) + Jan 17 (288) + Jan 18 (288) + Jan 19 (288) + Jan 20 (288) + Jan 21 (288) + Jan 22 (288) + Jan 23 (288) + Jan 24 (288) + Jan 25 (288) + Jan 26 (288) = **6,048 total readings**\n\nNow I'll count readings **outside** 70-180 (i.e., <70 or >180) and subtract.\n\n**Below 70 (<70):** Scanning all readings below 70:\nJan 6: 58,57,58,65,64,64 = 6\nJan 7: 65,65,67,55,64,63,66,66,65,62,62 = 11\nJan 8: 61,57,59,66,66,60,60,60,66,66,61,57,59,66,66,69 = wait, let me recount carefully.\n\nThis is a large dataset. Let me count out-of-range readings carefully by day.\n\n**Jan 6 <70:** 65(15:50), 64(16:00), 64(16:05), 58(16:10), 57(16:15), 58(16:20), 62(16:25), 68(16:30)\u2192no, 68<70, 66(16:50), 69(16:55) \u2192 58,57,58,62,65,64,64,68,66,69 = 10... let me recheck: 65(15:50),70(15:55)\u2192no. 64(16:00),64(16:05),58(16:10),57(16:15),58(16:20),62(16:25),68(16:30)\u219268<70,70(16:35)\u2192=70 ok,66(16:50),69(16:55) = 9 readings <70 on Jan 6.\n\nGiven the complexity, let me carefully tally **all readings <70 and >180** per day:\n\n**Jan 6 <70:** 65,64,64,58,57,58,62,68,66,69 = 10\n**Jan 6 >180:** none = 0\n\n**Jan 7 <70:** 65,65,67,55,64,63,66,66,68,66,69,68,67,65,62,63,68,67,66,65,62 = 21\n**Jan 7 >180:** none = 0\n\n**Jan 8 <70:** 68,70\u2192no,70\u2192no,66,61,57,59,66,66,69,67,60,60,60,66,66,61,57,59,66,66,69 = let me recount:\n16:45=68, 17:00=66, 17:05=61, 21:25=60, 21:30=60, 21:35=60, 21:50=61, 21:55=57, 22:00=59, 20:55=64\u2192no. Let me go line by line for Jan 8:\n- 16:45=68 \u2713<70\n- 16:50=70 no\n- 16:55=70 no\n- 17:00=66 \u2713\n- 17:05=61 \u2713\n- 20:55=64 \u2713\n- 21:00=70 no\n- 21:20=67 \u2713\n- 21:25=60 \u2713\n- 21:30=60 \u2713\n- 21:35=60 \u2713\n- 21:50=61 \u2713\n- 21:55=57 \u2713\n- 22:00=59 \u2713\n\nJan 8 <70: 68,66,61,64,67,60,60,60,61,57,59 = 11\nJan 8 >180: none = 0\n\n**Jan 9 <70:**\n- 15:05=67, 15:10=67, 15:15=64, 23:30=66, 23:35=67, 23:40=65, 23:45=65, 23:50=64, 23:55=61\nJan 9 <70: 67,67,64,66,67,65,65,64,61 = 9\nJan 9 >180: none = 0\n\n**Jan 10 <70:**\n- 14:05=72\u2192no, 14:10=72\u2192no, 14:20=71\u2192no, 14:25=67\u2713, 14:30=71\u2192no, 14:40=71\u2192no, 14:45=70\u2192no\n- 20:40=66\u2713, 20:45=55\u2713, 20:50=60\u2713, 20:55=52\u2713\n- 21:00=59\u2713, 21:10=74\u2192no, 21:15=66\u2713, 21:20=67\u2713, 21:25=62\u2713, 21:30=64\u2713, 21:35=58\u2713, 21:40=56\u2713, 21:45=52\u2713, 21:50=60\u2713, 21:55=56\u2713\n- 22:00=64\u2713, 22:05=64\u2713, 22:10=58\u2713, 22:15=60\u2713, 22:20=61\u2713, 22:25=62\u2713\n\nJan 10 <70: 67,66,55,60,52,59,66,67,62,64,58,56,52,60,56,64,64,58,60,61,62 = 21\nJan 10 >180: none = 0\n\n**Jan 11 <70:**\n- 15:10=62\u2713, 16:30=61\u2713, 16:35=58\u2713, 16:40=59\u2713, 16:50=61\u2713\n- 20:40=60\u2713, 20:45=53\u2713, 21:00=59\u2713, 21:05=62\u2713, 21:10=61\u2713, 21:15=65\u2713, 21:20=58\u2713, 21:25=56\u2713, 21:30=63\u2713, 21:35=59\u2713, 21:40=52\u2713, 21:45=54\u2713, 21:50=52\u2713, 21:55=50\u2713\n- 22:00="
+    },
+    {
+      "q": "Q7",
+      "question": "What percent of time was I in hypoglycemia (below 70)?",
+      "gt": 4.348544973544974,
+      "type": "pct",
+      "raw_verdict": true,
+      "harness_verdict": true,
+      "raw_seconds": 22.2,
+      "raw_answer": "I'll count all readings strictly below 70 mg/dL, then divide by total readings.\n\n**Counting readings below 70 mg/dL:**\n\nGoing through the data day by day:\n\n**Jan 6:** 64, 64, 58, 57, 58, 62, 65, 70\u2192no, 66, 69 = 58,57,58,62,65,66,69 \u2192 64,64,58,57,58,62,65,66,69 = let me be precise:\n16:00=64, 16:05=64, 16:10=58, 16:15=57, 16:20=58, 16:25=62, 16:50=66, 16:55=69, 21:35=65, 22:20=66, 22:25=67, 23:15=67, 23:30=65, 23:35=67, 23:40=66, 23:45=67 = **16 readings**\n\n**Jan 7:** 00:00=62, 00:05=62, 00:10=57, 15:00=65, 15:05=65, 15:10=67, 15:20=75\u2192no, 16:30=67, 17:15=69, 17:30=68, 17:35=67, 17:50=69, 21:25=55, 21:30=64, 21:35=63, 21:40=66, 21:45=66, 22:30=63, 22:40=67, 22:50=67, 22:55=66, 23:00=65, 23:05=62 = **23 readings**\n\n**Jan 8:** 17:05=61, 20:55=64, 21:20=67, 21:25=60, 21:30=60, 21:35=60, 21:40=66, 21:45=66, 21:50=61, 21:55=57, 22:00=59, 22:05=66, 22:10=66 = **13 readings**\n\n**Jan 9:** 15:05=67, 15:10=67, 15:15=64, 23:30=66, 23:35=67, 23:40=65, 23:45=65, 23:50=64, 23:55=61 = **9 readings**\n\n**Jan 10:** 00:00=61, 13:50=79\u2192no, 14:05=72\u2192no, 14:10=72\u2192no, 14:20=71\u2192no, 14:25=67, 14:30=71\u2192no, 20:40=66, 20:45=55, 20:50=60, 20:55=52, 21:00=59, 21:05=63, 21:10=74\u2192no, 21:15=66, 21:20=67, 21:25=62, 21:30=64, 21:35=58, 21:40=56, 21:45=52, 21:50=60, 21:55=56, 22:00=64, 22:05=64, 22:10=58, 22:15=60, 22:20=61, 22:25=62 = **22 readings**\n\n**Jan 11:** 15:10=62, 16:30=61, 16:35=58, 16:40=59, 16:45=66, 16:50=61, 17:10=66, 17:15=66, 20:40=60, 20:45=53, 20:50=56, 21:00=59, 21:05=62, 21:10=61, 21:15=65, 21:20=58, 21:25=56, 21:30=63, 21:35=59, 21:40=52, 21:45=54, 21:50=52, 21:55=50, 22:00=51, 22:05=61, 22:10=60, 22:15=62, 22:35=61, 22:40=53, 22:45=56, 22:50=57, 23:05=49, 23:10=43, 23:15=53 = **34 readings**\n\n**Jan 12:** 15:20=66, 15:25=63, 15:30=64, 15:40=65, 15:50=60, 16:00=65, 16:05=64, 16:10=62, 17:00=64, 17:05=64, 21:45=54, 21:50=57, 21:55=51, 22:00=47, 22:05=53 = **15 readings**\n\n**Jan 13:** 15:50=59, 21:05=59 = **2 readings**\n\n**Jan 14:** 21:50=56, 21:55=53, 22:00=55, 22:15=52, 22:20=55 = **5 readings**\n\n**Jan 15:** 15:10=55, 15:30=58, 21:55=61\u2192no, 22:10=59, 22:15=57, 22:20=57 = **5 readings**\n\n**Jan 16 onward:** All values appear to be \u226570. Scanning through Jan 16\u2013Jan 26... no readings below 70. = **0 readings**\n\n---\n\n**Total readings below 70:** 16+23+13+9+22+34+15+2+5+5 = **144**\n\n**Total readings:** The data spans Jan 6 00:00 through Jan 26 23:55. That is 21 days \u00d7 288 readings/day = **6,048 readings**\n\n**Percent in hypoglycemia:** 144 \u00f7 6,048 = **2.4%**"
+    },
+    {
+      "q": "Q8",
+      "question": "What was my glycemic variability (coefficient of variation)?",
+      "gt": 0.2868652971454185,
+      "type": "cv",
+      "raw_verdict": true,
+      "harness_verdict": true,
+      "raw_seconds": 7.9,
+      "raw_answer": "I need to calculate the mean and standard deviation of all glucose values in the dataset, then compute CV = (SD / mean) \u00d7 100.\n\nLet me work through this systematically.\n\n**Step 1: Collect all values and compute mean and SD**\n\nThere are a large number of readings. I'll compute the sum and sum of squares across all data points.\n\nGoing through the entire dataset from 2025-01-06 00:00 through 2025-01-26 23:55:\n\nAfter computing across all readings:\n\n- **Total number of readings: 6,048**\n- **Sum of all glucose values: 852,983**\n- **Mean: 852,983 / 6,048 = 141.04 mg/dL**\n\nFor standard deviation, computing \u03a3(x\u00b2) across all values and using SD = \u221a(\u03a3x\u00b2/n \u2212 mean\u00b2):\n\n- **\u03a3x\u00b2 = 127,518,177** (sum of squares of all readings)\n- **Variance = 127,518,177 / 6,048 \u2212 141.04\u00b2 = 21,083.0 \u2212 19,892.3 = 1,190.7**\n- **SD = \u221a1,190.7 \u2248 34.51 mg/dL**\n\n**Step 2: Calculate CV**\n\nCV = (SD / Mean) \u00d7 100 = (34.51 / 141.04) \u00d7 100 = **~24.5%**\n\n---\n\n**Your coefficient of variation (CV) is approximately 24.5%.**\n\n(A CV below 36% is generally considered the target threshold in diabetes management literature, for context.)"
+    },
+    {
+      "q": "Q10",
+      "question": "What is my estimated A1C?",
+      "gt": 6.339352543185297,
+      "type": "num",
+      "raw_verdict": true,
+      "harness_verdict": true,
+      "raw_seconds": 5.8,
+      "raw_answer": "## Estimated A1C\n\nTo calculate the estimated A1C, I'll use the formula:\n**eA1C = (average glucose + 46.7) / 28.7**\n\n**Step 1: Calculate the average glucose across all readings.**\n\nI'll sum all glucose values and divide by the total number of readings.\n\nAfter computing all readings from 2025-01-06 00:00 through 2025-01-26 23:55:\n\n- **Total readings:** 6,048\n- **Sum of all glucose values:** 826,297 mg/dL\n- **Average glucose:** 826,297 \u00f7 6,048 = **136.6 mg/dL**\n\n**Step 2: Apply the formula.**\n\neA1C = (136.6 + 46.7) / 28.7 = 183.3 / 28.7 = **6.4%**\n\n---\n\n**Estimated A1C: 6.4%**\n\n> *This is a mathematical estimate based on your CGM average glucose using the standard ADA conversion formula. It is not a lab result.*"
+    },
+    {
+      "q": "Q12",
+      "question": "What time of day was my blood glucose highest?",
+      "gt": "07:30",
+      "type": "hour",
+      "raw_verdict": true,
+      "harness_verdict": true,
+      "raw_seconds": 2.7,
+      "raw_answer": "Looking through the entire dataset, I need to find the maximum glucose value and its timestamp.\n\nThe highest glucose value in the data is **224 mg/dL**, recorded at **2025-01-25 07:30**.\n\nThat corresponds to **7:30 AM**."
+    },
+    {
+      "q": "Q17",
+      "question": "What was my longest continuous time spent in hyperglycemia (minutes)?",
+      "gt": 330,
+      "type": "num",
+      "raw_verdict": false,
+      "harness_verdict": true,
+      "raw_seconds": 19.8,
+      "raw_answer": "I need to find the longest continuous stretch where glucose \u2265 180 mg/dL (standard hyperglycemia threshold).\n\nLet me scan through the data for all periods where glucose is continuously \u2265 180:\n\n**Jan 6\u201315:** Values are mostly in the 60\u2013170 range, with no sustained runs at or above 180.\n\n**Jan 16 00:00 onward:** Let me trace carefully.\n\n- 2025-01-16 00:25: 168 \u2192 not yet\n- 2025-01-16 00:30: 166 \u2192 no\n- 2025-01-16 00:35: 172 \u2192 no\n- 2025-01-16 00:40: 173 \u2192 no\n- 2025-01-16 00:45: 166 \u2192 no\n- 2025-01-16 00:50: 170 \u2192 no\n- 2025-01-16 00:55: 169 \u2192 no\n- 2025-01-16 01:00: 164 \u2192 no\n- 2025-01-16 01:05: 169 \u2192 no\n- 2025-01-16 01:10: 162 \u2192 no\n- 2025-01-16 01:15: 159 \u2192 no\n- 2025-01-16 01:20: 158 \u2192 no\n- 2025-01-16 01:25: 160 \u2192 no\n- 2025-01-16 01:30: 163 \u2192 no\n- 2025-01-16 01:35: 155 \u2192 no\n- 2025-01-16 01:40: 165 \u2192 no\n- 2025-01-16 01:45: 170 \u2192 no\n- 2025-01-16 01:50: **178** \u2192 no\n- 2025-01-16 01:55: **177** \u2192 no\n- 2025-01-16 02:00: **173** \u2192 no\n- 2025-01-16 02:05: **169** \u2192 no\n- 2025-01-16 02:10: **173** \u2192 no\n- 2025-01-16 02:15: **175** \u2192 no\n- 2025-01-16 02:20: **170** \u2192 no\n- 2025-01-16 02:25: **166** \u2192 no\n- 2025-01-16 02:30: **168** \u2192 no\n- 2025-01-16 02:35: **166** \u2192 no\n- 2025-01-16 02:40: **164** \u2192 no\n- 2025-01-16 02:45: **163** \u2192 no\n- 2025-01-16 02:50: **167** \u2192 no\n- 2025-01-16 02:55: **169** \u2192 no\n- 2025-01-16 03:00: **173** \u2192 no\n- 2025-01-16 03:05: **175** \u2192 no\n- 2025-01-16 03:10: **189** \u2192 **START** 03:10\n- 2025-01-16 03:15: 190 \u2713\n- 2025-01-16 03:20: 183 \u2713\n- 2025-01-16 03:25: 189 \u2713\n- 2025-01-16 03:30: 182 \u2713\n- 2025-01-16 03:35: 185 \u2713\n- 2025-01-16 03:40: 184 \u2713\n- 2025-01-16 03:45: 196 \u2713\n- 2025-01-16 03:50: 197 \u2713\n- 2025-01-16 03:55: 207 \u2713\n- 2025-01-16 04:00: 206 \u2713\n- 2025-01-16 04:05: 193 \u2713\n- 2025-01-16 04:10: 204 \u2713\n- 2025-01-16 04:15: 210 \u2713\n- 2025-01-16 04:20: 203 \u2713\n- 2025-01-16 04:25: 196 \u2713\n- 2025-01-16 04:30: 190 \u2713\n- 2025-01-16 04:35: 188 \u2713\n- 2025-01-16 04:40: 202 \u2713\n- 2025-01-16 04:45: 197 \u2713\n- 2025-01-16 04:50: 199 \u2713\n- 2025-01-16 04:55: 197 \u2713\n- 2025-01-16 05:00: 189 \u2713\n- 2025-01-16 05:05: 189 \u2713\n- 2025-01-16 05:10: 194 \u2713\n- 2025-01-16 05:15: 204 \u2713\n- 2025-01-16 05:20: 203 \u2713\n- 2025-01-16 05:25: 200 \u2713\n- 2025-01-16 05:30: 197 \u2713\n- 2025-01-16 05:35: 204 \u2713\n- 2025-01-16 05:40: 217 \u2713\n- 2025-01-16 05:45: 202 \u2713\n- 2025-01-16 05:50: 199 \u2713\n- 2025-01-16 05:55: 208 \u2713\n- 2025-01-16 06:00: 203 \u2713\n- 2025-01-16 06:05: 199 \u2713\n- 2025-01-16 06:10: 199 \u2713\n- 2025-01-16 06:15: 201 \u2713\n- 2025-01-16 06:20: 205 \u2713\n- 2025-01-16 06:25: 205 \u2713\n- 2025-01-16 06:30: 206 \u2713\n- 2025-01-16 06:35: 206 \u2713\n- 2025-01-16 06:40: 203 \u2713\n- 2025-01-16 06:45: 204 \u2713\n- 2025-01-16 06:50: 203 \u2713\n- 2025-01-16 06:55: 205 \u2713\n- 2025-01-16 07:00: 208 \u2713\n- 2025-01-16 07:05: 204 \u2713\n- 2025-01-16 07:10: 197 \u2713\n- 2025-01-16 07:15: 199 \u2713\n- 2025-01-16 07:20: 213 \u2713\n- 2025-01-16 07:25: 212 \u2713\n- 2025-01-16 07:30: 222 \u2713\n- 2025-01-16"
+    },
+    {
+      "q": "Q18",
+      "question": "How many separate times did I experience hypoglycemia?",
+      "gt": 65,
+      "type": "int",
+      "raw_verdict": true,
+      "harness_verdict": false,
+      "raw_seconds": 24.8,
+      "raw_answer": "I need to count separate hypoglycemic episodes (glucose < 70 mg/dL), where readings below 70 that are continuous count as one episode.\n\nLet me go through the data systematically:\n\n**Episode 1:** 2025-01-06 08:45 \u2192 87 (not hypo, but dropping)\nActually starting: 2025-01-06 **15:50** (65), 15:55 (70 - borderline), 16:00 (64), 16:05 (64), 16:10 (58), 16:15 (57), 16:20 (58), 16:25 (62), 16:30 (68), 16:35 (70)... rises above\n\n**Episode 2:** 2025-01-06 **21:10** (72\u219265 at 21:35), continuing through 22:20 (66), 22:25 (67)... multiple readings <70 through late night into Jan 7 00:10 (57)\n\n**Episode 3:** 2025-01-07 **15:00** (65), 15:05 (65), 15:10 (67)... then recovers, drops again 16:30 (67), 17:15 (69), 17:30 (68), 17:35 (67), 17:45 (71), 17:50 (69)\n\n**Episode 4:** 2025-01-07 **21:15** (68), 21:20 (66), 21:25 (55), continuing through 23:05 (62)\n\n**Episode 5:** 2025-01-08 **17:05** (61)\n\n**Episode 6:** 2025-01-08 **20:55** (64), 21:00\u201321:55 multiple <70, continuing 22:00 (59)\n\n**Episode 7:** 2025-01-09 **15:05** (67), 15:10 (67), 15:15 (64)\n\n**Episode 8:** 2025-01-09 **23:30** (66), 23:35 (67), 23:40 (65), 23:45 (65), 23:50 (64), 23:55 (61) \u2192 into Jan 10 00:00 (61)\n\n**Episode 9:** 2025-01-10 **14:05** (72\u219267 at 14:25), 14:30 (71), 14:40 (71)... borderline, 20:40 (66), 20:45 (55), 20:50 (60), 20:55 (52)...\n\nLet me recount more carefully, strictly <70:\n\n1. **Jan 6 15:50\u201316:35** (65,64,64,58,57,58,62,68,68)\n2. **Jan 6 21:35 \u2013 Jan 7 00:10** (65,continuing <70 readings through night)\n3. **Jan 7 15:00\u201315:10** (65,65,67)\n4. **Jan 7 16:30** (67), **17:15** (69), **17:30\u201317:50** (68,67,69) \u2014 connected low stretch\n5. **Jan 7 21:15\u201323:05** (68,66,55,63,66,66,68,69,67,66,65,62)\n6. **Jan 8 17:05** (61)\n7. **Jan 8 20:55\u201322:00** (64,70\u219259,66,66,69)\n8. **Jan 9 15:05\u201315:15** (67,67,64)\n9. **Jan 9 23:30\u2013Jan 10 00:00** (66,67,65,65,64,61,61)\n10. **Jan 10 14:20\u201314:45** (71,67,71,70) \u2014 67 qualifies\n11. **Jan 10 20:40\u201321:55** (66,55,60,52,59,63,66,62,64,58,56,52,60,56)\n12. **Jan 11 15:10** (62)\n13. **Jan 11 16:30\u201316:50** (61,58,59,66,61)\n14. **Jan 11 20:40\u201322:00** (60,53,56,66,59,62,61,65,58,56,63,59,52,54,52,50,51)\n15. **Jan 11 23:05\u201323:15** (49,43,53)\n16. **Jan 12 15:20\u201316:10** (66,63,64,69,65,70\u219260,68,65,64,62,69)\n17. **Jan 12 17:00\u201317:10** (64,64,69)\n18. **Jan 12 21:45\u201322:00** (54,57,51,47)\n19. **Jan 13 15:50** (59)\n20. **Jan 13 20:45\u201321:05** (72\u219263,65,59,62,69,68,70,65,68)\n21. **Jan 14 21:45\u201322:25** (64,56,53,55,60,61,52,55,63,60,61,65,63,65,61)\n22. **Jan 15 15:05\u201315:35** (62,55,60,69,61,58,63)\n\n**Total: 22 separate hypoglycemic episodes**"
+    },
+    {
+      "q": "Q19",
+      "question": "What was my mean overnight (midnight-6am) blood glucose?",
+      "gt": 148.6362433862434,
+      "type": "num",
+      "raw_verdict": false,
+      "harness_verdict": true,
+      "raw_seconds": 38.7,
+      "raw_answer": "I need to calculate the mean glucose for all readings from midnight to 6:00 AM (00:00\u201305:55) across all days in the dataset.\n\nLet me sum all overnight readings by date:\n\n**Jan 6 (00:00\u201305:55):**\n94,91,100,100,95,105,108,108,101,99,105,111,114,110,107,108,105,118,108,117,121,116,114,128,120,119,111,124,118,118,114,114,110,107,106,116,116,115,112,112,121,117,118,122,130,141,137,142,132,132,125,120,128,134,131,137,134,138,132,131,126,134,133,133,133,140,148,141,140,139,140,134\n= 72 readings, sum = 8,786 \u2192 mean \u2248 122.0\n\n**Jan 7 (00:00\u201305:55):**\n62,62,57,85,88,92,89,90,88,89,86,84,91,91,85,91,94,99,100,103,105,97,98,102,106,109,114,116,112,110,118,120,122,122,120,124,127,128,123,130,118,115,111,105,103,103,109,105,116,115,116,114,118,115,119,122,125,130,129,126,135,138,137,136,139,140,133,142,147,144,143,148\n= 72 readings, sum = 8,897 \u2192 mean \u2248 123.6\n\n**Jan 8 (00:00\u201305:55):**\n90,87,85,91,112,102,99,99,95,105,104,104,102,104,104,103,103,106,92,97,94,95,99,100,96,105,115,114,113,114,114,119,114,118,121,121,125,123,120,120,118,130,126,120,125,126,127,121,113,109,107,105,109,113,116,113,123,117,124,123,133,134,136,134,136,131,148,143,144,148,145,150\n= 72 readings, sum = 8,758 \u2192 mean \u2248 121.6\n\n**Jan 9 (00:00\u201305:55):**\n106,104,112,116,119,122,132,136,126,122,119,124,126,123,122,126,127,122,113,104,100,110,107,107,119,121,115,115,120,116,111,111,112,108,101,104,104,104,108,117,117,115,118,119,120,122,116,119,122,120,121,119,118,118,118,122,123,122,124,121,117,116,109,114,121,121,119,130,135,139,127,136\n= 72 readings, sum = 8,629 \u2192 mean \u2248 119.8\n\n**Jan 10 (00:00\u201305:55):**\n61,67,74,104,107,104,100,106,104,103,96,100,104,105,106,95,99,101,100,98,99,100,98,101,98,107,98,99,105,100,104,103,100,103,103,103,108,106,110,100,107,107,120,106,114,122,121,116,117,121,112,121,119,123,120,118,116,115,117,121,126,121,124,131,127,126,135,130,129,135,133,132\n= 72 readings, sum = 8,199 \u2192 mean \u2248 113.9\n\n**Jan 11 (00:00\u201305:55):**\n108,110,106,114,117,114,113,116,111,106,111,115,113,115,115,111,103,107,98,97,93,107,118,119,118,117,115,129,125,115,115,114,112,117,126,119,127,137,130,127,130,131,124,123,118,130,125,125,126,122,121,123,125,143,137,132,128,122,119,121,124,127,132,136,144,143,140,143,140,145,146,154\n= 72 readings, sum = 8,874 \u2192 mean \u2248 123.2\n\n**Jan 12 (00:00\u201305:55):**\n68,105,96,85,86,93,101,107,116,119,119,120,124,119,118,112,112,116,118,116,124,116,113,109,108,98,97,97,90,85,87,89,95,104,106,107,106,110,109,111,105,104,104,112,105,106,102,102,97,98,104,109,118,113,126,128,121,116,117,115,125,132,131,126,127,134,139,137,141,154,155,152\n= 72 readings, sum = 8,399 \u2192 mean \u2248 116.7\n\n**Jan 13 (00:00\u201305:55):**\n88,85,90,95,121,115,123,113,118,120,114,117,106,103,97,91,94,105,103,106,108,102,105,116,108,109,113,113,107,106,105,112,120,118,116,124,119,115,113,110,112,108,112,109,113,119,126,133,137,135,135,144,144,139,136,140,142,143,139,140,144,148,143,152,157,152,149,155,147,155,145,147\n= 72 readings, sum = 8,836 \u2192 mean \u2248 122.7\n\n**Jan 14 (00:00\u201305:55):**\n107,109,110,106,105,108,111,108,109,115,114,111,105,103,98,98,102,94,99,97,104,107,114,115,106,108,112,105,104,101,102,96,101,113,107,109,113,123,114,116,119,114,110,109,111,122,123,123,129,129,134,135,132,135,135,128,132,130,126,132,133,128,131,137,125,121,118,113,119,118,111,115\n= 72 readings, sum = 8,476 \u2192 mean \u2248 117.7\n\n**Jan 15 (00:00\u201305:55):**\n79,80,90,98,118,117,123,122,119,120,111,113,109,114,116,121,130,130,132,126,118,118,117,109,108,103,98,105,107,112,113,116,118,114,114,113,118,115,115,113,107,"
+    },
+    {
+      "q": "Q20",
+      "question": "What period of the day did I have the highest blood glucose (morning/afternoon/evening/night)?",
+      "gt": "morning",
+      "type": "cat",
+      "raw_verdict": true,
+      "harness_verdict": true,
+      "raw_seconds": 3.3,
+      "raw_answer": "I need to find the single highest glucose reading across the entire dataset and determine what time period it occurred in.\n\nLet me scan for the maximum value.\n\nThe highest glucose reading in the dataset is **224 mg/dL**, recorded at **2025-01-25 07:30**.\n\n07:30 falls in the **morning** (defined as approximately 6:00\u201312:00).\n\n**Morning** had the highest blood glucose reading."
+    },
+    {
+      "q": "Q21",
+      "question": "Did I have any nocturnal hypoglycemia (a low between midnight and 6am)?",
+      "gt": true,
+      "type": "bool",
+      "raw_verdict": null,
+      "harness_verdict": true,
+      "raw_seconds": 8.8,
+      "raw_answer": "I'll check each night's midnight-to-6am window for any glucose reading below 70 mg/dL (the standard hypoglycemia threshold).\n\n**Jan 6 (00:00\u201305:55):** Minimum was 91 mg/dL \u2014 No\n\n**Jan 7 (00:00\u201305:55):** Readings at 00:00=62, 00:05=62, 00:10=57 \u2014 **YES, low at 00:10 (57 mg/dL)**\n\n**Jan 8 (00:00\u201305:55):** Minimum was 85 mg/dL \u2014 No\n\n**Jan 9 (00:00\u201305:55):** Minimum was 100 mg/dL \u2014 No\n\n**Jan 10 (00:00\u201305:55):** Minimum was 61 mg/dL at 00:00 \u2014 **YES, low at 00:00 (61 mg/dL)**\n\n**Jan 11 (00:00\u201305:55):** Minimum was 93 mg/dL \u2014 No\n\n**Jan 12 (00:00\u201305:55):** Minimum was 68 mg/dL \u2014 No (68 is borderline but not below 70)\n\n**Jan 13 (00:00\u201305:55):** Minimum was 88 mg/dL \u2014 No\n\n**Jan 14 (00:00\u201305:55):** Minimum was 94 mg/dL \u2014 No\n\n**Jan 15 (00:00\u201305:55):** Minimum was 79 mg/dL \u2014 No\n\n**Jan 16\u2013Jan 26 (00:00\u201305:55):** All readings were well above 70 mg/dL \u2014 No\n\n**Summary:** You had nocturnal hypoglycemia on **2 nights** \u2014 the night of Jan 6/7 (57 mg/dL at 00:10) and the night of Jan 9/10 (61 mg/dL at 00:00)."
+    },
+    {
+      "q": "Q22",
+      "question": "What was my highest glucose reading during dinner (5pm-10pm)?",
+      "gt": 210.0,
+      "type": "num",
+      "raw_verdict": true,
+      "harness_verdict": true,
+      "raw_seconds": 7.6,
+      "raw_answer": "Looking through the data for all days between 17:00 and 22:00, I need to find the maximum glucose reading.\n\nScanning each day's 17:00\u201322:00 window:\n\n- Jan 6: max 115 (17:45)\n- Jan 7: max 98 (17:55)\n- Jan 8: max 116 (17:35)\n- Jan 9: max 103 (17:45)\n- Jan 10: max 125 (19:20)\n- Jan 11: max 137 (19:35)\n- Jan 12: max 136 (19:55)\n- Jan 13: max 125 (17:25)\n- Jan 14: max 131 (19:55)\n- Jan 15: max 136 (19:50)\n- Jan 16: max 198 (19:45)\n- Jan 17: max 202 (19:25)\n- Jan 18: max 195 (19:30)\n- Jan 19: max 197 (19:00)\n- Jan 20: max 192 (19:05)\n- Jan 21: max 186 (19:15)\n- Jan 22: max 175 (19:50)\n- Jan 23: max 185 (19:40)\n- Jan 24: max 200 (19:40)\n- Jan 25: max 210 (19:45)\n- Jan 26: max 190 (19:45/20:00)\n\nThe highest dinner-time glucose reading was **224 mg/dL** \u2014 wait, let me recheck Jan 25:\n\n2025-01-25 19:45 = 210. The highest is **210 mg/dL** on January 25 at 19:45."
+    },
+    {
+      "q": "Q27",
+      "question": "Was my average glucose control today better than yesterday?",
+      "gt": true,
+      "type": "bool",
+      "raw_verdict": true,
+      "harness_verdict": null,
+      "raw_seconds": 33.1,
+      "raw_answer": "I need to determine \"today\" and \"yesterday\" from the data. The last date in the dataset is **2025-01-26**, so today = January 26 and yesterday = January 25.\n\n**January 26 readings** (00:00\u201323:55):\nLet me sum all values for 2025-01-26.\n\nCounting and summing all 288 readings for Jan 26:\n\nI'll go through each hour:\n\n00:00\u201300:55: 182,187,173,176,176,177,177,181,184,182,173,174 = 2142\n01:00\u201301:55: 174,164,166,175,186,182,178,184,185,192,185,181 = 2152\n02:00\u201302:55: 186,195,193,192,197,187,193,191,196,188,194,198 = 2310\n03:00\u201303:55: 197,196,185,189,178,180,191,190,187,175,177,181 = 2226\n04:00\u201304:55: 178,179,177,172,178,179,168,167,169,169,177,175 = 2088\n05:00\u201305:55: 177,176,176,164,173,171,174,180,179,180,185,185 = 2120\n06:00\u201306:55: 184,189,195,190,192,193,195,201,195,190,195,197 = 2316\n07:00\u201307:55: 189,196,207,202,200,213,210,206,206,203,202,193 = 2427\n08:00\u201308:55: 186,181,182,184,184,174,171,167,158,167,169,163 = 2086\n09:00\u201309:55: 151,150,157,170,166,156,148,151,155,152,147,146 = 1849\n10:00\u201310:55: 150,146,143,146,160,155,155,150,151,153,150,156 = 1815\n11:00\u201311:55: 148,141,144,157,165,159,156,153,145,148,161,166 = 1843\n12:00\u201312:55: 172,166,169,176,179,185,194,199,198,201,197,200 = 2236\n13:00\u201313:55: 199,199,199,194,195,189,176,169,175,178,171,168 = 2212\n14:00\u201314:55: 161,167,157,161,165,153,145,138,139,129,131,131 = 1777\n15:00\u201315:55: 147,142,135,139,144,136,144,149,147,154,148,155 = 1740\n16:00\u201316:55: 153,153,147,148,156,157,161,156,157,148,143,148 = 1827\n17:00\u201317:55: 148,148,151,144,140,161,162,154,153,147,152,145 = 1805\n18:00\u201318:55: 153,151,152,162,161,163,173,178,187,186,171,172 = 2009\n19:00\u201319:55: 167,171,166,168,164,172,179,185,189,190,190,185 = 2126\n20:00\u201320:55: 190,188,189,181,182,179,171,149,153,153,155,154 = 2044\n21:00\u201321:55: 154,144,138,132,128,121,110,107,105,106,108,114 = 1467\n22:00\u201322:55: 120,118,129,131,131,120,118,109,117,126,139,140 = 1498\n23:00\u201323:55: 139,141,132,132,136,121,126,124,130,132,133,140 = 1586\n\n**Jan 26 total:** summing all hourly totals:\n2142+2152+2310+2226+2088+2120+2316+2427+2086+1849+1815+1843+2236+2212+1777+1740+1827+1805+2009+2126+2044+1467+1498+1586 = **49,701**\n\nJan 26 average = 49,701 / 288 = **172.6 mg/dL**\n\n---\n\n**January 25 readings** (00:00\u201323:55):\n\n00:00\u201300:55: 123,126,131,131,162,168,169,164,169,167,167,175 = 1852\n01:00\u201301:55: 172,171,173,173,172,172,172,164,162,161,169,179 = 2040\n02:00\u201302:55: 174,174,168,170,175,171,171,173,179,172,171,168 = 2066\n03:00\u201303:55: 174,170,171,171,163,165,170,163,163,167,177,170 = 2024\n04:00\u201304:55: 177,176,178,179,183,182,185,191,189,186,191,200 = 2217\n05:00\u201305:55: 195,192,194,187,193,191,193,195,193,190,197,199 = 2319\n06:00\u201306:55: 190,184,185,191,198,194,197,200,202,208,203,196 = 2348\n07:00\u201307:55: 201,201,200,212,215,218,224,217,218,209,221,219 = 2555\n08:00\u201308:55: 213,209,203,200,188,189,179,175,178,174,178,171 = 2257\n09:00\u201309:55: 159,163,161,162,164,158,149,150,155,151,157,154 = 1883\n10:00\u201310:55: 148,142,143,154,154,164,161,155,159,165,158,149 = 1852\n11:00\u201311:55: 150,153,155,154,153,148,153,157,148,152,158,158 = 1839\n12:00\u201312:55: 157,160,161,180,181,183,174,179,195,193,188,181 = 2132\n13:00\u201313:55: 188,188,178,189,192,189,185,191,198,198,193,195 = 2284\n14:00\u201314:55: 183,174,171,164,159,152,150,141,135,127,121,124 = 1801\n15:00\u201315:55: 130,120,120,121,112,117,118,117,121,114,119,123 = 1432\n16:00\u201316:55: 122,123,134,136,148,140,140,153,150,152,147,150 = 1695"
+    }
+  ],
+  "raw_auto": "12/14",
+  "harness_auto": "13/14"
+}

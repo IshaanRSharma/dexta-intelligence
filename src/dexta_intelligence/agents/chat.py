@@ -126,7 +126,7 @@ def _finish(
 
 
 def _violation_summary(v: Violation) -> str:
-    """Short UI string — not the debug ``Violation.__str__`` with prose context."""
+    """Short UI string, not the debug ``Violation.__str__`` with prose context."""
     if v.nearest_pool_value is not None:
         return f"{v.number:g} (nearest evidence {v.nearest_pool_value:g})"
     return f"{v.number:g}"
@@ -159,6 +159,13 @@ def _apply_gate(  # noqa: PLR0911 - one return per gate outcome
             stopped_reason=result.stopped_reason,
         )
     if report.compliant:
+        if report.caveat and report.caveat not in result.answer:
+            return ReasoningResult(
+                answer=f"{result.answer}\n\n{report.caveat}",
+                steps=result.steps,
+                evidence=result.evidence,
+                stopped_reason=result.stopped_reason,
+            )
         return result
     steps = list(result.steps)
     evidence = {f"try0_{k}": v for k, v in result.evidence.items()}

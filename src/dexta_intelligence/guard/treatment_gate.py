@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from dexta_intelligence.coldstart import CapabilitySet
 
 __all__ = [
+    "LOW_CARB_CAVEAT",
     "NO_TREATMENT_DISCLAIMER",
     "SAFE_SENTENCE",
     "GateReport",
@@ -60,6 +61,31 @@ _ZOOM_TOOLS = frozenset({"zoom_event", "find_spikes"})
 _INSULIN_TOOLS = ("get_boluses", "get_basal_timeline")
 #: Meal-stream inspection required when carb entries exist.
 _MEAL_TOOLS = ("get_carb_entries",)
+
+#: Lowercase markers that make a cause question specifically about LOWS. For a
+#: low, a highs finder (find_spikes) is the wrong instrument and insulin-on-board
+#: is the factor that matters most, so the required set differs from a spike.
+_LOW_MARKERS = (
+    "go low", "going low", "goes low", "went low", "low after", "lows",
+    "hypo", "crash", "dip below", "below target", "below 70",
+)
+#: Localizers that count for a lows/pattern question - event_proximity is the
+#: lows-equivalent of zooming a spike.
+_LOW_LOCALIZE_TOOLS = _ZOOM_TOOLS | frozenset(
+    {"event_proximity", "get_context_around_event", "correlate"}
+)
+#: Insulin-on-board / outcome integrators - the inspection that matters for a low
+#: (get_iob integrates basal+bolus into the on-board amount at the event).
+_IOB_TOOLS = frozenset({"get_iob", "correction_outcome"})
+#: Carb-stream inspections (broadened beyond the single get_carb_entries).
+_BROAD_MEAL_TOOLS = frozenset({"get_carb_entries", "get_cob", "meal_response"})
+
+#: Appended to a lows answer whose insulin context WAS inspected but whose carb
+#: context was not - a non-fatal gap, surfaced instead of faded to silence.
+LOW_CARB_CAVEAT = (
+    "I have not inspected carb intake around these events, so treat this as a "
+    "partial explanation - under-fueling could also contribute."
+)
 #: Tools that count as data work (research must come after one of these).
 _DATA_TOOLS_EXEMPT = frozenset({"recall", "coverage", "search_evidence",
                                 "get_current_time", "get_weekday", "parse_relative_date"})
@@ -83,6 +109,9 @@ class GateReport:
     insulin_available: bool
     missing: tuple[str, ...]
     research_only: bool
+    #: A non-fatal gap to surface alongside a compliant answer (e.g. insulin was
+    #: inspected for a lows question but carbs were not). Empty when none.
+    caveat: str = ""
 
     @property
     def retry_hint(self) -> str:
@@ -135,15 +164,51 @@ def assess_trace(
             applies=True, compliant=True, insulin_available=False,
             missing=(), research_only=False,
         )
+    research_only = "search_evidence" in called and not (called - _DATA_TOOLS_EXEMPT)
+    if _is_low_question(question):
+        return _assess_low(called, capabilities, research_only)
     missing: list[str] = []
     if not (called & _ZOOM_TOOLS):
         missing.append("zoom_event")
     if capabilities.has_meals:
         missing.extend(t for t in _MEAL_TOOLS if t not in called)
     missing.extend(t for t in _INSULIN_TOOLS if t not in called)
-    research_only = "search_evidence" in called and not (called - _DATA_TOOLS_EXEMPT)
     compliant = not missing and not research_only
     return GateReport(
         applies=True, compliant=compliant, insulin_available=True,
         missing=tuple(missing), research_only=research_only,
+    )
+
+
+def _is_low_question(question: str) -> bool:
+    """True when the cause question is specifically about going low/hypo."""
+    text = question.lower()
+    return any(marker in text for marker in _LOW_MARKERS)
+
+
+def _assess_low(
+    called: set[str], capabilities: CapabilitySet, research_only: bool
+) -> GateReport:
+    """Compliance for a lows question.
+
+    Insulin-on-board is the factor that matters for a low, so the hard
+    requirement is that insulin was inspected (an IOB/outcome integrator, or the
+    classic bolus+basal pair) and the event localized (no highs finder required).
+    A missing carb inspection is a non-fatal caveat, not a fade: under-fueling is
+    a secondary contributor, and silencing a sound insulin-grounded answer over it
+    is worse than surfacing the gap.
+    """
+    missing: list[str] = []
+    if not (called & _LOW_LOCALIZE_TOOLS):
+        missing.append("zoom_event")
+    insulin_ok = bool(called & _IOB_TOOLS) or {"get_boluses", "get_basal_timeline"} <= called
+    if not insulin_ok:
+        missing.append("get_iob")
+    compliant = not missing and not research_only
+    caveat = ""
+    if compliant and capabilities.has_meals and not (called & _BROAD_MEAL_TOOLS):
+        caveat = LOW_CARB_CAVEAT
+    return GateReport(
+        applies=True, compliant=compliant, insulin_available=True,
+        missing=tuple(missing), research_only=research_only, caveat=caveat,
     )
