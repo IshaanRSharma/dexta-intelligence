@@ -867,8 +867,8 @@ requires-dist = [
     { name = "pylibrelinkup", marker = "extra == 'libre'", specifier = ">=0.10" },
     { name = "python-multipart", marker = "extra == 'all'", specifier = ">=0.0.9" },
     { name = "python-multipart", marker = "extra == 'gui'", specifier = ">=0.0.9" },
-    { name = "tconnectsync", marker = "extra == 'all'", specifier = ">=1.0" },
-    { name = "tconnectsync", marker = "extra == 'tandem'", specifier = ">=1.0" },
+    { name = "tconnectsync", marker = "extra == 'all'", specifier = ">=2.0" },
+    { name = "tconnectsync", marker = "extra == 'tandem'", specifier = ">=2.0" },
     { name = "uvicorn", marker = "extra == 'all'", specifier = ">=0.29" },
     { name = "uvicorn", marker = "extra == 'gui'", specifier = ">=0.29" },
 ]

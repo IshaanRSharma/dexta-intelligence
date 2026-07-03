@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Tandem connector retargeted at the Tandem Source API: docstrings and
+  user-facing strings updated, a runtime guard requires tconnectsync >= 2 (v1
+  spoke to the retired t:connect cloud), and the `[tandem]` extra now pins
+  `tconnectsync>=2.0`. Live-account verification still open (ISSUES #11).
 
 - External benchmark run in `bench/`: dexta vs the same model with the raw data
   in-context, on LLM-CGM (Healey & Kohane, PSB 2025). Head-to-head scripts, raw

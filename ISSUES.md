@@ -10,9 +10,12 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
 - **#11** Tandem connector targets the retired backend (2026-07-02, ecosystem
   survey): `connectors/tandem.py` documents and delegates to tconnectsync
   against the t:connect cloud, which Tandem shut down in the US on 2024-09-30.
-  tconnectsync v2+/v3 targets the replacement Tandem Source API. Verify against
-  a live account, require tconnectsync >= 2 where it is imported, and update
-  the connector docstring.
+  tconnectsync v2+/v3 targets the replacement Tandem Source API.
+  PARTIALLY RESOLVED (2026-07-02): docstrings and user-facing strings now
+  describe the Tandem Source API, `_build_client` enforces tconnectsync >= 2
+  at runtime with an upgrade hint, and the `[tandem]` extra is pinned to
+  `>=2.0`. Remaining: verify the full check/pull path against a live Tandem
+  Source account (all tests run on stubs).
 - **#12** Nightscout connector speaks legacy API v1 only (2026-07-02):
   `connectors/nightscout.py` uses `/api/v1/*` throughout. v1 still works, but
   API v3 is the secured, documented interface. Add v3 support with v1 fallback.

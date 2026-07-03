@@ -1,29 +1,29 @@
-"""Tandem t:slim X2 connector - direct pump data via the t:connect cloud.
+"""Tandem t:slim X2 connector - direct pump data via the Tandem Source API.
 
 .. warning:: **UNOFFICIAL, reverse-engineered API.** This connector talks to
-   Tandem's t:connect cloud through `tconnectsync
-   <https://github.com/jwoglom/tconnectsync>`_, which scrapes private,
-   undocumented endpoints used by the t:connect web and Android apps. It is
-   opt-in (the ``[tandem]`` extra), strictly read-only, and **may break without
-   notice** if Tandem changes its backend. No write/command path exists or ever
-   will - this only ever *reads* therapy data.
+   the Tandem Source cloud through `tconnectsync
+   <https://github.com/jwoglom/tconnectsync>`_ (v2 or newer), which drives
+   private, undocumented endpoints of Tandem Source. Source replaced the older
+   t:connect cloud that tconnectsync v1 targeted. It is opt-in (the
+   ``[tandem]`` extra), strictly read-only, and **may break without notice** if
+   Tandem changes its backend. No write/command path exists or ever will - this
+   only ever *reads* therapy data.
 
 The headline of this connector is what it removes: for a Control-IQ user it
 delivers real pump data - boluses, basal/temp-basal, suspends, and bolus-wizard
 carbs - **without the Nightscout hop**. You no longer need a Nightscout server
-and an uploader bridge to get insulin into dexta; t:connect credentials are
-enough.
+and an uploader bridge to get insulin into dexta; a Tandem account is enough.
 
 The module follows the house connector split:
 
-- **Pure conversion** (:func:`bolus_to_events`, :func:`basal_to_event`) takes
-  tconnectsync-shaped therapy-timeline records - the ``Bolus`` dataclass (all
-  string fields) and the basal/temp-basal dicts the ControlIQ parser emits -
-  and returns typed :class:`InsulinEvent` / :class:`MealEvent` objects. No I/O,
-  no tconnectsync import required: tests run on tiny stubs and plain dicts.
+- **Pure conversion** (:func:`bolus_to_events`, :func:`basal_to_event`,
+  :func:`pump_events_to_batch`) takes tconnectsync-shaped records and returns
+  typed :class:`InsulinEvent` / :class:`MealEvent` objects. No I/O, no
+  tconnectsync import required: tests run on tiny stubs and plain dicts.
 - **TandemConnector** owns the session: lazy tconnectsync import (optional
-  ``[tandem]`` extra), credential/region handling via :class:`TandemConfig`,
-  and the ``since`` -> ``therapy_timeline`` window.
+  ``[tandem]`` extra, tconnectsync >= 2), credential/region handling via
+  :class:`TandemConfig`, and the ``since`` -> ``pump_events`` window against
+  Tandem Source.
 
 Event mapping
 -------------
@@ -41,24 +41,25 @@ Event mapping
     - ``Profile``   -> ``kind=BASAL`` (scheduled-rate change).
     - ``Suspension``-> ``kind=SUSPEND`` (``duration_min``; no units).
 
-Timestamps: t:connect events carry **device-local time**. tconnectsync's
-parsers attach the user's configured timezone before formatting, so the strings
-it returns are ISO 8601 *with an offset* - which conversion normalizes to UTC.
+Timestamps: Tandem events carry **device-local time**. tconnectsync's parsers
+attach the user's configured timezone before formatting, so the strings it
+returns are ISO 8601 *with an offset* - which conversion normalizes to UTC.
 A naive timestamp (no offset, no ``Z``) is **rejected loudly** with
 ``ValueError`` per the house UTC rule: silently guessing a zone is exactly the
 class of pump/CGM time bug the models refuse to inherit, and a naive value here
 means tconnectsync had no timezone to apply.
 
 .. note:: The conversion below is written against tconnectsync's documented
-   record shapes (the ``Bolus`` dataclass and the ControlIQ basal dicts) and has
-   not been exercised against a live t:connect account. Field names,
-   ``delivery_type`` values, and the timezone behaviour of the parsed timestamps
-   should be validated against real credentials.
+   record shapes and has not been exercised against a live Tandem Source
+   account. Field names, event types, and the timezone behaviour of the parsed
+   timestamps should be validated against real credentials.
 """
 
 from __future__ import annotations
 
 import importlib
+import importlib.metadata
+import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
@@ -89,8 +90,12 @@ SOURCE = "tandem"
 PROFILE_SOURCE_ID = "tandem:profile:active"
 
 _DEDUPE_MARGIN = timedelta(minutes=5)
-#: t:connect's therapy_timeline takes whole-day bounds (``YYYY-MM-DD``).
+#: Tandem Source ``pump_events`` takes whole-day bounds (``YYYY-MM-DD``).
 _DATE_FMT = "%Y-%m-%d"
+
+#: Minimum tconnectsync major version: v2 retargeted the Tandem Source API
+#: after the legacy t:connect cloud was retired.
+_MIN_TCONNECTSYNC_MAJOR = 2
 
 #: tconnectsync basal ``delivery_type`` -> our InsulinKind. ``TempRate`` and
 #: ``Algorithm`` are both temp basals (Control-IQ's automatic adjustments are
@@ -188,7 +193,7 @@ def _parse_ts(value: object) -> datetime | None:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         msg = (
-            "naive tandem timestamp rejected: t:connect events are device-local "
+            "naive tandem timestamp rejected: Tandem events are device-local "
             "and tconnectsync attaches an offset; a naive value has no timezone"
         )
         raise ValueError(msg)
@@ -575,6 +580,27 @@ def _profile_raw_from_device(device: dict[str, Any]) -> RawEvent | None:
     return _raw_event_from_payload(SOURCE, PROFILE_SOURCE_ID, as_of, payload)
 
 
+def _tconnectsync_major(raw_version: str) -> int:
+    match = re.match(r"\d+", raw_version.strip())
+    return int(match.group()) if match else 0
+
+
+def _check_tconnectsync_version(raw_version: str) -> None:
+    """Raise if tconnectsync predates the Tandem Source API (major < 2).
+
+    tconnectsync v1 spoke to the legacy t:connect cloud, which Tandem retired;
+    v2 and newer drive the Tandem Source API this connector needs.
+    """
+    if _tconnectsync_major(raw_version) < _MIN_TCONNECTSYNC_MAJOR:
+        msg = (
+            f"tconnectsync {raw_version} is too old for the Tandem connector, "
+            f"which targets the Tandem Source API (needs tconnectsync >= "
+            f"{_MIN_TCONNECTSYNC_MAJOR}; v1 spoke to the retired t:connect cloud). "
+            "Upgrade it with: pip install -U 'dexta-intelligence[tandem]'"
+        )
+        raise RuntimeError(msg)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Connector - thin session layer over the pure conversion
 # ─────────────────────────────────────────────────────────────────────────────
@@ -582,10 +608,10 @@ def _profile_raw_from_device(device: dict[str, Any]) -> RawEvent | None:
 
 class TandemConnector:
     """Implements the :class:`~dexta_intelligence.connectors.base.Connector`
-    protocol against the Tandem t:connect cloud via tconnectsync.
+    protocol against the Tandem Source API via tconnectsync (v2 or newer).
 
-    Batch-only (not :class:`RealtimeConnector`): t:connect is the pump's upload
-    target, not a live stream - readings lag the device, so there is no
+    Batch-only (not :class:`RealtimeConnector`): Tandem Source is the pump's
+    upload target, not a live stream - readings lag the device, so there is no
     meaningful "right now" surface. tconnectsync is an optional extra and
     imported lazily, so the base install never pays for it.
     """
@@ -616,7 +642,7 @@ class TandemConnector:
                     ok=False,
                     source=self.source,
                     detail=(
-                        f"t:connect did not respond within {int(timeout_s)}s - "
+                        f"Tandem Source did not respond within {int(timeout_s)}s - "
                         "check network/VPN or try again later."
                     ),
                 )
@@ -724,10 +750,17 @@ class TandemConnector:
             tconnectsync = importlib.import_module("tconnectsync")
         except ImportError as exc:  # pragma: no cover - import-path guard
             msg = (
-                "Tandem t:connect support is not installed. "
+                "Tandem support is not installed. "
                 "Install it with: pip install 'dexta-intelligence[tandem]'"
             )
             raise RuntimeError(msg) from exc
+
+        try:
+            raw_version = importlib.metadata.version("tconnectsync")
+        except importlib.metadata.PackageNotFoundError:  # pragma: no cover
+            raw_version = str(getattr(tconnectsync, "__version__", "") or "")
+        if raw_version:
+            _check_tconnectsync_version(raw_version)
 
         client = tconnectsync.TConnectApi(
             email=self._config.email,
