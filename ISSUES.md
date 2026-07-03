@@ -7,6 +7,24 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
 
 ## Open / deferred
 
+- **#15** Deterministic context curator, first slice (2026-07-03, from the
+  context-engineering research pass): a `select_context(query, budget)` over
+  the episode graph and findings. Collect per type (FACTS: tool outputs and
+  episode nodes; BELIEFS: findings/hypotheses; CONVENTIONS: the metric
+  ontology; HISTORY: turn results), score deterministically (relevance,
+  temporal overlap with the asked window, salience, freshness, type prior
+  with facts over beliefs), fill under a token budget with per-type floors,
+  and return the selection PLUS a drop list with reasons. Invariants: pruning
+  reduces tokens never ground-truth availability (the store is truth, the
+  window is a view); severe episodes and treatment-gate inputs are never
+  droppable; every drop emits a trace line; same query and state yields the
+  same selection. No LLM in the write or drop path (optional re-ranker over
+  the deterministic top-N only). No memory-graph libraries: Graphiti, Mem0,
+  Cognee, and Letta all LLM-author their graph write path, which would put
+  ungated model-authored claims upstream of the faithfulness guard; Kuzu is
+  archived (Apple acquisition). NetworkX only if multi-hop queries ever
+  demand it. Types kept isolated per MemGuard (arXiv 2605.28009); context-rot
+  evidence in arXiv 2606.10209.
 - **#13** Faithfulness guard is set-membership, not provenance-aware (2026-07-03,
   from the LLM-CGM paper study): the guard's own docstring states it does
   "set-membership checking, not semantic verification. A number can match the
