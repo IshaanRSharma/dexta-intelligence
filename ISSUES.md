@@ -34,6 +34,15 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
   consult. Also make temporal episodes (excursions, lows, gaps) first-class
   segmented objects rather than per-tool outputs; the paper's worst code-agent
   scores were all temporal segmentation tasks.
+  PARTIALLY RESOLVED (2026-07-03): `analytics/episodes.py` makes hypo/hyper
+  excursions and sensor gaps first-class `Episode` nodes with typed
+  `ContextLink` edges to nearby meals, boluses, activity, and sleep
+  (per-kind reach windows), thresholds aligned to the LLM-CGM ground-truth
+  definitions, and `summarize()` emitting ontology-aligned keys. Validated
+  against the P1 bench ground truth (65 hypo episodes, 25 clinically
+  significant). Remaining: wire `summarize()` into the faithfulness guard as
+  episode-scoped evidence, thread episodes into trace.py, and the broader
+  definitions layer both agent and guard consult.
 - **#11** Tandem connector targets the retired backend (2026-07-02, ecosystem
   survey): `connectors/tandem.py` documents and delegates to tconnectsync
   against the t:connect cloud, which Tandem shut down in the US on 2024-09-30.
