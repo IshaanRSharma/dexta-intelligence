@@ -7,6 +7,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Bitemporal finding edges: findings now link through a `finding_edges` table
+  (supersedes, contradicts, plus reserved relations), each edge carrying
+  event time and knowledge time and a deterministic reason. Edges are
+  authored only where the system already computes the fact (supersession,
+  contradiction detection, synthesis retirement); nothing model-authored
+  enters the graph.
+- Deterministic context curator (`memory/curator.py`): `select_context` picks
+  typed context (facts, beliefs, conventions, history) under a token budget
+  with per-type floors and returns a drop list where every drop carries a
+  trace-ready reason. Severe episodes and treatment-gate inputs are never
+  droppable; scoring is clock-free and reproducible (ISSUES #15).
 - Temporal episode graph (`analytics/episodes.py`): hypo/hyper excursions and
   sensor gaps as first-class episode nodes (span, duration, extreme, severity,
   clinical significance) with typed context edges to the meals, boluses,

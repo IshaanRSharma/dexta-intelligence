@@ -1,6 +1,6 @@
 """Agent memory - finding semantics over the store, plus its wiki projection."""
 
-from dexta_intelligence.memory import embeddings
+from dexta_intelligence.memory import curator, embeddings
 from dexta_intelligence.memory.findings import (
     contradicts_edge,
     count_recurrence,
@@ -29,6 +29,7 @@ __all__ = [
     "WikiReport",
     "contradicts_edge",
     "count_recurrence",
+    "curator",
     "embeddings",
     "find_contradictions",
     "find_similar",

@@ -25,6 +25,20 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
   archived (Apple acquisition). NetworkX only if multi-hop queries ever
   demand it. Types kept isolated per MemGuard (arXiv 2605.28009); context-rot
   evidence in arXiv 2606.10209.
+  RESOLVED (2026-07-05): shipped in two parts. (1) Bitemporal finding edges:
+  `EdgeRelation`/`FindingEdge` models, a `finding_edges` table in both
+  backends (sqlite v10, postgres v8) behind `add_finding_edge`/
+  `get_finding_edges` on the port, deterministically authored where the
+  system already computes the fact (persist_findings supersession and
+  find_contradictions, the monitor's worsened-anomaly supersede, the
+  synthesis save path). (2) `memory/curator.py` `select_context`: typed
+  selection (facts, beliefs, conventions, history) under a token budget with
+  per-type floors, a drop list where every drop carries a trace-ready
+  reason, an unconditional safety floor for severe episodes and
+  treatment-gate inputs, and clock-free deterministic scoring (now is a
+  parameter). `supports`/`co_occurs` relations are defined but unauthored,
+  reserved for future deterministic authors. Curator is not yet wired into
+  the reasoning loop's prompt assembly; that wiring is the follow-up.
 - **#13** Faithfulness guard is set-membership, not provenance-aware (2026-07-03,
   from the LLM-CGM paper study): the guard's own docstring states it does
   "set-membership checking, not semantic verification. A number can match the
