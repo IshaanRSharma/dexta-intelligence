@@ -8,16 +8,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from dexta_intelligence.models import Finding, FindingStatus
+from dexta_intelligence.models import EdgeRelation, Finding, FindingEdge, FindingStatus
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import datetime
 
 __all__ = [
+    "contradicts_edge",
     "count_recurrence",
     "find_contradictions",
     "find_similar",
     "recurrence_headline_suffix",
+    "supersedes_edge",
 ]
 
 #: Minimum |effect| delta to treat two findings as directionally opposed.
@@ -56,6 +59,58 @@ def recurrence_headline_suffix(recurrence: int) -> str:
         return ""
     total = recurrence + 1
     return f" Similar pattern, {total} occurrence(s) including this run."
+
+
+def _edge_event_time(new: Finding, old: Finding) -> datetime | None:
+    """Timeline anchor for an edge: the newest window bound available, in order."""
+    for value in (new.window_end, new.window_start, old.window_end, old.window_start):
+        if value is not None:
+            return value
+    return None
+
+
+def supersedes_edge(
+    *, new_id: int, old: Finding, new: Finding, now: datetime
+) -> FindingEdge:
+    """A SUPERSEDES edge from the new finding to the one it replaced.
+
+    Deterministic: ``event_time`` is the newest finding window bound (when the
+    relationship held in the timeline), ``knowledge_time`` is ``now``. ``old.id``
+    must be set (the prior is already persisted).
+    """
+    assert old.id is not None
+    return FindingEdge(
+        src_id=new_id,
+        dst_id=old.id,
+        relation=EdgeRelation.SUPERSEDES,
+        knowledge_time=now,
+        event_time=_edge_event_time(new, old),
+        evidence=(
+            f"re-derived {new.agent}/{new.kind}/{new.scope}; "
+            f"seen_count={new.seen_count}"
+        ),
+    )
+
+
+def contradicts_edge(
+    *, new_id: int, old: Finding, new: Finding, now: datetime
+) -> FindingEdge:
+    """A CONTRADICTS edge from the new finding to an opposed prior.
+
+    The reason string records the opposing effect sizes that
+    :func:`find_contradictions` matched on. ``old.id`` must be set.
+    """
+    assert old.id is not None
+    prior_effect = old.stats.effect_size
+    effect = new.stats.effect_size
+    return FindingEdge(
+        src_id=new_id,
+        dst_id=old.id,
+        relation=EdgeRelation.CONTRADICTS,
+        knowledge_time=now,
+        event_time=_edge_event_time(new, old),
+        evidence=f"opposite effect: prior {prior_effect:+.3g} vs current {effect:+.3g}",
+    )
 
 
 def find_contradictions(

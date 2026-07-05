@@ -13,6 +13,11 @@ from typing import TYPE_CHECKING
 
 from dexta_intelligence.agents.skeptic import AGENT_NAME as SKEPTIC_NAME
 from dexta_intelligence.agents.skeptic import confound_hypotheses, skeptic_agent
+from dexta_intelligence.memory.findings import (
+    contradicts_edge,
+    find_contradictions,
+    supersedes_edge,
+)
 from dexta_intelligence.models import FindingStatus, HypothesisStatus
 
 if TYPE_CHECKING:
@@ -104,6 +109,11 @@ def persist_findings(
     ``seen_count + 1`` and a fresh ``last_verified``, so a pattern that keeps
     recurring stays fresh while one that stops being re-derived ages out (see
     :mod:`dexta_intelligence.memory.freshness`).
+
+    Each supersession and each contradiction (per
+    :func:`~dexta_intelligence.memory.findings.find_contradictions`, the same
+    deterministic rule the skeptic applies) is also recorded as a typed
+    :class:`~dexta_intelligence.models.FindingEdge` on the findings graph.
     """
     moment = now if now is not None else datetime.now(tz=UTC)
     persisted: list[int] = []
@@ -119,9 +129,17 @@ def persist_findings(
         stamped = finding.model_copy(update={"seen_count": carried, "last_verified": moment})
         new_id = store.insert_finding(stamped)
         persisted.append(new_id)
+        for old in find_contradictions(stamped, prior):
+            if old.id is not None:
+                store.add_finding_edge(
+                    contradicts_edge(new_id=new_id, old=old, new=stamped, now=moment)
+                )
         for old in matching:
             if old.id is not None:
                 store.supersede_finding(old.id, new_id)
+                store.add_finding_edge(
+                    supersedes_edge(new_id=new_id, old=old, new=stamped, now=moment)
+                )
     return persisted
 
 

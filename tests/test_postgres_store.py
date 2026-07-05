@@ -24,7 +24,9 @@ import pytest
 from dexta_intelligence.models import (
     ActivityEvent,
     DeviceEvent,
+    EdgeRelation,
     Finding,
+    FindingEdge,
     FindingStats,
     FindingStatus,
     GlucoseEvent,
@@ -64,6 +66,7 @@ _TABLES = [
     "goal_checkpoints",
     "goals",
     "hypotheses",
+    "finding_edges",
     "findings",
     "rollups",
     "prediction_events",
@@ -512,6 +515,62 @@ class TestPostgresContract:
         (active,) = store.get_findings(status=FindingStatus.ACTIVE)
         assert active.id == new_id
         assert active.superseded_by is None
+
+    # ── finding edges ──────────────────────────────────────────────────────────
+
+    def test_finding_edge_round_trip(self, store: PostgresStore) -> None:
+        edge = FindingEdge(
+            src_id=2,
+            dst_id=1,
+            relation=EdgeRelation.SUPERSEDES,
+            knowledge_time=T0,
+            event_time=T0 - timedelta(days=1),
+            evidence="re-derived pattern_miner/overnight_low/overnight",
+        )
+        eid = store.add_finding_edge(edge)
+        (got,) = store.get_finding_edges()
+        assert got == edge.model_copy(update={"id": eid})
+        assert got.knowledge_time.utcoffset() == timedelta(0)
+
+    def test_finding_edge_optional_event_time(self, store: PostgresStore) -> None:
+        store.add_finding_edge(
+            FindingEdge(
+                src_id=2, dst_id=1, relation=EdgeRelation.CO_OCCURS,
+                knowledge_time=T0, evidence="same run",
+            )
+        )
+        (got,) = store.get_finding_edges()
+        assert got.event_time is None
+
+    def test_finding_edge_filters(self, store: PostgresStore) -> None:
+        def edge(src: int, dst: int, relation: EdgeRelation) -> FindingEdge:
+            return FindingEdge(
+                src_id=src, dst_id=dst, relation=relation,
+                knowledge_time=T0, evidence="r",
+            )
+
+        store.add_finding_edge(edge(2, 1, EdgeRelation.SUPERSEDES))
+        store.add_finding_edge(edge(3, 1, EdgeRelation.CONTRADICTS))
+        store.add_finding_edge(edge(3, 2, EdgeRelation.SUPERSEDES))
+        assert len(store.get_finding_edges(src_id=3)) == 2
+        assert len(store.get_finding_edges(dst_id=1)) == 2
+        (contra,) = store.get_finding_edges(relation=EdgeRelation.CONTRADICTS)
+        assert contra.src_id == 3
+        (both,) = store.get_finding_edges(src_id=3, dst_id=1)
+        assert both.relation is EdgeRelation.CONTRADICTS
+        assert store.get_finding_edges(src_id=99) == []
+
+    def test_finding_edges_ordered_and_not_deduped(self, store: PostgresStore) -> None:
+        def edge(knowledge_time: datetime) -> FindingEdge:
+            return FindingEdge(
+                src_id=2, dst_id=1, relation=EdgeRelation.SUPERSEDES,
+                knowledge_time=knowledge_time, evidence="r",
+            )
+
+        store.add_finding_edge(edge(T0))
+        store.add_finding_edge(edge(T0 + timedelta(days=1)))
+        got = store.get_finding_edges(src_id=2, dst_id=1)
+        assert [e.knowledge_time for e in got] == [T0, T0 + timedelta(days=1)]
 
     # ── hypotheses ─────────────────────────────────────────────────────────────
 

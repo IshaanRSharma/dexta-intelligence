@@ -23,7 +23,9 @@ if TYPE_CHECKING:
         ChatTurn,
         CoverageStats,
         DeviceEvent,
+        EdgeRelation,
         Finding,
+        FindingEdge,
         FindingStatus,
         GlucoseEvent,
         Goal,
@@ -149,6 +151,25 @@ class StoragePort(Protocol):
         status: FindingStatus | None = None,
         limit: int = 50,
     ) -> list[Finding]: ...
+
+    def add_finding_edge(self, edge: FindingEdge) -> int:
+        """Persist one typed finding-to-finding edge; returns its id.
+
+        Edges are deterministically authored (supersession, contradiction); the
+        store never de-duplicates them, so re-authoring the same relationship on a
+        later run records a fresh knowledge_time.
+        """
+        ...
+
+    def get_finding_edges(
+        self,
+        *,
+        src_id: int | None = None,
+        dst_id: int | None = None,
+        relation: EdgeRelation | None = None,
+    ) -> list[FindingEdge]:
+        """Edges filtered by any of src/dst/relation, oldest first (id ascending)."""
+        ...
 
     def insert_hypothesis(self, hypothesis: Hypothesis) -> int: ...
     def get_hypotheses(self, *, status: str | None = None) -> list[Hypothesis]: ...

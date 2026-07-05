@@ -32,7 +32,9 @@ __all__ = [
     "ContextRequest",
     "CoverageStats",
     "DeviceEvent",
+    "EdgeRelation",
     "Finding",
+    "FindingEdge",
     "FindingStats",
     "FindingStatus",
     "GlucoseEvent",
@@ -372,6 +374,44 @@ class Finding(_FrozenModel):
     #: analyses have produced it (recurrence), which lengthens the TTL.
     last_verified: datetime | None = None
     seen_count: int = 1
+
+
+class EdgeRelation(enum.StrEnum):
+    """How one finding relates to another on the findings graph.
+
+    Deterministically authored, never model-written: an edge is only persisted
+    where the system already computes the relationship (supersession on re-derive,
+    contradiction on opposite effect). ``supports`` / ``co_occurs`` are reserved
+    for future deterministic authors.
+    """
+
+    SUPERSEDES = "supersedes"
+    CONTRADICTS = "contradicts"
+    SUPPORTS = "supports"
+    CO_OCCURS = "co_occurs"
+
+
+class FindingEdge(_FrozenModel):
+    """A typed, bitemporal edge between two findings (``src`` relates to ``dst``).
+
+    Bitemporal so the graph can be read as of a moment in either axis:
+    ``event_time`` is when the relationship held in the patient timeline (from the
+    findings' windows); ``knowledge_time`` is when dexta formed the edge. ``evidence``
+    is a short deterministic reason string, suitable for a trace line. Edges are
+    authored by code, never by the model, so nothing model-written ever reaches
+    the graph upstream of the faithfulness guard.
+    """
+
+    src_id: int
+    dst_id: int
+    relation: EdgeRelation
+    knowledge_time: datetime
+    event_time: datetime | None = None
+    evidence: str = ""
+    id: int | None = None
+
+    _utc_knowledge = field_validator("knowledge_time")(_require_utc)
+    _utc_event = field_validator("event_time")(_require_utc_opt)
 
 
 class HypothesisStatus(enum.StrEnum):

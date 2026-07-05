@@ -2,10 +2,12 @@
 
 from dexta_intelligence.memory import embeddings
 from dexta_intelligence.memory.findings import (
+    contradicts_edge,
     count_recurrence,
     find_contradictions,
     find_similar,
     recurrence_headline_suffix,
+    supersedes_edge,
 )
 from dexta_intelligence.memory.synthesis import (
     SynthesisResult,
@@ -25,6 +27,7 @@ __all__ = [
     "STALE_THRESHOLD",
     "SynthesisResult",
     "WikiReport",
+    "contradicts_edge",
     "count_recurrence",
     "embeddings",
     "find_contradictions",
@@ -34,6 +37,7 @@ __all__ = [
     "recurrence_headline_suffix",
     "save",
     "staleness",
+    "supersedes_edge",
     "synthesize",
     "topic_slug",
 ]

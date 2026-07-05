@@ -16,9 +16,11 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.guard.faithfulness import audit
+from dexta_intelligence.memory.findings import supersedes_edge
 from dexta_intelligence.models import Finding, FindingStatus
 
 if TYPE_CHECKING:
@@ -125,11 +127,14 @@ def save(store: StoragePort, result: SynthesisResult, *, today: date) -> None:
     SUPERSEDED first, so :func:`load_latest` always reads exactly one. An empty
     result still supersedes - the prior narrative should not linger once stale.
     """
-    for prior in store.get_findings(
-        agent=_SYNTHESIS_AGENT, status=FindingStatus.ACTIVE
-    ):
-        if prior.id is not None:
-            store.set_finding_status(prior.id, FindingStatus.SUPERSEDED)
+    priors = [
+        prior
+        for prior in store.get_findings(agent=_SYNTHESIS_AGENT, status=FindingStatus.ACTIVE)
+        if prior.id is not None
+    ]
+    for prior in priors:
+        assert prior.id is not None
+        store.set_finding_status(prior.id, FindingStatus.SUPERSEDED)
 
     finding = Finding(
         agent=_SYNTHESIS_AGENT,
@@ -144,7 +149,12 @@ def save(store: StoragePort, result: SynthesisResult, *, today: date) -> None:
         confidence=0.5,
         status=FindingStatus.ACTIVE,
     )
-    store.insert_finding(finding)
+    new_id = store.insert_finding(finding)
+    moment = datetime(today.year, today.month, today.day, tzinfo=UTC)
+    for prior in priors:
+        store.add_finding_edge(
+            supersedes_edge(new_id=new_id, old=prior, new=finding, now=moment)
+        )
 
 
 def load_latest(store: StoragePort) -> SynthesisResult | None:
