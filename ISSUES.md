@@ -37,8 +37,10 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
   reason, an unconditional safety floor for severe episodes and
   treatment-gate inputs, and clock-free deterministic scoring (now is a
   parameter). `supports`/`co_occurs` relations are defined but unauthored,
-  reserved for future deterministic authors. Curator is not yet wired into
-  the reasoning loop's prompt assembly; that wiring is the follow-up.
+  reserved for future deterministic authors. Follow-up done (2026-07-07):
+  `agents/curation.py` wires `select_context` into the chat and orchestrator
+  system prompts with one trace receipt per pruned item; numbers still route
+  through tools so the guard's evidence pool stays tool-only.
 - **#13** Faithfulness guard is set-membership, not provenance-aware (2026-07-03,
   from the LLM-CGM paper study): the guard's own docstring states it does
   "set-membership checking, not semantic verification. A number can match the
