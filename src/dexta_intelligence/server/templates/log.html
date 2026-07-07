@@ -54,6 +54,54 @@
   </form>
 </article>
 
+<article class="card">
+  <h2>Or describe it in your own words</h2>
+  <p class="page-sub">dexta proposes structured events from your text. A deterministic validator checks each one, and nothing is stored until you confirm it below.</p>
+  <form method="post" action="/actions/capture/propose">
+    <div class="fields">
+      <div class="field">
+        <label class="field-label" for="capture-utterance">What happened?</label>
+        <input id="capture-utterance" name="utterance" type="text" placeholder="e.g. felt shaky after lunch and changed my infusion site" autocomplete="off" />
+      </div>
+    </div>
+    <div class="card-actions">
+      <button type="submit">Propose events</button>
+    </div>
+  </form>
+</article>
+
+{% if pending %}
+<div class="page-head" style="margin-top:24px">
+  <h2>Proposed from your words - confirm to log</h2>
+  <p class="page-sub">Parsed by the model, checked by the validator. Unconfirmed proposals are never stored and never used as evidence.</p>
+</div>
+<div class="cards">
+  {% for p in pending %}
+  <article class="card finding-card">
+    <div class="card-head">
+      <h2>{{ p.note or p.type_label }}</h2>
+      <span class="badge neutral">proposed, unconfirmed</span>
+    </div>
+    <div class="chips">
+      {{ chip("type", p.type_label) }}
+      {{ chip("when", p.when) }}
+    </div>
+    <p class="stats">From: &ldquo;{{ p.utterance }}&rdquo;</p>
+    <div class="btn-row">
+      <form method="post" action="/actions/capture/confirm">
+        <input type="hidden" name="proposal_id" value="{{ p.id }}" />
+        <button type="submit">Confirm and log</button>
+      </form>
+      <form method="post" action="/actions/capture/dismiss">
+        <input type="hidden" name="proposal_id" value="{{ p.id }}" />
+        <button type="submit" class="btn btn-secondary">Dismiss</button>
+      </form>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if events %}
 <div class="page-head" style="margin-top:24px">
   <h2>Recent context</h2>

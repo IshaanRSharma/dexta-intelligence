@@ -65,6 +65,7 @@ from dexta_intelligence.server.settings_schema import (
     source_nav,
 )
 from dexta_intelligence.server.views_context import context_page_view
+from dexta_intelligence.server.views_episode import episode_card_view
 from dexta_intelligence.server.views_evals import evals_page_view
 from dexta_intelligence.server.views_findings import (
     _active_card,
@@ -175,6 +176,9 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     # it from config at boot, and the Connectors page retunes it live.
     app.state.autosync = AutoSyncController(config, store_opener)
     app.state.status_pill_cache = {"text": "", "at": 0.0}
+    # Accepted-but-unconfirmed capture proposals, keyed by id. In-memory on
+    # purpose: an unconfirmed proposal must never touch the store.
+    app.state.pending_captures = {}
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     templates = Jinja2Templates(directory=str(templates_dir))
     _static_stamps = [f.stat().st_mtime for f in static_dir.iterdir() if f.is_file()]
@@ -358,6 +362,10 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
         events = [_manual_event_view(e, tz, now) for e in reversed(recent)]
+        pending = [
+            _pending_capture_view(pid, proposal, tz)
+            for pid, proposal in request.app.state.pending_captures.items()
+        ]
         return _render(
             "log.html",
             request,
@@ -365,6 +373,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             flash=_log_banner(flash),
             event_types=_MANUAL_EVENT_TYPES,
             events=events,
+            pending=pending,
             default_ts=now.astimezone(tz).strftime("%Y-%m-%dT%H:%M"),
             **missing,
         )
@@ -402,6 +411,61 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
         return RedirectResponse("/log?flash=log_ok", status_code=303)
+
+    # ── conversational capture: propose (LLM) → validate → confirm (user) ────
+
+    @app.post("/actions/capture/propose")
+    def action_capture_propose(request: Request, utterance: str = Form("")) -> Any:
+        """Parse free text into validated, PENDING proposals. Persists nothing:
+        proposals wait in memory until the user confirms each one explicitly."""
+        from dexta_intelligence.agents.capture import (  # noqa: PLC0415
+            propose_events,
+            validate_proposal,
+        )
+
+        text = utterance.strip()
+        if not text:
+            return RedirectResponse("/log?flash=capture_empty", status_code=303)
+        model = getattr(request.app.state, "chat_model", None) or discovery_model(config)
+        if model is None:
+            return RedirectResponse("/log?flash=capture_nomodel", status_code=303)
+        now = datetime.now(UTC)
+        window = (now - timedelta(days=_CAPTURE_WINDOW_DAYS), now + timedelta(hours=1))
+        accepted = rejected = 0
+        for proposal in propose_events(model, text, now):
+            verdict = validate_proposal(proposal, window)
+            if verdict.accepted:
+                request.app.state.pending_captures[uuid.uuid4().hex] = proposal
+                accepted += 1
+            else:
+                logger.info("capture: proposal rejected (%s)", verdict.reason)
+                rejected += 1
+        return RedirectResponse(
+            f"/log?flash=capture_done:{accepted}:{rejected}", status_code=303
+        )
+
+    @app.post("/actions/capture/confirm")
+    def action_capture_confirm(request: Request, proposal_id: str = Form(...)) -> Any:
+        """The commit gate: only this explicit user POST persists a proposal,
+        tagged source="chat_confirmed" with the source utterance retained."""
+        from dexta_intelligence.agents.capture import confirmed_manual_event  # noqa: PLC0415
+
+        proposal = request.app.state.pending_captures.pop(proposal_id, None)
+        if proposal is None:
+            return RedirectResponse("/log?flash=capture_gone", status_code=303)
+        store = store_opener(config, None)
+        try:
+            store.add_manual_event(
+                confirmed_manual_event(proposal, created_at=datetime.now(UTC))
+            )
+        finally:
+            _close(store, store_opener)
+        return RedirectResponse("/log?flash=log_ok", status_code=303)
+
+    @app.post("/actions/capture/dismiss")
+    def action_capture_dismiss(request: Request, proposal_id: str = Form(...)) -> Any:
+        request.app.state.pending_captures.pop(proposal_id, None)
+        return RedirectResponse("/log?flash=capture_dismissed", status_code=303)
 
     @app.post("/actions/upload")
     async def action_upload(request: Request, file: UploadFile = File(...)) -> Any:  # noqa: B008
@@ -866,6 +930,12 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             answer = agent.ask(ctx, question)
         finally:
             _close(store, store_opener)
+        episode_context = getattr(answer, "episode_context", None)
+        episode = (
+            episode_card_view(episode_context, _analysis_tz(config))
+            if episode_context
+            else None
+        )
         return _render(
             "_answer.html",
             request,
@@ -876,6 +946,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             tools=list(answer.tools_used),
             faithful=answer.faithful,
             violations=list(answer.violations),
+            episode=episode,
         )
 
     @app.get("/api/ask/stream")
@@ -960,6 +1031,12 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                     store.append_chat_turn(
                         ChatTurn(session_id=sid, role="assistant", content=answer.text, ts=now)
                     )
+                episode_html = None
+                episode_context = getattr(answer, "episode_context", None)
+                if episode_context:
+                    episode_html = templates.get_template("_episode_card.html").render(
+                        episode=episode_card_view(episode_context, _analysis_tz(config))
+                    )
                 events.put(
                     {
                         "kind": "answer",
@@ -972,6 +1049,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                                 {"icon": line.icon, "text": line.text} for line in answer.trace
                             ],
                             "violations": list(answer.violations),
+                            "episode_html": episode_html,
                         },
                     }
                 )
@@ -1951,6 +2029,10 @@ _MANUAL_EVENT_TYPES: tuple[tuple[str, str], ...] = (
 )
 _MANUAL_TYPE_LABELS = dict(_MANUAL_EVENT_TYPES)
 
+#: Plausible-timestamp reach for capture proposals: how far back a chat
+#: utterance may place an event and still be confirmable.
+_CAPTURE_WINDOW_DAYS = 7
+
 
 def _analysis_tz(config: Config) -> ZoneInfo:
     """The patient-local zone from config, falling back to UTC on anything unknown."""
@@ -1974,13 +2056,53 @@ def _parse_local_dt(value: str, tz: ZoneInfo) -> datetime | None:
     return dt.astimezone(UTC)
 
 
+_LOG_FLASHES: dict[str, dict[str, str]] = {
+    "log_ok": {"kind": "ok", "text": "Context logged. It is now part of your timeline."},
+    "log_badtype": {"kind": "warn", "text": "Unknown event type. Nothing was logged."},
+    "capture_empty": {"kind": "warn", "text": "Describe what happened first."},
+    "capture_nomodel": {
+        "kind": "warn",
+        "text": "Proposing events from text needs a language model. "
+        "Set a provider in Settings, or use the form above.",
+    },
+    "capture_gone": {"kind": "warn", "text": "That proposal is no longer pending."},
+    "capture_dismissed": {"kind": "ok", "text": "Proposal dismissed. Nothing was logged."},
+}
+
+
 def _log_banner(flash: str | None) -> dict[str, str] | None:
     """Flash banner for the /log page."""
-    if flash == "log_ok":
-        return {"kind": "ok", "text": "Context logged. It is now part of your timeline."}
-    if flash == "log_badtype":
-        return {"kind": "warn", "text": "Unknown event type. Nothing was logged."}
-    return None
+    if flash and flash.startswith("capture_done:"):
+        return _capture_done_banner(flash)
+    return _LOG_FLASHES.get(flash or "")
+
+
+def _capture_done_banner(flash: str) -> dict[str, str]:
+    try:
+        accepted, rejected = (int(part) for part in flash.split(":")[1:3])
+    except (ValueError, IndexError):
+        accepted, rejected = 0, 0
+    parts: list[str] = []
+    if accepted:
+        parts.append(f"{accepted} proposal(s) ready below - confirm to log them.")
+    if rejected:
+        parts.append(f"{rejected} proposal(s) rejected by the validator.")
+    if not parts:
+        parts.append("No loggable events found in that text.")
+    return {"kind": "ok" if accepted else "warn", "text": " ".join(parts)}
+
+
+def _pending_capture_view(pid: str, proposal: Any, tz: ZoneInfo) -> dict[str, Any]:
+    """Shape one pending capture proposal for the /log confirm cards."""
+    return {
+        "id": pid,
+        "type_label": _MANUAL_TYPE_LABELS.get(
+            proposal.event_type, proposal.event_type.replace("_", " ").title()
+        ),
+        "when": proposal.ts.astimezone(tz).strftime("%b %d, %Y · %H:%M"),
+        "note": proposal.note,
+        "utterance": proposal.source_utterance,
+    }
 
 
 def _manual_event_view(e: ManualEvent, tz: ZoneInfo, now: datetime) -> dict[str, Any]:
