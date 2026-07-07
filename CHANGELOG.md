@@ -7,6 +7,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- The graph, surfaced as product: a why-chain episode card on chat answers
+  (span, duration, extreme, severity, typed context edges with signed
+  offsets), recurrence lines on briefs and recall ("seen 7 times since May
+  12"), `what_changed` and `contradicted_beliefs` belt tools over the
+  SUPERSEDES and CONTRADICTS edges, and a deterministic endo-visit brief
+  (top 3 findings with receipts and a neutral question each, dosing-bait and
+  unfaithful candidates structurally dropped).
+- Conversational capture, thesis-safe: the model proposes structured events
+  from free text, a deterministic validator checks type, window, and
+  dosing-text rejection, and the user's one-tap confirmation on /log is the
+  only commit gate. Unconfirmed proposals live in process memory and cannot
+  reach the store, guard, findings, or graph.
+- Curated context in the reasoning prompts: the deterministic curator's
+  typed selection now feeds chat and orchestrator system prompts, with one
+  trace receipt per pruned item.
 - Bitemporal finding edges: findings now link through a `finding_edges` table
   (supersedes, contradicts, plus reserved relations), each edge carrying
   event time and knowledge time and a deterministic reason. Edges are

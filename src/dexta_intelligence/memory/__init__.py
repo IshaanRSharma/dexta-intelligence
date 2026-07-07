@@ -7,6 +7,7 @@ from dexta_intelligence.memory.findings import (
     find_contradictions,
     find_similar,
     recurrence_headline_suffix,
+    recurrence_line,
     supersedes_edge,
 )
 from dexta_intelligence.memory.synthesis import (
@@ -36,6 +37,7 @@ __all__ = [
     "generate_wiki",
     "load_latest",
     "recurrence_headline_suffix",
+    "recurrence_line",
     "save",
     "staleness",
     "supersedes_edge",

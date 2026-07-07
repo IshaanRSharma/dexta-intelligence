@@ -17,6 +17,7 @@ from dexta_intelligence.agents.tools.episodes import episode_specs
 from dexta_intelligence.agents.tools.glucose import glucose_specs
 from dexta_intelligence.agents.tools.literature import literature_specs
 from dexta_intelligence.agents.tools.manual import manual_specs
+from dexta_intelligence.agents.tools.memory_graph import memory_graph_specs
 from dexta_intelligence.agents.tools.recall import recall_specs
 from dexta_intelligence.agents.tools.similar import similar_specs
 from dexta_intelligence.agents.tools.time_tools import time_tool_specs
@@ -42,6 +43,7 @@ def build_belt(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
 
     specs = [
         *recall_specs(ctx),
+        *memory_graph_specs(ctx),
         *glucose_specs(ctx, toolkit),
         *episode_specs(ctx, toolkit),
         *compare_specs(toolkit),

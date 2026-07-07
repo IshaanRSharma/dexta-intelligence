@@ -20,6 +20,7 @@ __all__ = [
     "find_contradictions",
     "find_similar",
     "recurrence_headline_suffix",
+    "recurrence_line",
     "supersedes_edge",
 ]
 
@@ -59,6 +60,22 @@ def recurrence_headline_suffix(recurrence: int) -> str:
         return ""
     total = recurrence + 1
     return f" Similar pattern, {total} occurrence(s) including this run."
+
+
+def recurrence_line(finding: Finding) -> str:
+    """The recurrence receipt for one finding: "seen 7 times since May 12".
+
+    Built from the finding's own lifecycle fields (``seen_count`` and its
+    window bounds), so any surface rendering a finding can attach it without a
+    store query. Empty for a first sighting; the since-date is the earliest
+    window bound the record retains.
+    """
+    if finding.seen_count <= 1:
+        return ""
+    since = finding.window_start or finding.window_end
+    if since is None:
+        return f"seen {finding.seen_count} times"
+    return f"seen {finding.seen_count} times since {since.strftime('%b %d')}"
 
 
 def _edge_event_time(new: Finding, old: Finding) -> datetime | None:

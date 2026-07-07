@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents import prompts
 from dexta_intelligence.guard.faithfulness import audit
-from dexta_intelligence.memory.findings import count_recurrence
+from dexta_intelligence.memory.findings import count_recurrence, recurrence_line
 from dexta_intelligence.models import FindingStatus
 
 if TYPE_CHECKING:
@@ -185,6 +185,9 @@ def _deterministic_section(finding: Finding) -> BriefSection:
     numbers = _evidence_numbers_line(finding)
 
     body_parts = [finding.headline.strip()]
+    recurrence = recurrence_line(finding)
+    if recurrence:
+        body_parts.append(f"{recurrence[0].upper()}{recurrence[1:]}.")
     if stats:
         body_parts.append(stats)
     if numbers:
@@ -367,6 +370,10 @@ def _evidence_pool(findings: Sequence[Finding]) -> dict[str, Any]:
     for i, finding in enumerate(findings):
         pool[f"evidence_{i}"] = finding.evidence
         pool[f"stats_{i}"] = finding.stats.model_dump()
+        lifecycle: dict[str, Any] = {"seen_count": finding.seen_count}
+        if finding.window_start is not None:
+            lifecycle["window_start"] = finding.window_start.isoformat()
+        pool[f"lifecycle_{i}"] = lifecycle
     return pool
 
 

@@ -1649,6 +1649,7 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
     """
     from dexta_intelligence.agents.brief import _ADVICE_RE  # noqa: PLC0415
     from dexta_intelligence.memory import embeddings  # noqa: PLC0415
+    from dexta_intelligence.memory.findings import recurrence_line  # noqa: PLC0415
     from dexta_intelligence.memory.synthesis import load_latest  # noqa: PLC0415
 
     def _reads_as_dosing(f: Finding) -> bool:
@@ -1684,6 +1685,9 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
             "confidence": f.confidence,
             "status": f.status.value,
         }
+        recurrence = recurrence_line(f)
+        if recurrence:
+            item["recurrence"] = recurrence
         if f.skeptic_notes:
             item["skeptic_notes"] = f.skeptic_notes
         items.append(item)
