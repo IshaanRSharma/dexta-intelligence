@@ -7,6 +7,19 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
 
 ## Open / deferred
 
+- **#16** Dosing-gate residuals and capture housekeeping (2026-07-07, from
+  the adversarial red-team pass). The lexical gate now catches the synonym
+  and quantity-implied bypasses, but three residual classes intentionally
+  remain (fixing them lexically costs more precision than the leak is
+  worth; defense-in-depth is the prompt rail plus human confirmation):
+  noun-free directives ("take a bit more before pizza"), gerund forms
+  ("consider adding a unit"), and non-English directives. Two capture
+  items flagged for a decision, not fixed: `app.state.pending_captures`
+  has no cap or expiry (mild in-memory DoS; single-user local server, so
+  left open by choice), and the confirm handler does not re-validate at
+  confirm time (it relies on validation at propose time plus pop-before-
+  persist ordering; holds today, but an explicit re-validation would make
+  it hold by construction).
 - **#15** Deterministic context curator, first slice (2026-07-03, from the
   context-engineering research pass): a `select_context(query, budget)` over
   the episode graph and findings. Collect per type (FACTS: tool outputs and
