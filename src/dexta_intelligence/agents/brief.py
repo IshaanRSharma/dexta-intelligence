@@ -53,13 +53,34 @@ __all__ = [
 #: Top findings carried into the brief - an endo visit is minutes long.
 _MAX_SECTIONS = 5
 
-#: Treatment-advice gate. Matches an action verb followed (within a short
-#: window) by a dosing noun - "increase basal", "take 2 units", "adjust the
-#: bolus". The brief is observation only, so any match is refused and the
-#: deterministic section is rendered instead. The model prompt forbids this
-#: too; this regex is the enforcement, not the request.
+def _clause_gap(n: int) -> str:
+    """A gap of up to ``n`` chars that stays inside one clause: a sentence/clause
+    punctuation mark followed by whitespace (or end) ends it, so a directive verb
+    binds only to a noun it governs, not one in a later clause ("take your time.
+    Basal was 0.8 u/hr" stays observation). A decimal point between digits is not
+    a break, so "give 0.5 units" is still caught."""
+    return rf"(?:(?![.,;:!?](?:\s|$))[^\n]){{0,{n}}}?"
+
+
+#: Treatment-advice gate. Refuses text that reads as dosing/titration guidance:
+#: a directive verb governing a dosing noun ("increase basal", "raise your basal",
+#: "give 0.5 units", "set a temp basal"), a quantity add-on ("2 more units"), or
+#: "up your basal". Verbs match in base (imperative) form so past-tense self-
+#: reports ("your basal increased", "I gave 2 units") pass. The brief is
+#: observation only, so any match is refused and the deterministic render used
+#: instead. The prompt forbids this too; this is the enforcement, not the request.
 _ADVICE_RE = re.compile(
-    r"(?i)\b(increase|decrease|adjust|take)\b.{0,40}\b(insulin|units|basal|bolus|dose)"
+    r"(?i)(?:"
+    r"\b(?:increase|decrease|adjust|take|raise|lower|reduce|boost|bump|cut|"
+    r"titrate|dial|give|add|set|correct)\b" + _clause_gap(30) +
+    r"\b(?:insulin|units?|basal|bolus|dose|doses|dosing|correction)\b"
+    r"|"
+    r"\b(?:more|less|extra|another|additional)\b" + _clause_gap(20) +
+    r"\b(?:insulin|units?|basal|bolus|dose|correction)\b"
+    r"|"
+    r"\bup(?:ping)?\b" + _clause_gap(10) + r"\b(?:your|the|my)\b" + _clause_gap(15) +
+    r"\b(?:insulin|basal|bolus|dose)\b"
+    r")"
 )
 
 

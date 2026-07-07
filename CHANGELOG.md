@@ -146,6 +146,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Dosing gate hardened after an adversarial red-team pass: the shared
+  `_ADVICE_RE` backstop only matched four verbs, so "raise your basal",
+  "give 2 units", "2 more units", "up your basal" and similar phrasings
+  leaked as observation. The verb set is broadened, quantity-implied and
+  "up your" branches added, and the match window is clause-tempered so
+  "give 0.5 units" is caught while "take your time. Basal was 0.8 u/hr"
+  stays observation. Remaining lexical residuals documented in ISSUES #16.
 - Faithfulness guard: comma-grouped numbers (`25,920`) no longer split into two
   claims, removing the main source of false grounding warnings.
 - The project resolves with `uv lock` again: the `carelink` extra no longer pins
