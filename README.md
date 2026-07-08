@@ -20,12 +20,16 @@ Most diabetes tools show you what happened. dexta investigates why, shows its wo
 honest about it. Three principles:
 
 1. Determinism computes the facts, the model reasons on top. Tested analytics and statistics
-   produce every number (time in range, rigor gates, oref reconciliation). The model plans
-   investigations, ranks hypotheses, and explains. It never invents a figure.
+   produce every number (time in range, the clinician-anchored Glycemia Risk Index, rigor gates,
+   oref reconciliation). The model plans investigations, ranks hypotheses, and explains. It never
+   invents a figure.
 2. Statistical rigor before any claim. Discovery agents must pass permutation tests and
    false-discovery control, then survive an independent skeptic, before a finding is shown.
 3. Two hard safety rails. A faithfulness guard rejects any prose whose numbers do not trace to a
-   tool call. A treatment gate blocks dosing, basal, carb-ratio, and correction instructions. Always.
+   tool call, and a metric-ontology check catches a real number cited for the wrong metric (a
+   standard deviation reported as a coefficient of variation, a Glycemia Risk Index reported as one
+   of its components). A treatment gate blocks dosing, basal, carb-ratio, and correction
+   instructions. Always.
 
 ## The receipt: an external benchmark
 
@@ -129,6 +133,7 @@ The web app is one clear feature per tab:
 | Tab | What it does |
 | --- | --- |
 | Chat | Instant question and answer with a live tool trace. |
+| Timeline | An interactive view of the temporal episode graph: high and low excursions and sensor gaps as nodes on a time axis, with typed edges to the meals, boluses, activity, and sleep around each one. Hover for detail, click through to an episode, filter by kind, brush to zoom. Rendered from the deterministic episode graph, no model in the drawing. |
 | Investigations | The deep, traced drill: plan to trace to evidence, plus deep analysis and the open-investigations queue. |
 | Findings | Durable memory: active, hypotheses, rejected, and the investigation log, with evidence strength and counter-evidence. Prediction reconciliation lives here. |
 | Reports | A clinician discussion brief (review now, monitor, questions to ask), grounded in your evidence and PubMed, with Markdown export. |
