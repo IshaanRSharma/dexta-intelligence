@@ -159,3 +159,64 @@ def test_report_has_empty_provenance_by_default() -> None:
     report = audit("mean 135.2", EV)
     assert report.provenance_violations == ()
     assert bool(report) is report.ok
+
+
+# ── Glycemia Risk Index (GRI) provenance ──────────────────────────────────────
+
+# A GRI tool-result bundle (keys as glycemia_risk_index emits them). Distinct
+# values so a component cited as the score (or vice versa) is caught.
+GRI_EV = {
+    "glycemia_risk_index_1": {
+        "gri": 42.0, "hypo_component": 10.0, "hyper_component": 8.0,
+        "pct_very_low": 3.0, "pct_low": 6.0, "pct_high": 12.0,
+        "pct_very_high": 2.0, "n_readings": 288,
+    }
+}
+
+
+def test_gri_keys_resolve_to_distinct_metrics() -> None:
+    assert metric_for_key("gri") == "gri"
+    assert metric_for_key("hypo_component") == "gri_hypo_component"
+    assert metric_for_key("hyper_component") == "gri_hyper_component"
+    # banded low/high are distinct from cumulative tbr/tar
+    assert metric_for_key("pct_low") == "gri_low"
+    assert metric_for_key("pct_high") == "gri_high"
+    assert metric_for_key("tbr_pct") == "tbr"
+    assert metric_for_key("tar_pct") == "tar"
+    # severe bands map straight onto tbr54 / tar250
+    assert metric_for_key("pct_very_low") == "tbr54"
+    assert metric_for_key("pct_very_high") == "tar250"
+
+
+def test_build_provenance_binds_gri_bundle() -> None:
+    prov = build_provenance(GRI_EV)
+    assert prov["gri"] == [42.0]
+    assert prov["gri_hypo_component"] == [10.0]
+    assert prov["gri_low"] == [6.0]
+    assert prov["tbr54"] == [3.0]  # pct_very_low binds to the severe-hypo metric
+
+
+def test_gri_score_cited_as_hypo_component_is_flagged() -> None:
+    report = audit(
+        "Your hypoglycemia component was 42.0.", GRI_EV, check_provenance=True
+    )
+    assert not report.ok
+    assert not report.violations  # membership passes: 42.0 is in the pool
+    pv = report.provenance_violations[0]
+    assert pv.claimed_metric == "gri_hypo_component" and pv.matched_metric == "gri"
+
+
+def test_component_cited_as_gri_is_flagged() -> None:
+    report = audit(
+        "Your glycemia risk index was 10.0.", GRI_EV, check_provenance=True
+    )
+    assert not report.ok
+    pv = report.provenance_violations[0]
+    assert pv.claimed_metric == "gri" and pv.matched_metric == "gri_hypo_component"
+
+
+def test_correct_gri_citations_pass() -> None:
+    assert audit("Your glycemia risk index was 42.", GRI_EV, check_provenance=True).ok
+    assert audit(
+        "Your hypoglycemia component was 10.", GRI_EV, check_provenance=True
+    ).ok

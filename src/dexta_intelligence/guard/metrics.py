@@ -55,13 +55,13 @@ METRICS: tuple[Metric, ...] = (
     Metric("tar", frozenset({"tar", "tar_pct", "tar180", "time_above_range"}),
            ("time above range", "above range", "percent time in hyperglycemia"),
            is_percent=True),
-    Metric("tar250", frozenset({"tar250", "tar250_pct", "severe_hyper"}),
+    Metric("tar250", frozenset({"tar250", "tar250_pct", "severe_hyper", "pct_very_high"}),
            ("above 250", "severe hyperglycemia", "very high"), is_percent=True),
     Metric("tbr", frozenset({"tbr", "tbr_pct", "tbr70", "time_below_range"}),
            ("time below range", "below 70", "time in hypoglycemia", "percent time in hypoglycemia"),
            is_percent=True),
-    Metric("tbr54", frozenset({"tbr54", "tbr54_pct", "severe_hypo"}),
-           ("below 54", "severe hypoglycemia"), is_percent=True),
+    Metric("tbr54", frozenset({"tbr54", "tbr54_pct", "severe_hypo", "pct_very_low"}),
+           ("below 54", "severe hypoglycemia", "very low"), is_percent=True),
     Metric("max", frozenset({"max", "maximum", "max_glucose", "peak"}),
            ("maximum", "highest", "peak", "max glucose")),
     Metric("min", frozenset({"min", "minimum", "min_glucose", "nadir"}),
@@ -75,6 +75,20 @@ METRICS: tuple[Metric, ...] = (
     Metric("num_hypo", frozenset({"n_lows", "num_hypo", "n_hypo", "hypo_episodes"}),
            ("number of hypoglycemia", "hypoglycemic episodes", "separate lows",
             "times i experienced hypoglycemia")),
+    # Klonoff Glycemia Risk Index. gri and its components are 0-100 scores, not
+    # ratios (never cited as fractions). Banded gri_low/gri_high are percent-of-time
+    # but exclude the severe bands, so they stay distinct from cumulative tbr/tar;
+    # very-low/very-high map onto tbr54/tar250 above.
+    Metric("gri", frozenset({"gri", "gri_score", "glycemia_risk_index", "glycemic_risk_index"}),
+           ("glycemia risk index", "glycemic risk index", "gri")),
+    Metric("gri_hypo_component", frozenset({"gri_hypo_component", "hypo_component"}),
+           ("hypoglycemia component", "hypo component")),
+    Metric("gri_hyper_component", frozenset({"gri_hyper_component", "hyper_component"}),
+           ("hyperglycemia component", "hyper component")),
+    Metric("gri_low", frozenset({"gri_low", "pct_low"}),
+           ("gri low band", "banded low"), is_percent=True),
+    Metric("gri_high", frozenset({"gri_high", "pct_high"}),
+           ("gri high band", "banded high"), is_percent=True),
 )
 
 _KEY_TO_METRIC: dict[str, str] = {k: m.canonical for m in METRICS for k in m.key_aliases}
