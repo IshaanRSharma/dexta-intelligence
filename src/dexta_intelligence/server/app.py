@@ -79,6 +79,10 @@ from dexta_intelligence.server.views_hero import hero_chart_view
 from dexta_intelligence.server.views_memory import memory_page_view
 from dexta_intelligence.server.views_reconciliation import reconciliation_page_view
 from dexta_intelligence.server.views_system import system_page_view
+from dexta_intelligence.server.views_timeline import (
+    episode_graph_payload,
+    timeline_page_view,
+)
 from dexta_intelligence.server.views_trace import (
     answer_faithfulness_flagged,
     faithfulness_violations_from_answer,
@@ -185,6 +189,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     templates.env.globals["static_version"] = str(int(max(_static_stamps, default=0)))
     # Primary nav + overflow "More" menu (Phase 4 tiering).
     _nav_more = (
+        ("/timeline", "Timeline"),
         ("/investigations", "Investigations"),
         ("/goals", "Goals"),
         ("/reports", "Reports"),
@@ -692,6 +697,26 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
         return _render("findings.html", request, "/findings", findings=view)
+
+    # ── timeline (temporal episode graph) ───────────────────────────────────────
+
+    @app.get("/timeline", response_class=HTMLResponse)
+    def timeline(request: Request) -> Any:
+        store = store_opener(config, None)
+        try:
+            view = timeline_page_view(store, config)
+        finally:
+            _close(store, store_opener)
+        return _render("timeline.html", request, "/timeline", **view)
+
+    @app.get("/episodes.json")
+    def episodes_json() -> Any:
+        store = store_opener(config, None)
+        try:
+            payload = episode_graph_payload(store, config)
+        finally:
+            _close(store, store_opener)
+        return JSONResponse(payload)
 
     # ── connectors ──────────────────────────────────────────────────────────────
 

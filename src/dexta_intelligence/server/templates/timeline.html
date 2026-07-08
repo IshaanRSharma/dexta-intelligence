@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}dexta · timeline{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/timeline.css?v={{ static_version }}" />
+
+<div class="page-head">
+  <h1>Temporal episode graph</h1>
+  <p class="page-sub">Every glucose excursion and sensor gap in the active window, with the
+  meals, boluses, activity, and sleep linked around each one. Deterministic and model-free:
+  nothing on this page was authored by a language model.</p>
+</div>
+
+<div class="hero-grid tl-tiles">
+  {% for t in tiles %}
+  <div class="hero-tile">
+    <div class="hero-num{% if not t.value %} empty{% endif %}">{{ t.value }}</div>
+    <div class="hero-label">{{ t.label }}{% if t.note %} · {{ t.note }}{% endif %}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<p class="muted small tl-window">Window {{ window_label }} · times shown in UTC</p>
+
+{% if has_episodes %}
+<section class="tl-shell" aria-label="Episode graph controls and chart">
+  <div class="tl-controls">
+    <fieldset class="tl-filters">
+      <legend>Episodes</legend>
+      <label class="tl-toggle tl-toggle-hypo">
+        <input type="checkbox" data-filter="hypo" checked />
+        <span class="tl-swatch tl-swatch-hypo" aria-hidden="true">▼</span> Lows
+      </label>
+      <label class="tl-toggle tl-toggle-hyper">
+        <input type="checkbox" data-filter="hyper" checked />
+        <span class="tl-swatch tl-swatch-hyper" aria-hidden="true">▲</span> Highs
+      </label>
+      <label class="tl-toggle tl-toggle-gap">
+        <input type="checkbox" data-filter="sensor_gap" checked />
+        <span class="tl-swatch tl-swatch-gap" aria-hidden="true">▨</span> Sensor gaps
+      </label>
+    </fieldset>
+    <fieldset class="tl-filters">
+      <legend>Context</legend>
+      <label class="tl-toggle">
+        <input type="checkbox" data-filter="meal" checked />
+        <span class="tl-glyph tl-glyph-meal" aria-hidden="true">●</span> Meals
+      </label>
+      <label class="tl-toggle">
+        <input type="checkbox" data-filter="bolus" checked />
+        <span class="tl-glyph tl-glyph-bolus" aria-hidden="true">◆</span> Boluses
+      </label>
+      <label class="tl-toggle">
+        <input type="checkbox" data-filter="activity" checked />
+        <span class="tl-glyph tl-glyph-activity" aria-hidden="true">▲</span> Activity
+      </label>
+      <label class="tl-toggle">
+        <input type="checkbox" data-filter="sleep" checked />
+        <span class="tl-glyph tl-glyph-sleep" aria-hidden="true">■</span> Sleep
+      </label>
+    </fieldset>
+    <fieldset class="tl-filters">
+      <legend>View</legend>
+      <label class="tl-toggle">
+        <input type="checkbox" data-filter="edges" checked />
+        <span aria-hidden="true">⁄</span> Connections
+      </label>
+      <button type="button" class="btn-secondary btn-sm" id="tl-reset">Reset zoom</button>
+    </fieldset>
+  </div>
+
+  <div class="tl-chart-wrap">
+    <div id="tl-chart" class="tl-chart" role="img"
+         aria-label="Temporal episode graph. Highs are drawn above the baseline, lows below,
+         sensor gaps as hatched bands. Use the filters to scope, and click an episode for detail."></div>
+    <div id="tl-overview" class="tl-overview" aria-hidden="true"></div>
+    <p class="muted small tl-hint">Scroll or use the brush below to zoom · click an episode for its
+    context · severe episodes carry a bold outline and a <strong>!</strong> mark.</p>
+  </div>
+
+  <div id="tl-tooltip" class="tl-tooltip" role="status" aria-live="polite" hidden></div>
+
+  <aside id="tl-detail" class="tl-detail" aria-live="polite">
+    <p class="muted small">Select an episode to see the context linked around it.</p>
+  </aside>
+</section>
+
+<script src="/static/timeline.js?v={{ static_version }}" defer></script>
+{% else %}
+<div class="empty">
+  <strong>No episodes in this window</strong>
+  <p class="hint">No hypo or hyper excursions and no sensor gaps were detected over the active
+  window. Sync more data or widen the analysis window in Settings, then check back.</p>
+</div>
+{% endif %}
+{% endblock %}

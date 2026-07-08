@@ -933,3 +933,72 @@ def test_mask_dsn_hides_password() -> None:
     # no password -> unchanged; empty -> empty
     assert _mask_dsn("postgresql://db.example.com/dexta") == "postgresql://db.example.com/dexta"
     assert _mask_dsn("") == ""
+
+
+# ── timeline (temporal episode graph) ───────────────────────────────────────────
+
+
+def _seed_excursions(store: SQLiteStore) -> None:
+    """Seed a flat trace with one clinically significant high and one low run,
+    so the episode graph has hyper/hypo nodes to render."""
+    ts = FIXED_NOW - timedelta(days=2)
+    rows: list[GlucoseEvent] = []
+    while ts <= FIXED_NOW:
+        offset = (ts - (FIXED_NOW - timedelta(days=1))).total_seconds() / 60.0
+        if 0 <= offset < 40:
+            mg = 210  # hyper run (>180), ~40 min
+        elif 120 <= offset < 160:
+            mg = 60  # hypo run (<70), ~40 min
+        else:
+            mg = 120
+        rows.append(GlucoseEvent(ts=ts, mg_dl=mg))
+        ts += timedelta(minutes=5)
+    store.insert_glucose(rows)
+
+
+def test_timeline_page_renders(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    resp = _client(store).get("/timeline")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Temporal episode graph" in body
+    assert "tl-shell" in body
+    assert "timeline.js" in body
+    assert "High episodes" in body
+    store.close()
+
+
+def test_episodes_json_shape(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    resp = _client(store).get("/episodes.json")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert set(data) >= {"summary", "nodes", "window"}
+    assert isinstance(data["nodes"], list)
+    assert data["summary"]["num_hyper"] >= 1
+    assert data["summary"]["num_hypo"] >= 1
+    assert data["window"]["start"] < data["window"]["end"]
+    node = next(n for n in data["nodes"] if n["kind"] in ("hypo", "hyper"))
+    assert {"id", "kind", "start", "end", "duration_min", "links"} <= set(node)
+    store.close()
+
+
+def test_timeline_empty_store_degrades(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).get("/timeline")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "No episodes in this window" in body
+    assert "tl-shell" not in body
+    store.close()
+
+
+def test_episodes_json_empty_store(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    data = _client(store).get("/episodes.json").json()
+    assert data["nodes"] == []
+    assert data["summary"]["num_hyper"] == 0
+    assert "window" in data
+    store.close()

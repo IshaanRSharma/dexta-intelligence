@@ -1,0 +1,172 @@
+/* Temporal episode graph (Timeline page). Composes with app.css tokens.
+   Kind colours are always paired with a shape and a text label, so nothing on
+   the page depends on colour alone. Theme-aware: local hues have dark overrides. */
+
+:root {
+  --tl-hypo: #dc2626;
+  --tl-hypo-soft: rgba(220, 38, 38, 0.12);
+  --tl-hyper: #d97706;
+  --tl-hyper-soft: rgba(217, 119, 6, 0.14);
+  --tl-gap: #64748b;
+  --tl-meal: #0891b2;
+  --tl-bolus: #7c3aed;
+  --tl-activity: #0d9488;
+  --tl-sleep: #475569;
+  --tl-grid: var(--border);
+  --tl-edge: rgba(100, 116, 139, 0.9);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --tl-hypo: #f87171;
+    --tl-hypo-soft: rgba(248, 113, 113, 0.18);
+    --tl-hyper: #fbbf24;
+    --tl-hyper-soft: rgba(251, 191, 36, 0.18);
+    --tl-gap: #94a3b8;
+    --tl-meal: #22d3ee;
+    --tl-bolus: #a78bfa;
+    --tl-activity: #2dd4bf;
+    --tl-sleep: #94a3b8;
+    --tl-edge: rgba(148, 163, 184, 0.9);
+  }
+}
+:root[data-theme="dark"] {
+  --tl-hypo: #f87171;
+  --tl-hypo-soft: rgba(248, 113, 113, 0.18);
+  --tl-hyper: #fbbf24;
+  --tl-hyper-soft: rgba(251, 191, 36, 0.18);
+  --tl-gap: #94a3b8;
+  --tl-meal: #22d3ee;
+  --tl-bolus: #a78bfa;
+  --tl-activity: #2dd4bf;
+  --tl-sleep: #94a3b8;
+  --tl-edge: rgba(148, 163, 184, 0.9);
+}
+
+.tl-tiles { margin-bottom: 12px; }
+.tl-window { margin: 0 0 20px; font-variant-numeric: tabular-nums; }
+
+.tl-shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) { .tl-shell { grid-template-columns: 1fr; } }
+
+.tl-controls {
+  grid-column: 1 / -1;
+  display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start;
+}
+.tl-filters {
+  display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+  margin: 0; padding: 10px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); box-shadow: var(--shadow-sm);
+}
+.tl-filters legend {
+  padding: 0 4px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+}
+.tl-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text-secondary); cursor: pointer;
+  user-select: none;
+}
+.tl-toggle input { width: 15px; height: 15px; }
+.tl-swatch, .tl-glyph { font-size: 13px; line-height: 1; }
+.tl-swatch-hypo { color: var(--tl-hypo); }
+.tl-swatch-hyper { color: var(--tl-hyper); }
+.tl-swatch-gap { color: var(--tl-gap); }
+.tl-glyph-meal { color: var(--tl-meal); }
+.tl-glyph-bolus { color: var(--tl-bolus); }
+.tl-glyph-activity { color: var(--tl-activity); }
+.tl-glyph-sleep { color: var(--tl-sleep); }
+
+.tl-chart-wrap {
+  min-width: 0;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px 12px; box-shadow: var(--shadow-sm);
+}
+.tl-chart { width: 100%; }
+.tl-chart svg, .tl-overview svg { display: block; width: 100%; height: auto; }
+.tl-overview { margin-top: 8px; }
+.tl-hint { margin: 10px 2px 0; }
+
+/* SVG marks */
+.tl-baseline { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 4 4; }
+.tl-axis-line { stroke: var(--tl-grid); stroke-width: 1; }
+.tl-axis-label { font-size: 10px; fill: var(--muted); font-family: inherit; }
+.tl-zone-label {
+  font-size: 10px; font-weight: 600; fill: var(--muted); font-family: inherit;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+
+.tl-band { cursor: pointer; transition: opacity 120ms; }
+.tl-band rect.tl-fill { stroke-width: 1.5; }
+.tl-band-hypo rect.tl-fill { fill: var(--tl-hypo-soft); stroke: var(--tl-hypo); }
+.tl-band-hyper rect.tl-fill { fill: var(--tl-hyper-soft); stroke: var(--tl-hyper); }
+.tl-band.tl-severe rect.tl-fill { stroke-width: 2.6; }
+.tl-band-label { font-size: 10px; font-family: inherit; font-variant-numeric: tabular-nums; }
+.tl-band-hypo .tl-band-label { fill: var(--tl-hypo); }
+.tl-band-hyper .tl-band-label { fill: var(--tl-hyper); }
+.tl-severe-mark { font-size: 11px; font-weight: 800; font-family: inherit; }
+.tl-band-hypo .tl-severe-mark { fill: var(--tl-hypo); }
+.tl-band-hyper .tl-severe-mark { fill: var(--tl-hyper); }
+
+.tl-gap rect { fill: url(#tl-hatch); stroke: var(--tl-gap); stroke-width: 1; opacity: 0.85; cursor: pointer; }
+.tl-gap-label { font-size: 10px; fill: var(--tl-gap); font-family: inherit; }
+.tl-hatch-stroke { stroke: var(--tl-gap); stroke-width: 1; }
+
+.tl-edge { stroke: var(--tl-edge); stroke-width: 1; fill: none; opacity: 0.14; pointer-events: none; }
+.tl-edge.tl-edge-on { opacity: 0.9; stroke-width: 1.6; }
+
+.tl-node { cursor: pointer; }
+.tl-node > * { stroke: var(--surface); stroke-width: 1.3; paint-order: stroke; }
+.tl-node-meal { fill: var(--tl-meal); }
+.tl-node-bolus { fill: var(--tl-bolus); }
+.tl-node-activity { fill: var(--tl-activity); }
+.tl-node-sleep { fill: var(--tl-sleep); }
+.tl-node-ring { fill: none; stroke: var(--surface); stroke-width: 1.5; }
+.tl-lane-label { font-size: 10px; fill: var(--muted); font-family: inherit; }
+
+.tl-band.tl-dim, .tl-node.tl-dim, .tl-gap.tl-dim { opacity: 0.18; }
+.tl-band.tl-active rect.tl-fill { stroke-width: 3; }
+.tl-band:focus, .tl-gap:focus, .tl-node:focus { outline: none; }
+.tl-band:focus-visible rect.tl-fill,
+.tl-gap:focus-visible rect,
+.tl-node:focus-visible circle { stroke: var(--accent); stroke-width: 3; }
+
+/* brush overview */
+.tl-brush-track { fill: var(--surface-2); stroke: var(--border); stroke-width: 1; }
+.tl-brush-tick-hypo { fill: var(--tl-hypo); }
+.tl-brush-tick-hyper { fill: var(--tl-hyper); }
+.tl-brush-tick-gap { fill: var(--tl-gap); }
+.tl-brush-window { fill: rgba(29, 78, 216, 0.12); stroke: var(--accent); stroke-width: 1; cursor: grab; }
+.tl-brush-window:active { cursor: grabbing; }
+.tl-brush-handle { fill: var(--accent); cursor: ew-resize; }
+.tl-brush-window:focus-visible { stroke-width: 2.5; outline: none; }
+
+/* tooltip */
+.tl-tooltip {
+  position: absolute; z-index: 40; max-width: 260px;
+  padding: 8px 11px; font-size: 12px; line-height: 1.45;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-xs);
+  box-shadow: var(--shadow); pointer-events: none;
+}
+.tl-tooltip[hidden] { display: none; }
+.tl-tooltip .tl-tt-title { font-weight: 700; }
+.tl-tooltip .tl-tt-row { color: var(--text-secondary); }
+.tl-tooltip .tl-tt-tag {
+  display: inline-block; margin-top: 4px; padding: 1px 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.tl-tt-tag-severe { background: var(--bad-soft); color: var(--bad); border: 1px solid var(--bad-border); }
+.tl-tt-tag-sig { background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn-border); }
+
+/* detail panel (reuses the episode-card shape) */
+.tl-detail { min-width: 0; }
+.tl-detail .episode-card { margin: 0; }
+@media (max-width: 900px) { .tl-detail { margin-top: 4px; } }
