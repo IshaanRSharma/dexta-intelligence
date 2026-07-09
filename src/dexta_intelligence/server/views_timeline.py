@@ -11,14 +11,24 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo
 
 from dexta_intelligence.analytics.episodes import build_graph
+from dexta_intelligence.server.views_episode import episode_card_view
 
 if TYPE_CHECKING:
     from dexta_intelligence.config import Config
     from dexta_intelligence.store.port import StoragePort
 
-__all__ = ["episode_graph_payload", "timeline_page_view"]
+__all__ = [
+    "episode_detail_payload",
+    "episode_graph_payload",
+    "timeline_page_view",
+]
+
+#: Padding on each side of an episode's span for the local focus-view glucose
+#: curve, in minutes. Generous enough to show the run-up and recovery.
+_LOCAL_WINDOW_PAD_MIN = 150.0
 
 
 def _window_bounds(store: StoragePort, config: Config) -> tuple[datetime, datetime]:
@@ -65,6 +75,64 @@ def episode_graph_payload(store: StoragePort, config: Config) -> dict[str, Any]:
     return payload
 
 
+def episode_detail_payload(
+    store: StoragePort, config: Config, episode_id: str
+) -> dict[str, Any] | None:
+    """One episode plus the local glucose curve around it, as a JSON-ready dict.
+
+    Rebuilds the deterministic episode graph for the active window (the same build
+    ``/episodes.json`` uses), finds the named node, and slices the raw glucose
+    readings for a padded local window so the focus view can draw the actual curve
+    under the episode. Returns ``None`` when the id is not in the window. Nothing
+    here is authored by a model: the series is the store's own readings.
+    """
+    start, end = _window_bounds(store, config)
+    graph = build_graph(
+        store,
+        start,
+        end,
+        target_low=config.analysis.target_low,
+        target_high=config.analysis.target_high,
+    )
+    episode = graph.node(episode_id)
+    if episode is None:
+        return None
+    pad = timedelta(minutes=_LOCAL_WINDOW_PAD_MIN)
+    lo = episode.start - pad
+    hi = episode.end + pad
+    readings = sorted(store.get_glucose(lo, hi), key=lambda g: g.ts)
+    series = [{"t": g.ts.isoformat(), "v": g.mg_dl} for g in readings]
+    return {
+        "episode": episode.to_dict(),
+        "series": series,
+        "window": {"start": lo.isoformat(), "end": hi.isoformat()},
+        "target": {
+            "low": config.analysis.target_low,
+            "high": config.analysis.target_high,
+        },
+        "timezone": config.analysis.timezone,
+    }
+
+
+def _salient_episode_id(nodes: list[dict[str, Any]]) -> str | None:
+    """The most salient episode to select on load: severe, then clinically
+    significant, then longest. Falls back to the first node (e.g. a lone sensor
+    gap) so the focus view is never blank when the window holds anything at all.
+    """
+    excursions = [n for n in nodes if n.get("kind") in ("hypo", "hyper")]
+    if not excursions:
+        return str(nodes[0]["id"]) if nodes else None
+
+    def rank(n: dict[str, Any]) -> tuple[int, int, float]:
+        return (
+            1 if n.get("severe") else 0,
+            1 if n.get("clinically_significant") else 0,
+            float(n.get("duration_min") or 0.0),
+        )
+
+    return str(max(excursions, key=rank)["id"])
+
+
 def timeline_page_view(store: StoragePort, config: Config) -> dict[str, Any]:
     """Shape the Timeline page: summary tiles, window label, and the graph payload.
 
@@ -102,6 +170,14 @@ def timeline_page_view(store: StoragePort, config: Config) -> dict[str, Any]:
             "note": "",
         },
     ]
+    default_id = _salient_episode_id(payload["nodes"])
+    default_card = None
+    if default_id is not None:
+        node = next((n for n in payload["nodes"] if n["id"] == default_id), None)
+        if node is not None:
+            # UTC keeps the server-rendered card consistent with the UTC axis the
+            # navigator and focus curve draw; no mixed zones on one page.
+            default_card = episode_card_view(node, ZoneInfo("UTC"))
     return {
         "payload": payload,
         "summary": summary,
@@ -109,6 +185,8 @@ def timeline_page_view(store: StoragePort, config: Config) -> dict[str, Any]:
         "n_episodes": n_episodes,
         "has_episodes": n_episodes > 0,
         "window_label": window_label,
+        "default_episode_id": default_id,
+        "default_episode": default_card,
     }
 
 

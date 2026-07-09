@@ -28,6 +28,7 @@ from dexta_intelligence.models import (
     GoalCheckpoint,
     GoalMetric,
     InvestigationRun,
+    MealEvent,
     OpenInvestigation,
     RunFinding,
 )
@@ -966,6 +967,18 @@ def test_timeline_page_renders(tmp_path: Path) -> None:
     assert "tl-shell" in body
     assert "timeline.js" in body
     assert "High episodes" in body
+    # Navigator strip and focus relation view are both present.
+    assert "tl-navigator" in body
+    assert "tl-focus" in body
+    # Both lenses of the focus view: the Curve / Graph toggle drives off the same
+    # selected episode.
+    assert 'data-view="curve"' in body
+    assert 'data-view="graph"' in body
+    # Default selection is populated server-side, never blank: the shell carries a
+    # default episode id and the facts card is pre-rendered.
+    assert 'data-default-episode="' in body
+    assert "data-default-episode=\"\"" not in body
+    assert "episode-card" in body
     store.close()
 
 
@@ -982,6 +995,66 @@ def test_episodes_json_shape(tmp_path: Path) -> None:
     assert data["window"]["start"] < data["window"]["end"]
     node = next(n for n in data["nodes"] if n["kind"] in ("hypo", "hyper"))
     assert {"id", "kind", "start", "end", "duration_min", "links"} <= set(node)
+    store.close()
+
+
+def test_timeline_graph_lens_toggle(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    body = _client(store).get("/timeline").text
+    # The Curve / Graph switcher renders and defaults to the curve lens; both
+    # lenses drive off the same selected episode client-side.
+    assert 'class="tl-viewtoggle"' in body
+    assert 'data-view="curve"' in body
+    assert 'data-view="graph"' in body
+    assert 'id="tl-view-curve"' in body and 'aria-pressed="true"' in body
+    store.close()
+
+
+def test_episode_json_relation_view(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    client = _client(store)
+    nodes = client.get("/episodes.json").json()["nodes"]
+    hyper = next(n for n in nodes if n["kind"] == "hyper")
+    resp = client.get("/episode.json", params={"id": hyper["id"]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert set(data) >= {"episode", "series", "window", "target"}
+    assert data["episode"]["id"] == hyper["id"]
+    # The local glucose curve is a non-empty series sliced from the store, and it
+    # spans the episode plus padding on each side.
+    assert isinstance(data["series"], list) and len(data["series"]) > 1
+    assert all({"t", "v"} <= set(pt) for pt in data["series"])
+    assert data["window"]["start"] < data["episode"]["start"]
+    assert data["window"]["end"] > data["episode"]["end"]
+    store.close()
+
+
+def test_episode_json_carries_labelled_edges(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    # A meal shortly before the seeded high gives the episode a typed edge whose
+    # signed offset is what the focus view turns into "N min before".
+    high_start = FIXED_NOW - timedelta(days=1)
+    store.insert_meals([MealEvent(ts=high_start - timedelta(minutes=20), carbs_g=45)])
+    client = _client(store)
+    nodes = client.get("/episodes.json").json()["nodes"]
+    hyper = next(n for n in nodes if n["kind"] == "hyper")
+    data = client.get("/episode.json", params={"id": hyper["id"]}).json()
+    meals = [link for link in data["episode"]["links"] if link["kind"] == "meal"]
+    assert meals, "expected a meal edge on the episode"
+    assert meals[0]["detail"]["carbs_g"] == 45
+    assert meals[0]["offset_min"] < 0
+    store.close()
+
+
+def test_episode_json_missing_and_unknown(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    client = _client(store)
+    assert client.get("/episode.json").status_code == 400
+    assert client.get("/episode.json", params={"id": "hyper:nope"}).status_code == 404
     store.close()
 
 

@@ -22,66 +22,74 @@
 <p class="muted small tl-window">Window {{ window_label }} · times shown in UTC</p>
 
 {% if has_episodes %}
-<section class="tl-shell" aria-label="Episode graph controls and chart">
-  <div class="tl-controls">
-    <fieldset class="tl-filters">
-      <legend>Episodes</legend>
-      <label class="tl-toggle tl-toggle-hypo">
-        <input type="checkbox" data-filter="hypo" checked />
-        <span class="tl-swatch tl-swatch-hypo" aria-hidden="true">▼</span> Lows
-      </label>
-      <label class="tl-toggle tl-toggle-hyper">
-        <input type="checkbox" data-filter="hyper" checked />
-        <span class="tl-swatch tl-swatch-hyper" aria-hidden="true">▲</span> Highs
-      </label>
-      <label class="tl-toggle tl-toggle-gap">
-        <input type="checkbox" data-filter="sensor_gap" checked />
-        <span class="tl-swatch tl-swatch-gap" aria-hidden="true">▨</span> Sensor gaps
-      </label>
-    </fieldset>
-    <fieldset class="tl-filters">
-      <legend>Context</legend>
-      <label class="tl-toggle">
-        <input type="checkbox" data-filter="meal" checked />
-        <span class="tl-glyph tl-glyph-meal" aria-hidden="true">●</span> Meals
-      </label>
-      <label class="tl-toggle">
-        <input type="checkbox" data-filter="bolus" checked />
-        <span class="tl-glyph tl-glyph-bolus" aria-hidden="true">◆</span> Boluses
-      </label>
-      <label class="tl-toggle">
-        <input type="checkbox" data-filter="activity" checked />
-        <span class="tl-glyph tl-glyph-activity" aria-hidden="true">▲</span> Activity
-      </label>
-      <label class="tl-toggle">
-        <input type="checkbox" data-filter="sleep" checked />
-        <span class="tl-glyph tl-glyph-sleep" aria-hidden="true">■</span> Sleep
-      </label>
-    </fieldset>
-    <fieldset class="tl-filters">
-      <legend>View</legend>
-      <label class="tl-toggle">
-        <input type="checkbox" data-filter="edges" checked />
-        <span aria-hidden="true">⁄</span> Connections
-      </label>
-      <button type="button" class="btn-secondary btn-sm" id="tl-reset">Reset zoom</button>
-    </fieldset>
+<section class="tl-shell" aria-label="Episode graph"
+         data-default-episode="{{ default_episode_id or '' }}">
+
+  <div class="tl-nav" aria-label="Episode navigator">
+    <div class="tl-nav-head">
+      <span class="tl-nav-title">When episodes happened</span>
+      <fieldset class="tl-filters">
+        <legend class="tl-sr">Show episode kinds</legend>
+        <label class="tl-toggle tl-toggle-hyper">
+          <input type="checkbox" data-filter="hyper" checked />
+          <span class="tl-swatch tl-swatch-hyper" aria-hidden="true">▲</span> Highs
+        </label>
+        <label class="tl-toggle tl-toggle-hypo">
+          <input type="checkbox" data-filter="hypo" checked />
+          <span class="tl-swatch tl-swatch-hypo" aria-hidden="true">▼</span> Lows
+        </label>
+        <label class="tl-toggle tl-toggle-gap">
+          <input type="checkbox" data-filter="sensor_gap" checked />
+          <span class="tl-swatch tl-swatch-gap" aria-hidden="true">▨</span> Gaps
+        </label>
+      </fieldset>
+    </div>
+    <div id="tl-navigator" class="tl-navigator" role="group"
+         aria-label="Episodes on the time axis. Highs sit above the line, lows below,
+         sensor gaps as ticks. Select one to load its relations."></div>
+    <p class="muted small tl-nav-hint">Pick an episode to see the meals, boluses, activity,
+    and sleep that surround it.</p>
   </div>
 
-  <div class="tl-chart-wrap">
-    <div id="tl-chart" class="tl-chart" role="img"
-         aria-label="Temporal episode graph. Highs are drawn above the baseline, lows below,
-         sensor gaps as hatched bands. Use the filters to scope, and click an episode for detail."></div>
-    <div id="tl-overview" class="tl-overview" aria-hidden="true"></div>
-    <p class="muted small tl-hint">Scroll or use the brush below to zoom · click an episode for its
-    context · severe episodes carry a bold outline and a <strong>!</strong> mark.</p>
+  <div class="tl-focus" aria-label="Relations for the selected episode">
+    <div class="tl-focus-head">
+      <div class="tl-focus-heading">
+        <span class="tl-focus-eyebrow">Selected episode</span>
+        <h2 id="tl-focus-title" class="tl-focus-title">Loading…</h2>
+      </div>
+      <div class="tl-focus-actions">
+        <div class="tl-viewtoggle" role="group" aria-label="Focus view">
+          <button type="button" class="tl-vt-btn on" id="tl-view-curve"
+                  data-view="curve" aria-pressed="true">Curve</button>
+          <button type="button" class="tl-vt-btn" id="tl-view-graph"
+                  data-view="graph" aria-pressed="false">Graph</button>
+        </div>
+        <div class="tl-stepper">
+          <button type="button" class="btn-secondary btn-sm" id="tl-prev"
+                  aria-label="Previous episode">◂ Prev</button>
+          <span id="tl-position" class="tl-position" aria-live="polite"></span>
+          <button type="button" class="btn-secondary btn-sm" id="tl-next"
+                  aria-label="Next episode">Next ▸</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tl-focus-grid">
+      <div class="tl-plot-wrap">
+        <div id="tl-plot" class="tl-plot" role="img"
+             aria-label="Glucose curve around the selected episode, with each meal, bolus,
+             activity, and sleep placed at its real time and labelled with how it relates
+             to the episode."></div>
+      </div>
+      <aside id="tl-detail" class="tl-detail" aria-live="polite">
+        {% if default_episode %}
+        {% with episode = default_episode %}{% include "_episode_card.html" %}{% endwith %}
+        {% endif %}
+      </aside>
+    </div>
   </div>
 
   <div id="tl-tooltip" class="tl-tooltip" role="status" aria-live="polite" hidden></div>
-
-  <aside id="tl-detail" class="tl-detail" aria-live="polite">
-    <p class="muted small">Select an episode to see the context linked around it.</p>
-  </aside>
 </section>
 
 <script src="/static/timeline.js?v={{ static_version }}" defer></script>

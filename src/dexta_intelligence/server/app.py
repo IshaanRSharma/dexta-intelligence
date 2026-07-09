@@ -80,6 +80,7 @@ from dexta_intelligence.server.views_memory import memory_page_view
 from dexta_intelligence.server.views_reconciliation import reconciliation_page_view
 from dexta_intelligence.server.views_system import system_page_view
 from dexta_intelligence.server.views_timeline import (
+    episode_detail_payload,
     episode_graph_payload,
     timeline_page_view,
 )
@@ -717,6 +718,20 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
         return JSONResponse(payload)
+
+    @app.get("/episode.json")
+    def episode_json(request: Request) -> Any:
+        episode_id = request.query_params.get("id", "")
+        if not episode_id:
+            return JSONResponse({"error": "missing id"}, status_code=400)
+        store = store_opener(config, None)
+        try:
+            detail = episode_detail_payload(store, config, episode_id)
+        finally:
+            _close(store, store_opener)
+        if detail is None:
+            return JSONResponse({"error": "episode not found"}, status_code=404)
+        return JSONResponse(detail)
 
     # ── connectors ──────────────────────────────────────────────────────────────
 
