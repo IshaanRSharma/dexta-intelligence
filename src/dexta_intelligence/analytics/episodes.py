@@ -10,7 +10,10 @@ makes them durable, deterministic nodes:
 - an :class:`Episode` per contiguous excursion (hypo / hyper) or sensor gap, with
   its span, extreme, duration, and clinical-significance flag;
 - typed :class:`ContextLink` edges to the meals, boluses, activity, and sleep in
-  the window around it, each with a signed time offset.
+  the window around it, each with a signed time offset. A meal and the manual
+  bolus that recorded the same action pair into one "treatment" edge
+  (:func:`pair_treatments`), biased toward NOT merging: a false "separate" is
+  safe, a false "merged" hides the missed-bolus signal.
 
 It is a pure function over the store: no model, no numpy, byte-deterministic given
 the same events. Excursion thresholds follow the benchmark's own definitions
@@ -29,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 from dexta_intelligence.models import InsulinKind
 
 if TYPE_CHECKING:
+    from dexta_intelligence.models import InsulinEvent, MealEvent
     from dexta_intelligence.store.port import StoragePort
 
 __all__ = [
@@ -38,6 +42,7 @@ __all__ = [
     "EpisodeGraph",
     "build_graph",
     "detect_episodes",
+    "pair_treatments",
     "summarize",
 ]
 
@@ -57,9 +62,15 @@ GAP_MIN_MINUTES = 30
 #: How far before an episode a context event may sit and still be linked, by kind
 #: (minutes). Activity reaches furthest back: post-exercise insulin sensitization
 #: drives lows hours later. Sleep is linked by interval overlap, not a window.
-_PRE_MIN: dict[str, float] = {"meal": 180.0, "bolus": 180.0, "activity": 360.0}
+_PRE_MIN: dict[str, float] = {
+    "meal": 180.0, "bolus": 180.0, "treatment": 180.0, "activity": 360.0,
+}
 #: How far after an episode's end a context event may sit and still be linked.
 _POST_MIN = 60.0
+
+#: A meal and a manual bolus this close (minutes) are candidates for one
+#: treatment (a single bolus-wizard action recorded as two events).
+TREATMENT_PAIR_MAX_MIN = 15.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +81,7 @@ class ContextLink:
     so "a 45 g breakfast 20 min before this high" is legible without re-deriving.
     """
 
-    kind: str  # "meal" | "bolus" | "activity" | "sleep"
+    kind: str  # "treatment" | "meal" | "bolus" | "activity" | "sleep"
     ts: datetime
     offset_min: float
     detail: dict[str, Any]
@@ -177,6 +188,69 @@ def _link(ep: Episode, kind: str, ts: datetime, detail: dict[str, Any]) -> Conte
                        detail=detail)
 
 
+def pair_treatments(
+    meals: list[MealEvent], boluses: list[InsulinEvent],
+) -> tuple[
+    list[tuple[MealEvent, InsulinEvent]], list[MealEvent], list[InsulinEvent]
+]:
+    """Pair meals with the manual boluses that recorded the same treatment.
+
+    A bolus-wizard action lands as two events (carbs and units); downstream the
+    pair should read as one "treatment 58 g + 5.2 U" node. Two rules, both
+    deliberately conservative because a false "separate" is safe while a false
+    "merged" erases the missed-bolus signal:
+
+    - a shared ``raw_event_id`` means the two events came from one device record;
+    - otherwise a mutual, unambiguous nearest match within
+      ``TREATMENT_PAIR_MAX_MIN`` minutes, skipping automatic boluses. Any
+      ambiguity (two candidate boluses for a meal, two candidate meals for a
+      bolus) pairs nothing.
+
+    Returns ``(pairs, unpaired_meals, unpaired_boluses)``, all ordered by time.
+    """
+    ms = sorted(meals, key=lambda m: m.ts)
+    bs = sorted(boluses, key=lambda b: b.ts)
+    used_m: set[int] = set()
+    used_b: set[int] = set()
+    pairs: list[tuple[MealEvent, InsulinEvent]] = []
+
+    by_raw: dict[int, list[int]] = {}
+    for j, b in enumerate(bs):
+        if b.raw_event_id is not None:
+            by_raw.setdefault(b.raw_event_id, []).append(j)
+    for i, m in enumerate(ms):
+        if m.raw_event_id is None:
+            continue
+        js = [j for j in by_raw.get(m.raw_event_id, []) if j not in used_b]
+        if len(js) == 1:
+            pairs.append((m, bs[js[0]]))
+            used_m.add(i)
+            used_b.add(js[0])
+
+    def close(m: MealEvent, b: InsulinEvent) -> bool:
+        return abs(_minutes(b.ts, m.ts)) <= TREATMENT_PAIR_MAX_MIN
+
+    meal_cands = {
+        i: [j for j, b in enumerate(bs)
+            if j not in used_b and not b.automatic and close(ms[i], b)]
+        for i in range(len(ms)) if i not in used_m
+    }
+    bolus_cands = {
+        j: [i for i in meal_cands if j in meal_cands[i]]
+        for j in range(len(bs)) if j not in used_b
+    }
+    for i, js in meal_cands.items():
+        if len(js) == 1 and bolus_cands.get(js[0]) == [i]:
+            pairs.append((ms[i], bs[js[0]]))
+            used_m.add(i)
+            used_b.add(js[0])
+
+    pairs.sort(key=lambda p: p[0].ts)
+    rest_m = [m for i, m in enumerate(ms) if i not in used_m]
+    rest_b = [b for j, b in enumerate(bs) if j not in used_b]
+    return pairs, rest_m, rest_b
+
+
 def _attach_context(episodes: list[Episode], store: StoragePort,
                     start: datetime, end: datetime) -> list[Episode]:
     """Bind meals/boluses/activity/sleep to each excursion episode as edges.
@@ -187,8 +261,11 @@ def _attach_context(episodes: list[Episode], store: StoragePort,
     """
     lo = start - timedelta(minutes=max(_PRE_MIN.values()))
     hi = end + timedelta(minutes=_POST_MIN)
-    meals = store.get_meals(lo, hi)
-    boluses = [i for i in store.get_insulin(lo, hi) if i.kind == InsulinKind.BOLUS]
+    all_meals = store.get_meals(lo, hi)
+    all_boluses = [i for i in store.get_insulin(lo, hi) if i.kind == InsulinKind.BOLUS]
+    # Resolve carb+bolus pairs into treatments before attaching, so an episode
+    # links to one "treatment 58 g + 5.2 U" node instead of two halves.
+    treatments, meals, boluses = pair_treatments(all_meals, all_boluses)
     activity = store.get_activity(lo, hi)
     sleep = store.get_sleep(lo, hi)
 
@@ -202,6 +279,12 @@ def _attach_context(episodes: list[Episode], store: StoragePort,
             out.append(ep)
             continue
         links: list[ContextLink] = []
+        for m, b in treatments:
+            if in_window(m.ts, ep, "treatment"):
+                links.append(_link(ep, "treatment", m.ts, {
+                    "carbs_g": m.carbs_g, "units": b.units, "automatic": b.automatic,
+                    "note": m.note, "bolus_dt_min": round(_minutes(b.ts, m.ts), 1),
+                }))
         for m in meals:
             if in_window(m.ts, ep, "meal"):
                 links.append(_link(ep, "meal", m.ts, {"carbs_g": m.carbs_g, "note": m.note}))

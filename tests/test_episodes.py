@@ -20,6 +20,7 @@ from dexta_intelligence.analytics.episodes import (
     EpisodeGraph,
     build_graph,
     detect_episodes,
+    pair_treatments,
     summarize,
 )
 from dexta_intelligence.coldstart import ColdStartReport
@@ -182,6 +183,90 @@ def test_sensor_gap_has_no_context_links() -> None:
     store = _store([(0, 120), (5, 120), (60, 120)], meals=meals)
     gap = next(e for e in _detect(store) if e.kind == "sensor_gap")
     assert gap.links == ()
+
+
+# ── treatment pairing ─────────────────────────────────────────────────────────
+
+
+def test_meal_and_close_bolus_pair_into_one_treatment_edge() -> None:
+    meals = [MealEvent(ts=_ts(-20), carbs_g=58.0, note="dinner")]
+    insulin = [InsulinEvent(ts=_ts(-17), kind=InsulinKind.BOLUS, units=6.0)]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals, insulin=insulin)
+    ep = next(e for e in _detect(store) if e.kind == "hyper")
+    kinds = [link.kind for link in ep.links]
+    assert kinds == ["treatment"]
+    t = ep.links[0]
+    assert t.offset_min == -20.0  # anchored to the meal
+    assert t.detail["carbs_g"] == 58.0
+    assert t.detail["units"] == 6.0
+    assert t.detail["bolus_dt_min"] == 3.0
+
+
+def test_shared_raw_event_id_pairs_beyond_the_time_window() -> None:
+    meals = [MealEvent(ts=_ts(-40), carbs_g=30.0, raw_event_id=7)]
+    insulin = [InsulinEvent(ts=_ts(-10), kind=InsulinKind.BOLUS, units=3.0, raw_event_id=7)]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals, insulin=insulin)
+    ep = next(e for e in _detect(store) if e.kind == "hyper")
+    assert [link.kind for link in ep.links] == ["treatment"]
+    assert ep.links[0].detail["bolus_dt_min"] == 30.0
+
+
+def test_ambiguous_boluses_pair_nothing() -> None:
+    # Two manual boluses inside the window of one meal: conservative, keep all
+    # three as separate edges rather than guessing which one was the meal bolus.
+    meals = [MealEvent(ts=_ts(-20), carbs_g=58.0)]
+    insulin = [
+        InsulinEvent(ts=_ts(-18), kind=InsulinKind.BOLUS, units=4.0),
+        InsulinEvent(ts=_ts(-12), kind=InsulinKind.BOLUS, units=2.0),
+    ]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals, insulin=insulin)
+    ep = next(e for e in _detect(store) if e.kind == "hyper")
+    assert sorted(link.kind for link in ep.links) == ["bolus", "bolus", "meal"]
+
+
+def test_automatic_bolus_never_time_pairs() -> None:
+    meals = [MealEvent(ts=_ts(-20), carbs_g=58.0)]
+    insulin = [InsulinEvent(ts=_ts(-18), kind=InsulinKind.BOLUS, units=1.5, automatic=True)]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals, insulin=insulin)
+    ep = next(e for e in _detect(store) if e.kind == "hyper")
+    assert sorted(link.kind for link in ep.links) == ["bolus", "meal"]
+
+
+def test_distant_meal_and_bolus_stay_separate() -> None:
+    # 20 minutes apart without a shared raw id: outside the pairing window, so
+    # the missed-bolus signal (a late correction is not a meal bolus) survives.
+    meals = [MealEvent(ts=_ts(-40), carbs_g=58.0)]
+    insulin = [InsulinEvent(ts=_ts(-20), kind=InsulinKind.BOLUS, units=6.0)]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals, insulin=insulin)
+    ep = next(e for e in _detect(store) if e.kind == "hyper")
+    assert sorted(link.kind for link in ep.links) == ["bolus", "meal"]
+
+
+def test_two_meals_near_one_bolus_pair_nothing() -> None:
+    meals = [
+        MealEvent(ts=_ts(-22), carbs_g=40.0),
+        MealEvent(ts=_ts(-14), carbs_g=18.0),
+    ]
+    insulin = [InsulinEvent(ts=_ts(-18), kind=InsulinKind.BOLUS, units=5.0)]
+    pairs, rest_meals, rest_boluses = pair_treatments(meals, insulin)
+    assert pairs == []
+    assert len(rest_meals) == 2 and len(rest_boluses) == 1
+
+
+def test_two_clean_pairs_both_pair() -> None:
+    meals = [
+        MealEvent(ts=_ts(0), carbs_g=40.0),
+        MealEvent(ts=_ts(240), carbs_g=60.0),
+    ]
+    insulin = [
+        InsulinEvent(ts=_ts(2), kind=InsulinKind.BOLUS, units=4.0),
+        InsulinEvent(ts=_ts(243), kind=InsulinKind.BOLUS, units=6.5),
+    ]
+    pairs, rest_meals, rest_boluses = pair_treatments(meals, insulin)
+    assert len(pairs) == 2
+    assert rest_meals == [] and rest_boluses == []
+    assert pairs[0][0].carbs_g == 40.0 and pairs[0][1].units == 4.0
+    assert pairs[1][0].carbs_g == 60.0 and pairs[1][1].units == 6.5
 
 
 # ── rollup, determinism, serialization ────────────────────────────────────────

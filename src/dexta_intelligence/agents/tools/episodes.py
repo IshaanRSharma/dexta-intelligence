@@ -102,9 +102,11 @@ def episode_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec
             description=(
                 "One episode with its typed context edges: the meals, boluses, "
                 "activity, and sleep around it, each with a signed minute offset from "
-                "the episode start. Name it by episode_id (from episodes) or locate it "
-                "by timestamp. The instrument for 'why did I go high/low then' - "
-                "traverse the episode to its context instead of guessing from a trace."
+                "the episode start. A carb entry and the manual bolus recorded as one "
+                "action appear as a single 'treatment' edge (carbs + units). Name it "
+                "by episode_id (from episodes) or locate it by timestamp. The "
+                "instrument for 'why did I go high/low then' - traverse the episode "
+                "to its context instead of guessing from a trace."
             ),
             parameters={
                 "type": "object",

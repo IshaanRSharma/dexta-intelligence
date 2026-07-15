@@ -13,6 +13,7 @@
   --tl-gap: #64748b;
   --tl-meal: #0891b2;
   --tl-bolus: #7c3aed;
+  --tl-treatment: #4f46e5;
   --tl-activity: #0d9488;
   --tl-sleep: #475569;
   --tl-curve-a: #2563eb;
@@ -30,6 +31,7 @@
     --tl-gap: #94a3b8;
     --tl-meal: #22d3ee;
     --tl-bolus: #a78bfa;
+    --tl-treatment: #818cf8;
     --tl-activity: #2dd4bf;
     --tl-sleep: #94a3b8;
     --tl-curve-a: #60a5fa;
@@ -45,6 +47,7 @@
   --tl-gap: #94a3b8;
   --tl-meal: #22d3ee;
   --tl-bolus: #a78bfa;
+  --tl-treatment: #818cf8;
   --tl-activity: #2dd4bf;
   --tl-sleep: #94a3b8;
   --tl-curve-a: #60a5fa;
@@ -199,6 +202,7 @@
 .tl-f-conn { fill: none; stroke-width: 1.6; opacity: 0.55; }
 .tl-f-conn-meal { stroke: var(--tl-meal); }
 .tl-f-conn-bolus { stroke: var(--tl-bolus); }
+.tl-f-conn-treatment { stroke: var(--tl-treatment); }
 .tl-f-conn-activity { stroke: var(--tl-activity); }
 .tl-f-conn-sleep { stroke: var(--tl-sleep); }
 
@@ -207,6 +211,7 @@
 .tl-f-event .tl-f-shape { stroke: var(--surface); stroke-width: 1.4; paint-order: stroke; }
 .tl-f-event-meal .tl-f-shape { fill: var(--tl-meal); }
 .tl-f-event-bolus .tl-f-shape { fill: var(--tl-bolus); }
+.tl-f-event-treatment .tl-f-shape { fill: var(--tl-treatment); }
 .tl-f-event-activity .tl-f-shape { fill: var(--tl-activity); }
 .tl-f-event-sleep .tl-f-shape { fill: var(--tl-sleep); }
 .tl-f-lab1 { font-size: 11.5px; font-weight: 650; fill: var(--text); font-family: inherit; font-variant-numeric: tabular-nums; }
@@ -221,6 +226,7 @@
 .tl-g-edge { stroke-width: 1.6; opacity: 0.5; }
 .tl-g-edge-meal { stroke: var(--tl-meal); }
 .tl-g-edge-bolus { stroke: var(--tl-bolus); }
+.tl-g-edge-treatment { stroke: var(--tl-treatment); }
 .tl-g-edge-activity { stroke: var(--tl-activity); }
 .tl-g-edge-sleep { stroke: var(--tl-sleep); }
 .tl-g-edge-label {

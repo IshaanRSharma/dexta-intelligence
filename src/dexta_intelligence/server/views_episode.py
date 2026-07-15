@@ -68,7 +68,23 @@ def _edge_view(link: dict[str, Any], tz: ZoneInfo) -> dict[str, Any]:
     }
 
 
+def _treatment_line(detail: dict[str, Any]) -> str:
+    halves: list[str] = []
+    carbs = detail.get("carbs_g")
+    units = detail.get("units")
+    if isinstance(carbs, (int, float)):
+        halves.append(f"{carbs:g} g carbs")
+    if isinstance(units, (int, float)):
+        halves.append(f"{units:g} U")
+    parts = [" + ".join(halves)] if halves else []
+    if detail.get("note"):
+        parts.append(str(detail["note"]))
+    return ", ".join(parts)
+
+
 def _detail_line(kind: str, detail: dict[str, Any]) -> str:
+    if kind == "treatment":
+        return _treatment_line(detail)
     parts: list[str] = []
     if kind == "meal":
         carbs = detail.get("carbs_g")

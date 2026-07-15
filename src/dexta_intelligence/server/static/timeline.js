@@ -26,7 +26,7 @@
   // larger than G_CLUSTER_MAX collapse into one cluster node so dense runs (six
   // rescue carbs, stacked corrections) stay legible; smaller groups are spread
   // and pushed apart radially until nodes sit at least G_MIN_GAP apart.
-  const G_KIND_SLOT = { meal: -45, bolus: -15, activity: 15, sleep: 45 };
+  const G_KIND_SLOT = { meal: -45, treatment: -30, bolus: -15, activity: 15, sleep: 45 };
   const G_W = 960;
   const G_H = 620;
   const G_R_MIN = 140;
@@ -170,7 +170,13 @@
   function edgeDetail(kind, detail) {
     detail = detail || {};
     const parts = [];
-    if (kind === "meal") {
+    if (kind === "treatment") {
+      const halves = [];
+      if (num(detail.carbs_g)) halves.push(trimNum(detail.carbs_g) + " g carbs");
+      if (num(detail.units)) halves.push(trimNum(detail.units) + " U");
+      if (halves.length) parts.push(halves.join(" + "));
+      if (detail.note) parts.push(String(detail.note));
+    } else if (kind === "meal") {
       if (num(detail.carbs_g)) parts.push(trimNum(detail.carbs_g) + " g carbs");
       if (detail.note) parts.push(String(detail.note));
     } else if (kind === "bolus") {
@@ -188,6 +194,12 @@
   // Compact glyph label, e.g. "meal 45g" / "bolus 5.2U" / "activity run".
   function glyphLabel(kind, detail) {
     detail = detail || {};
+    if (kind === "treatment") {
+      const halves = [];
+      if (num(detail.carbs_g)) halves.push(trimNum(detail.carbs_g) + "g");
+      if (num(detail.units)) halves.push(trimNum(detail.units) + "U");
+      return halves.length ? "treatment " + halves.join("+") : "treatment";
+    }
     if (kind === "meal") return num(detail.carbs_g) ? "meal " + trimNum(detail.carbs_g) + "g" : "meal";
     if (kind === "bolus") return num(detail.units) ? "bolus " + trimNum(detail.units) + "U" : "bolus";
     if (kind === "activity") return detail.kind ? "activity " + String(detail.kind) : "activity";
@@ -236,6 +248,14 @@
     if (kind === "bolus") {
       const u = total(function (d) { return d.units; });
       return n + " boluses" + (u != null ? " · " + trimNum(u) + "U" : "");
+    }
+    if (kind === "treatment") {
+      const g = total(function (d) { return d.carbs_g; });
+      const u = total(function (d) { return d.units; });
+      const halves = [];
+      if (g != null) halves.push(trimNum(g) + "g");
+      if (u != null) halves.push(trimNum(u) + "U");
+      return n + " treatments" + (halves.length ? " · " + halves.join("+") : "");
     }
     if (kind === "activity") return n + " activity events";
     if (kind === "sleep") return n + " sleep entries";
@@ -679,6 +699,11 @@
     if (kind === "meal") return svg("circle", { cx: x, cy: y, r: r, class: "tl-f-shape" });
     if (kind === "sleep") return svg("rect", { x: x - r, y: y - r, width: 2 * r, height: 2 * r, class: "tl-f-shape" });
     if (kind === "bolus") return svg("polygon", { points: [x, y - r, x + r, y, x, y + r, x - r, y].map(String).join(" "), class: "tl-f-shape" });
+    if (kind === "treatment") {
+      const h = r * 0.87;
+      const pts = [x - r, y, x - r / 2, y - h, x + r / 2, y - h, x + r, y, x + r / 2, y + h, x - r / 2, y + h];
+      return svg("polygon", { points: pts.map(function (v) { return v.toFixed(1); }).join(" "), class: "tl-f-shape" });
+    }
     return svg("polygon", { points: [x, y - r, x + r, y + r, x - r, y + r].map(String).join(" "), class: "tl-f-shape" });
   }
 
