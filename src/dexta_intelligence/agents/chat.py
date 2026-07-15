@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents import prompts
+from dexta_intelligence.agents.curation import DEFAULT_CONTEXT_BUDGET_TOKENS, curated_context
 from dexta_intelligence.agents.reason import ReasoningResult, run_reasoning_loop
 from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
 from dexta_intelligence.agents.trace import TraceLine, render_trace
-from dexta_intelligence.guard.faithfulness import Violation, audit
+from dexta_intelligence.guard.faithfulness import ProvenanceViolation, Violation, audit
 from dexta_intelligence.guard.treatment_gate import (
     NO_TREATMENT_DISCLAIMER,
     SAFE_SENTENCE,
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
 
     from dexta_intelligence.agents.base import AgentContext
     from dexta_intelligence.agents.investigation import Synthesis
+    from dexta_intelligence.agents.reason import ToolCall
     from dexta_intelligence.coldstart import CapabilitySet
 
 logger = logging.getLogger(__name__)
@@ -49,6 +52,10 @@ class ChatAnswer:
     violations: tuple[str, ...] = ()
     #: The grounded synthesis of the investigation, when one was run (orchestrator).
     synthesis: Synthesis | None = None
+    #: The episode node the answer traversed (the explain_episode result dict:
+    #: kind, span, extreme, severity flags, typed context edges), when one was.
+    #: Deterministic tool output, so a UI can render it as the why-chain card.
+    episode_context: dict[str, Any] | None = None
 
 
 @dataclass
@@ -57,14 +64,24 @@ class ChatAgent:
     max_steps: int = 6
     target_low: int = 70
     target_high: int = 180
+    context_budget_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
 
     def ask(self, ctx: AgentContext, question: str) -> ChatAnswer:
         toolkit = DiscoveryToolkit(ctx, target_low=self.target_low, target_high=self.target_high)
         specs = tool_specs(ctx, toolkit)
+        context_block, receipts = curated_context(
+            ctx,
+            question,
+            now=datetime.now(UTC),
+            budget_tokens=self.context_budget_tokens,
+            target_low=self.target_low,
+            target_high=self.target_high,
+        )
+        system = f"{_SYSTEM}\n\n{context_block}" if context_block else _SYSTEM
         result = run_reasoning_loop(
             self.model,
             specs,
-            system=_SYSTEM,
+            system=system,
             user=question,
             max_steps=self.max_steps,
         )
@@ -73,12 +90,18 @@ class ChatAgent:
             return run_reasoning_loop(
                 self.model,
                 specs,
-                system=f"{_SYSTEM}\n\nGATE: {hint}",
+                system=f"{system}\n\nGATE: {hint}",
                 user=question,
                 max_steps=self.max_steps,
             )
 
-        return _finish(result, question=question, capabilities=toolkit.capabilities(), rerun=rerun)
+        return _finish(
+            result,
+            question=question,
+            capabilities=toolkit.capabilities(),
+            rerun=rerun,
+            pre_trace=receipts,
+        )
 
 
 def _finish(
@@ -87,11 +110,13 @@ def _finish(
     question: str = "",
     capabilities: CapabilitySet | None = None,
     rerun: Callable[[str], ReasoningResult] | None = None,
+    pre_trace: tuple[TraceLine, ...] = (),
 ) -> ChatAnswer:
     if question and capabilities is not None:
         result = _apply_gate(result, question, capabilities, rerun)
     tools_used = tuple(step.name for step in result.steps)
-    trace = tuple(render_trace(result.steps))
+    trace = pre_trace + tuple(render_trace(result.steps))
+    episode = _episode_context(result.steps)
     if not result.answer:
         if result.stopped_reason == "model_error" and result.error_detail:
             fallback = result.error_detail
@@ -104,10 +129,16 @@ def _finish(
             fallback, tools_used, faithful=True, stopped_reason=result.stopped_reason, trace=trace
         )
 
-    report = audit(result.answer, result.evidence)
+    report = audit(result.answer, result.evidence, check_provenance=True)
     if not report.ok:
-        logger.warning("chat: %d untraceable number(s) in answer", len(report.violations))
-        violations = tuple(_violation_summary(v) for v in report.violations)
+        logger.warning(
+            "chat: %d untraceable + %d wrong-metric number(s) in answer",
+            len(report.violations), len(report.provenance_violations),
+        )
+        violations = (
+            tuple(_violation_summary(v) for v in report.violations)
+            + tuple(_provenance_summary(v) for v in report.provenance_violations)
+        )
         warned = (
             result.answer + "\n\n⚠️ Some figures above could not be traced to your data - "
             "treat them with caution."
@@ -119,10 +150,24 @@ def _finish(
             stopped_reason=result.stopped_reason,
             trace=trace,
             violations=violations,
+            episode_context=episode,
         )
     return ChatAnswer(
-        result.answer, tools_used, faithful=True, stopped_reason=result.stopped_reason, trace=trace
+        result.answer,
+        tools_used,
+        faithful=True,
+        stopped_reason=result.stopped_reason,
+        trace=trace,
+        episode_context=episode,
     )
+
+
+def _episode_context(steps: list[ToolCall]) -> dict[str, Any] | None:
+    """The last successfully traversed episode node in this turn, if any."""
+    for step in reversed(steps):
+        if step.name == "explain_episode" and step.ok and isinstance(step.result, dict):
+            return step.result
+    return None
 
 
 def _violation_summary(v: Violation) -> str:
@@ -130,6 +175,11 @@ def _violation_summary(v: Violation) -> str:
     if v.nearest_pool_value is not None:
         return f"{v.number:g} (nearest evidence {v.nearest_pool_value:g})"
     return f"{v.number:g}"
+
+
+def _provenance_summary(v: ProvenanceViolation) -> str:
+    """Short UI string for a wrong-metric citation."""
+    return f"{v.number:g} cited as {v.claimed_metric} but matches {v.matched_metric}"
 
 
 def _apply_gate(  # noqa: PLR0911 - one return per gate outcome

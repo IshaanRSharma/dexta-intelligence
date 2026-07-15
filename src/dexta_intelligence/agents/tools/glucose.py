@@ -19,7 +19,8 @@ if TYPE_CHECKING:
 
 def glucose_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
     """Coverage, list_segments, set_window, zoom_event, daily_series, glucose_stats,
-    find_spikes - the orient-and-drill primitives over the CGM series."""
+    glycemia_risk_index, find_spikes - the orient-and-drill primitives over the CGM
+    series."""
 
     def coverage(_args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
         cov = ctx.store.coverage()
@@ -89,6 +90,16 @@ def glucose_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec
                 "n", "mean", "sd", "variance", "cv_pct", "median", "p10", "p25",
                 "p75", "p90", "minimum", "maximum", "tir_pct", "tbr_pct", "tar_pct",
                 "tbr54_pct", "tar250_pct", "gmi_pct",
+            ),
+        )
+
+    def glycemia_risk_index(_args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+        result = toolkit.glycemia_risk_index()
+        return result, _numbers(
+            result,
+            (
+                "gri", "hypo_component", "hyper_component", "pct_very_low",
+                "pct_low", "pct_high", "pct_very_high", "n_readings",
             ),
         )
 
@@ -206,6 +217,19 @@ def glucose_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec
                 },
             },
             fn=glucose_stats,
+        ),
+        ToolSpec(
+            name="glycemia_risk_index",
+            description=(
+                "Overall clinician-anchored glycemic risk over the ACTIVE window "
+                "(Klonoff GRI, 0-100, hypoglycemia weighted ~2x hyperglycemia): the "
+                "gri score plus its hypo/hyper components and the four band percentages "
+                "(very-low <54, low 54-70, high 180-250, very-high >250; low/high "
+                "EXCLUDE the severe bands, unlike TBR/TAR). One risk DESCRIPTION for "
+                "'how risky is my control overall', never a dose."
+            ),
+            parameters={"type": "object", "properties": {}},
+            fn=glycemia_risk_index,
         ),
         ToolSpec(
             name="find_spikes",

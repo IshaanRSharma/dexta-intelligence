@@ -294,6 +294,11 @@
     if (view._answerBody) {
       view._answerBody.classList.remove("answer-streaming");
     }
+    if (payload.episode_html) {
+      const episode = el("div", "answer-episode");
+      episode.innerHTML = payload.episode_html;
+      view._answerBody.appendChild(episode);
+    }
     if (view.status && view.status.isConnected) view.status.remove();
     finalizeWorkLog(view);
     if (payload.trace && payload.trace.length) {

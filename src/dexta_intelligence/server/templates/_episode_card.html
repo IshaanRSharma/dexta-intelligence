@@ -1,0 +1,28 @@
+{% from "_components.html" import chip %}
+{% if episode %}
+<article class="card finding-card episode-card">
+  <div class="card-head">
+    <h2>{{ episode.title }}</h2>
+    {% if episode.severe %}
+    <span class="badge bad">severe</span>
+    {% elif episode.clinically_significant %}
+    <span class="badge neutral">clinically significant</span>
+    {% endif %}
+  </div>
+  <div class="chips">
+    {% if episode.span %}{{ chip("when", episode.span) }}{% endif %}
+    {% if episode.duration %}{{ chip("duration", episode.duration) }}{% endif %}
+    {% if episode.extreme %}{{ chip("extreme", episode.extreme) }}{% endif %}
+  </div>
+  {% if episode.edges %}
+  <p class="muted small">Context around this episode (offset from its start):</p>
+  <div class="chips">
+    {% for edge in episode.edges %}
+    {{ chip(edge.kind ~ " " ~ edge.offset, edge.detail or edge.at) }}
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted small">No meals, boluses, activity, or sleep were logged around this episode.</p>
+  {% endif %}
+</article>
+{% endif %}

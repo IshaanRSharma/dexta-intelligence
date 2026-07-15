@@ -32,7 +32,9 @@ from dexta_intelligence.models import (
     ChatSession,
     ChatTurn,
     CoverageStats,
+    EdgeRelation,
     Finding,
+    FindingEdge,
     FindingStats,
     FindingStatus,
     GlucoseEvent,
@@ -64,7 +66,7 @@ if TYPE_CHECKING:
 
 __all__ = ["PostgresStore"]
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 _SECONDS_PER_DAY = 86400.0
 _CGM_SLOT_SECONDS = 300.0  # expected 5-minute CGM cadence
@@ -208,6 +210,19 @@ CREATE TABLE IF NOT EXISTS findings (
     seen_count INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_findings_agent_kind_status ON findings (agent, kind, status);
+
+CREATE TABLE IF NOT EXISTS finding_edges (
+    id BIGSERIAL PRIMARY KEY,
+    src_id BIGINT NOT NULL,
+    dst_id BIGINT NOT NULL,
+    relation TEXT NOT NULL,
+    knowledge_time TIMESTAMPTZ NOT NULL,
+    event_time TIMESTAMPTZ,
+    evidence TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_finding_edges_src ON finding_edges (src_id);
+CREATE INDEX IF NOT EXISTS idx_finding_edges_dst ON finding_edges (dst_id);
+CREATE INDEX IF NOT EXISTS idx_finding_edges_relation ON finding_edges (relation);
 
 CREATE TABLE IF NOT EXISTS hypotheses (
     id BIGSERIAL PRIMARY KEY,
@@ -1002,6 +1017,64 @@ class PostgresStore:
                 superseded_by=r[13],
                 last_verified=_opt_utc(r[14]),
                 seen_count=r[15] if r[15] is not None else 1,
+            )
+            for r in fetched
+        ]
+
+    def add_finding_edge(self, edge: FindingEdge) -> int:
+        with self._conn.transaction(), self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO finding_edges "
+                "(src_id, dst_id, relation, knowledge_time, event_time, evidence) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    edge.src_id,
+                    edge.dst_id,
+                    edge.relation.value,
+                    _to_utc(edge.knowledge_time),
+                    _opt_utc(edge.event_time),
+                    edge.evidence,
+                ),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def get_finding_edges(
+        self,
+        *,
+        src_id: int | None = None,
+        dst_id: int | None = None,
+        relation: EdgeRelation | None = None,
+    ) -> list[FindingEdge]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if src_id is not None:
+            clauses.append("src_id = %s")
+            params.append(src_id)
+        if dst_id is not None:
+            clauses.append("dst_id = %s")
+            params.append(dst_id)
+        if relation is not None:
+            clauses.append("relation = %s")
+            params.append(relation.value)
+        where = f"WHERE {' AND '.join(clauses)} " if clauses else ""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, src_id, dst_id, relation, knowledge_time, event_time, evidence "
+                f"FROM finding_edges {where}ORDER BY id ASC",
+                params,
+            )
+            fetched = cur.fetchall()
+        return [
+            FindingEdge(
+                id=r[0],
+                src_id=r[1],
+                dst_id=r[2],
+                relation=EdgeRelation(r[3]),
+                knowledge_time=_to_utc(r[4]),
+                event_time=_opt_utc(r[5]),
+                evidence=r[6],
             )
             for r in fetched
         ]

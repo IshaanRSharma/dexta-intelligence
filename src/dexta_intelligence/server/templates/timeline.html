@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}dexta · timeline{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/timeline.css?v={{ static_version }}" />
+
+<div class="page-head">
+  <h1>Temporal episode graph</h1>
+  <p class="page-sub">Every glucose excursion and sensor gap in the active window, with the
+  meals, boluses, activity, and sleep linked around each one. Deterministic and model-free:
+  nothing on this page was authored by a language model.</p>
+</div>
+
+<div class="hero-grid tl-tiles">
+  {% for t in tiles %}
+  <div class="hero-tile">
+    <div class="hero-num{% if not t.value %} empty{% endif %}">{{ t.value }}</div>
+    <div class="hero-label">{{ t.label }}{% if t.note %} · {{ t.note }}{% endif %}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<p class="muted small tl-window">Window {{ window_label }} · times shown in UTC</p>
+
+{% if has_episodes %}
+<section class="tl-shell" aria-label="Episode graph"
+         data-default-episode="{{ default_episode_id or '' }}">
+
+  <div class="tl-nav" aria-label="Episode navigator">
+    <div class="tl-nav-head">
+      <span class="tl-nav-title">When episodes happened</span>
+      <fieldset class="tl-filters">
+        <legend class="tl-sr">Show episode kinds</legend>
+        <label class="tl-toggle tl-toggle-hyper">
+          <input type="checkbox" data-filter="hyper" checked />
+          <span class="tl-swatch tl-swatch-hyper" aria-hidden="true">▲</span> Highs
+        </label>
+        <label class="tl-toggle tl-toggle-hypo">
+          <input type="checkbox" data-filter="hypo" checked />
+          <span class="tl-swatch tl-swatch-hypo" aria-hidden="true">▼</span> Lows
+        </label>
+        <label class="tl-toggle tl-toggle-gap">
+          <input type="checkbox" data-filter="sensor_gap" checked />
+          <span class="tl-swatch tl-swatch-gap" aria-hidden="true">▨</span> Gaps
+        </label>
+      </fieldset>
+    </div>
+    <div id="tl-navigator" class="tl-navigator" role="group"
+         aria-label="Episodes on the time axis. Highs sit above the line, lows below,
+         sensor gaps as ticks. Select one to load its relations."></div>
+    <p class="muted small tl-nav-hint">Pick an episode to see the meals, boluses, activity,
+    and sleep that surround it.</p>
+  </div>
+
+  <div class="tl-focus" aria-label="Relations for the selected episode">
+    <div class="tl-focus-head">
+      <div class="tl-focus-heading">
+        <span class="tl-focus-eyebrow">Selected episode</span>
+        <h2 id="tl-focus-title" class="tl-focus-title">Loading…</h2>
+      </div>
+      <div class="tl-focus-actions">
+        <div class="tl-viewtoggle" role="group" aria-label="Focus view">
+          <button type="button" class="tl-vt-btn on" id="tl-view-curve"
+                  data-view="curve" aria-pressed="true">Curve</button>
+          <button type="button" class="tl-vt-btn" id="tl-view-graph"
+                  data-view="graph" aria-pressed="false">Graph</button>
+        </div>
+        <div class="tl-stepper">
+          <button type="button" class="btn-secondary btn-sm" id="tl-prev"
+                  aria-label="Previous episode">◂ Prev</button>
+          <span id="tl-position" class="tl-position" aria-live="polite"></span>
+          <button type="button" class="btn-secondary btn-sm" id="tl-next"
+                  aria-label="Next episode">Next ▸</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tl-focus-grid">
+      <div class="tl-plot-wrap">
+        <div id="tl-plot" class="tl-plot" role="img"
+             aria-label="Glucose curve around the selected episode, with each meal, bolus,
+             activity, and sleep placed at its real time and labelled with how it relates
+             to the episode."></div>
+      </div>
+      <aside id="tl-detail" class="tl-detail" aria-live="polite">
+        {% if default_episode %}
+        {% with episode = default_episode %}{% include "_episode_card.html" %}{% endwith %}
+        {% endif %}
+      </aside>
+    </div>
+  </div>
+
+  <div id="tl-tooltip" class="tl-tooltip" role="status" aria-live="polite" hidden></div>
+</section>
+
+<script src="/static/timeline.js?v={{ static_version }}" defer></script>
+{% else %}
+<div class="empty">
+  <strong>No episodes in this window</strong>
+  <p class="hint">No hypo or hyper excursions and no sensor gaps were detected over the active
+  window. Sync more data or widen the analysis window in Settings, then check back.</p>
+</div>
+{% endif %}
+{% endblock %}

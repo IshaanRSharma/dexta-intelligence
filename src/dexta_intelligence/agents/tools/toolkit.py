@@ -297,6 +297,14 @@ class DiscoveryToolkit:
             return self._daily_full
         return {d: v for d, v in self._daily_full.items() if lo <= d <= hi}
 
+    def active_window(self) -> tuple[datetime, datetime]:
+        """The active sub-window (UTC) the episode-graph tools segment over."""
+        return (self._active_start, self._active_end)
+
+    def target_range(self) -> tuple[int, int]:
+        """The (low, high) in-range thresholds this toolkit was built with."""
+        return self._target
+
     def _active_glucose(self) -> tuple[list[datetime], list[float]]:
         """(timestamps, values) sliced to the active sub-window via bisect."""
         lo = bisect.bisect_left(self._glucose_ts, self._active_start)
@@ -648,6 +656,40 @@ class DiscoveryToolkit:
         if s.mean is not None:
             out["gmi_pct"] = round(_GMI_INTERCEPT + _GMI_SLOPE * s.mean, 1)
         return out
+
+    def glycemia_risk_index(self) -> dict[str, Any]:
+        """Klonoff Glycemia Risk Index over the ACTIVE window - one clinician-anchored
+        glycemic-risk score (0-100) weighting hypoglycemia about twice hyperglycemia.
+        A risk DESCRIPTION, never a dose. The Low (54 to <70) and High (>180 to 250)
+        bands EXCLUDE the severe bands, so they differ from cumulative TBR (<70) and
+        TAR (>180); only very-low (<54) and very-high (>250) match tbr54/tar250. Caps
+        at 100. Never raises."""
+        _, vals = self._active_glucose()
+        n = len(vals)
+        scope: dict[str, Any] = {
+            "start": self._active_start.astimezone(self._tz).date().isoformat(),
+            "end": self._active_end.astimezone(self._tz).date().isoformat(),
+        }
+        if n == 0:
+            return {**scope, "n_readings": 0, "note": "no readings in this window"}
+        pct_very_low = 100.0 * sum(1 for v in vals if v < 54) / n
+        pct_low = 100.0 * sum(1 for v in vals if 54 <= v < 70) / n
+        pct_high = 100.0 * sum(1 for v in vals if 180 < v <= 250) / n
+        pct_very_high = 100.0 * sum(1 for v in vals if v > 250) / n
+        hypo = pct_very_low + 0.8 * pct_low
+        hyper = pct_very_high + 0.5 * pct_high
+        gri = min(100.0, 3.0 * hypo + 1.6 * hyper)
+        return {
+            **scope,
+            "n_readings": n,
+            "gri": round(gri, 1),
+            "hypo_component": round(hypo, 1),
+            "hyper_component": round(hyper, 1),
+            "pct_very_low": round(pct_very_low, 1),
+            "pct_low": round(pct_low, 1),
+            "pct_high": round(pct_high, 1),
+            "pct_very_high": round(pct_very_high, 1),
+        }
 
     # ── correlation ──────────────────────────────────────────────────────────
 
@@ -1641,6 +1683,7 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
     """
     from dexta_intelligence.agents.brief import _ADVICE_RE  # noqa: PLC0415
     from dexta_intelligence.memory import embeddings  # noqa: PLC0415
+    from dexta_intelligence.memory.findings import recurrence_line  # noqa: PLC0415
     from dexta_intelligence.memory.synthesis import load_latest  # noqa: PLC0415
 
     def _reads_as_dosing(f: Finding) -> bool:
@@ -1676,6 +1719,9 @@ def _recall(ctx: AgentContext, query: str) -> tuple[Any, dict[str, Any]]:
             "confidence": f.confidence,
             "status": f.status.value,
         }
+        recurrence = recurrence_line(f)
+        if recurrence:
+            item["recurrence"] = recurrence
         if f.skeptic_notes:
             item["skeptic_notes"] = f.skeptic_notes
         items.append(item)

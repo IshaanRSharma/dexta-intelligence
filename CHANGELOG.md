@@ -7,6 +7,49 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- The graph, surfaced as product: a why-chain episode card on chat answers
+  (span, duration, extreme, severity, typed context edges with signed
+  offsets), recurrence lines on briefs and recall ("seen 7 times since May
+  12"), `what_changed` and `contradicted_beliefs` belt tools over the
+  SUPERSEDES and CONTRADICTS edges, and a deterministic endo-visit brief
+  (top 3 findings with receipts and a neutral question each, dosing-bait and
+  unfaithful candidates structurally dropped).
+- Conversational capture, thesis-safe: the model proposes structured events
+  from free text, a deterministic validator checks type, window, and
+  dosing-text rejection, and the user's one-tap confirmation on /log is the
+  only commit gate. Unconfirmed proposals live in process memory and cannot
+  reach the store, guard, findings, or graph.
+- Curated context in the reasoning prompts: the deterministic curator's
+  typed selection now feeds chat and orchestrator system prompts, with one
+  trace receipt per pruned item.
+- Bitemporal finding edges: findings now link through a `finding_edges` table
+  (supersedes, contradicts, plus reserved relations), each edge carrying
+  event time and knowledge time and a deterministic reason. Edges are
+  authored only where the system already computes the fact (supersession,
+  contradiction detection, synthesis retirement); nothing model-authored
+  enters the graph.
+- Deterministic context curator (`memory/curator.py`): `select_context` picks
+  typed context (facts, beliefs, conventions, history) under a token budget
+  with per-type floors and returns a drop list where every drop carries a
+  trace-ready reason. Severe episodes and treatment-gate inputs are never
+  droppable; scoring is clock-free and reproducible (ISSUES #15).
+- Temporal episode graph (`analytics/episodes.py`): hypo/hyper excursions and
+  sensor gaps as first-class episode nodes (span, duration, extreme, severity,
+  clinical significance) with typed context edges to the meals, boluses,
+  activity, and sleep around each episode. Deterministic, model-free, aligned
+  to the LLM-CGM ground-truth definitions; `summarize()` emits ontology-keyed
+  rollups ready for the faithfulness guard (ISSUES #14). Plus a timeline
+  renderer in `bench/render_episodes.py`. Episodes carry stable ids and are
+  exposed on the agent belt as two tools: `episodes` (all nodes plus rollups)
+  and `explain_episode` (traverse one node's context edges by id or
+  timestamp), so the model reasons over the graph instead of re-deriving
+  segmentation per question.
+- Provenance layer on the faithfulness guard: a deterministic metric ontology
+  (`guard/metrics.py`) binds evidence numbers to the metric they describe, and
+  an opt-in provenance pass catches "right number, wrong metric" citations
+  (the standard deviation presented as the coefficient of variation), the
+  exact failure LLM-CGM measured in code-execution agents. Wired into the
+  chat answer surface; all other audit callers unchanged (ISSUES #13).
 - Nightscout API v3 support with v1 fallback: the connector prefers the
   secured `/api/v3/*` interface (JWT bearer token minted from the configured
   access token) and falls back to the legacy v1 query API on older servers.
@@ -103,6 +146,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Dosing gate hardened after an adversarial red-team pass: the shared
+  `_ADVICE_RE` backstop only matched four verbs, so "raise your basal",
+  "give 2 units", "2 more units", "up your basal" and similar phrasings
+  leaked as observation. The verb set is broadened, quantity-implied and
+  "up your" branches added, and the match window is clause-tempered so
+  "give 0.5 units" is caught while "take your time. Basal was 0.8 u/hr"
+  stays observation. Remaining lexical residuals documented in ISSUES #16.
 - Faithfulness guard: comma-grouped numbers (`25,920`) no longer split into two
   claims, removing the main source of false grounding warnings.
 - The project resolves with `uv lock` again: the `carelink` extra no longer pins

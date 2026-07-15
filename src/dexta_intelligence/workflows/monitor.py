@@ -43,6 +43,7 @@ from dexta_intelligence.analytics.rollups import (
     VERY_HIGH_MG_DL,
     VERY_LOW_MG_DL,
 )
+from dexta_intelligence.memory.findings import supersedes_edge
 from dexta_intelligence.models import Finding, FindingStatus, InsulinKind
 
 if TYPE_CHECKING:
@@ -190,18 +191,23 @@ def _persist_new(ctx: AgentContext, anomalies: list[Anomaly]) -> list[Anomaly]:
     for f in existing:
         stale_by_scope.setdefault(f.scope, []).append(f)
 
+    moment = datetime.now(tz=UTC)
     recorded: list[Anomaly] = []
     for anomaly in anomalies:
         if anomaly.key and anomaly.key in active_keys:
             continue  # same ongoing anomaly - already recorded, don't duplicate
+        fresh = _to_finding(anomaly)
         try:
-            new_id = ctx.store.insert_finding(_to_finding(anomaly))
+            new_id = ctx.store.insert_finding(fresh)
         except Exception:
             logger.exception("monitor: failed to persist anomaly %s", anomaly.name)
             continue
         for stale in stale_by_scope.get(anomaly.name, []):
             if stale.id is not None and str(stale.evidence.get("key", "")) != anomaly.key:
                 ctx.store.supersede_finding(stale.id, new_id)
+                ctx.store.add_finding_edge(
+                    supersedes_edge(new_id=new_id, old=stale, new=fresh, now=moment)
+                )
         recorded.append(anomaly)
     return recorded
 

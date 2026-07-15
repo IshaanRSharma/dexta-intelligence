@@ -35,8 +35,10 @@ def cmd_serve(
     Binds localhost by default; pass ``--host 0.0.0.0`` to deliberately expose
     the GUI to your LAN (there is no auth - only do this on a trusted network).
 
-    ``demo`` seeds the synthetic patient into the served database when it is empty
-    (idempotent), so ``dexta serve --demo`` is a one-command, no-data, no-key tour.
+    ``demo`` runs a fully isolated synthetic tour: unless ``--db`` is given
+    explicitly, the server uses a throwaway database in a temp directory (never
+    the configured store), seeds the synthetic patient into it when empty, and
+    disables connector sync so no real data can enter or leave the demo.
     """
     try:
         import uvicorn  # noqa: PLC0415
@@ -49,6 +51,13 @@ def cmd_serve(
             "  pip install 'dexta-intelligence[gui]'\n"
         )
         return 1
+
+    if demo and db_path is None:
+        import tempfile  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+
+        db_path = Path(tempfile.mkdtemp(prefix="dexta-demo-")) / "demo.db"
+        out.write(f"demo database: {db_path} (your real database is untouched)\n")
 
     base_opener = opener
     if db_path is not None:
@@ -65,10 +74,14 @@ def cmd_serve(
     # Capture the launched config path once so the settings panel reads/writes
     # the file the running server actually loaded - not a per-request re-resolve.
     settings_path = resolve_config_path(config_path)
-    app = create_app(config, store_opener=base_opener, config_path=settings_path, host=host)
+    app = create_app(
+        config, store_opener=base_opener, config_path=settings_path, host=host, demo=demo
+    )
 
     interval = sync_every if sync_every is not None else config.server.auto_sync_minutes
-    if interval and interval > 0:
+    if demo:
+        out.write("demo mode: connector sync is disabled\n")
+    elif interval and interval > 0:
         # The controller lives on app.state (created in create_app); enable it
         # from config at boot. The Connectors page retunes it live thereafter.
         app.state.autosync.configure(interval)

@@ -21,11 +21,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents import prompts
 from dexta_intelligence.agents.chat import _finish
 from dexta_intelligence.agents.context_acquisition import request_context_tool
+from dexta_intelligence.agents.curation import DEFAULT_CONTEXT_BUDGET_TOKENS, curated_context
 from dexta_intelligence.agents.investigation import seed_belief_from_store, synthesize
 from dexta_intelligence.agents.reason import ReasoningEvent, ToolSpec, run_reasoning_loop
 from dexta_intelligence.agents.tools.toolkit import DiscoveryToolkit, tool_specs
@@ -216,6 +218,7 @@ class OrchestratorAgent:
     #: tool-calling loop. Default off: a real-model A/B showed the scaffold does
     #: not improve answers on a capable model. Kept for ablation.
     use_belief: bool = False
+    context_budget_tokens: int = DEFAULT_CONTEXT_BUDGET_TOKENS
 
     def ask(
         self,
@@ -234,6 +237,16 @@ class OrchestratorAgent:
             belt.append(request_context_tool(ctx))
         belief = seed_belief_from_store(ctx) if self.use_belief else None
         system = f"{_SYSTEM}\n\n{_belief_directive(belief)}" if belief is not None else _SYSTEM
+        context_block, receipts = curated_context(
+            ctx,
+            question,
+            now=datetime.now(UTC),
+            budget_tokens=self.context_budget_tokens,
+            target_low=self.target_low,
+            target_high=self.target_high,
+        )
+        if context_block:
+            system = f"{system}\n\n{context_block}"
         result = run_reasoning_loop(
             self.model,
             belt,
@@ -257,7 +270,11 @@ class OrchestratorAgent:
             )
 
         answer = _finish(
-            result, question=question, capabilities=toolkit.capabilities(), rerun=rerun
+            result,
+            question=question,
+            capabilities=toolkit.capabilities(),
+            rerun=rerun,
+            pre_trace=receipts,
         )
         concluded = bool(result.answer) and answer.faithful and answer.stopped_reason == "answered"
         if result.belief is not None and concluded:

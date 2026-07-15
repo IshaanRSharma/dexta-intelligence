@@ -7,6 +7,92 @@ Follow-ups from the independent commit review of `d02b538..0ebba2d` on
 
 ## Open / deferred
 
+- **#16** Dosing-gate residuals and capture housekeeping (2026-07-07, from
+  the adversarial red-team pass). The lexical gate now catches the synonym
+  and quantity-implied bypasses, but three residual classes intentionally
+  remain (fixing them lexically costs more precision than the leak is
+  worth; defense-in-depth is the prompt rail plus human confirmation):
+  noun-free directives ("take a bit more before pizza"), gerund forms
+  ("consider adding a unit"), and non-English directives. Two capture
+  items flagged for a decision, not fixed: `app.state.pending_captures`
+  has no cap or expiry (mild in-memory DoS; single-user local server, so
+  left open by choice), and the confirm handler does not re-validate at
+  confirm time (it relies on validation at propose time plus pop-before-
+  persist ordering; holds today, but an explicit re-validation would make
+  it hold by construction).
+- **#15** Deterministic context curator, first slice (2026-07-03, from the
+  context-engineering research pass): a `select_context(query, budget)` over
+  the episode graph and findings. Collect per type (FACTS: tool outputs and
+  episode nodes; BELIEFS: findings/hypotheses; CONVENTIONS: the metric
+  ontology; HISTORY: turn results), score deterministically (relevance,
+  temporal overlap with the asked window, salience, freshness, type prior
+  with facts over beliefs), fill under a token budget with per-type floors,
+  and return the selection PLUS a drop list with reasons. Invariants: pruning
+  reduces tokens never ground-truth availability (the store is truth, the
+  window is a view); severe episodes and treatment-gate inputs are never
+  droppable; every drop emits a trace line; same query and state yields the
+  same selection. No LLM in the write or drop path (optional re-ranker over
+  the deterministic top-N only). No memory-graph libraries: Graphiti, Mem0,
+  Cognee, and Letta all LLM-author their graph write path, which would put
+  ungated model-authored claims upstream of the faithfulness guard; Kuzu is
+  archived (Apple acquisition). NetworkX only if multi-hop queries ever
+  demand it. Types kept isolated per MemGuard (arXiv 2605.28009); context-rot
+  evidence in arXiv 2606.10209.
+  RESOLVED (2026-07-05): shipped in two parts. (1) Bitemporal finding edges:
+  `EdgeRelation`/`FindingEdge` models, a `finding_edges` table in both
+  backends (sqlite v10, postgres v8) behind `add_finding_edge`/
+  `get_finding_edges` on the port, deterministically authored where the
+  system already computes the fact (persist_findings supersession and
+  find_contradictions, the monitor's worsened-anomaly supersede, the
+  synthesis save path). (2) `memory/curator.py` `select_context`: typed
+  selection (facts, beliefs, conventions, history) under a token budget with
+  per-type floors, a drop list where every drop carries a trace-ready
+  reason, an unconditional safety floor for severe episodes and
+  treatment-gate inputs, and clock-free deterministic scoring (now is a
+  parameter). `supports`/`co_occurs` relations are defined but unauthored,
+  reserved for future deterministic authors. Follow-up done (2026-07-07):
+  `agents/curation.py` wires `select_context` into the chat and orchestrator
+  system prompts with one trace receipt per pruned item; numbers still route
+  through tools so the guard's evidence pool stays tool-only.
+- **#13** Faithfulness guard is set-membership, not provenance-aware (2026-07-03,
+  from the LLM-CGM paper study): the guard's own docstring states it does
+  "set-membership checking, not semantic verification. A number can match the
+  pool while being cited in the wrong context." That is exactly the failure
+  class LLM-CGM measured in code-execution agents (SD reported where CV was
+  asked, 0/10 for both code frameworks in their Table 3). Harden the guard to
+  verify number -> computation -> window -> metric -> unit provenance, so it
+  catches "right number, wrong metric" and not just fabricated numbers.
+  Highest-ROI verification hardening; upgrades the safety claim from "we flag
+  fabricated numbers" to "we verify every number is computed and cited
+  correctly."
+  LARGELY RESOLVED (2026-07-03): `guard/metrics.py` adds a deterministic
+  metric ontology (evidence keys + prose aliases per metric), and the guard's
+  new opt-in provenance pass (`check_provenance=True`, wired into the chat
+  answer surface) fires only when a sentence names a metric we hold, the
+  number mismatches it, and matches a different held metric. SD-cited-as-CV
+  is now caught and surfaced. Remaining: thread ProvenanceViolation into
+  trace.py, extend the ontology beyond the core metric set, and the #14
+  episode layer.
+- **#14** Structured domain-context layer (2026-07-03, same study): LLM-CGM's
+  top future-work ask is injected domain definitions and analysis conventions
+  (CV is not SD, in-range is 70-180, "today" is the last data day). dexta
+  covers pieces (tool belt, timing_context, coldstart gating) but has no
+  single structured layer that both the agent and the faithfulness guard
+  consult. Also make temporal episodes (excursions, lows, gaps) first-class
+  segmented objects rather than per-tool outputs; the paper's worst code-agent
+  scores were all temporal segmentation tasks.
+  PARTIALLY RESOLVED (2026-07-03): `analytics/episodes.py` makes hypo/hyper
+  excursions and sensor gaps first-class `Episode` nodes with typed
+  `ContextLink` edges to nearby meals, boluses, activity, and sleep
+  (per-kind reach windows), thresholds aligned to the LLM-CGM ground-truth
+  definitions, and `summarize()` emitting ontology-aligned keys. Validated
+  against the P1 bench ground truth (65 hypo episodes, 25 clinically
+  significant). Episodes are now addressable (stable ids, `EpisodeGraph.node`
+  / `.at` traversal) and on the reasoning belt as two tools: `episodes` and
+  `explain_episode` (by id or timestamp, returning the node with its typed
+  context edges, numbers fed to the faithfulness evidence pool). Remaining:
+  thread episodes and ProvenanceViolation into trace.py, and the broader
+  definitions layer both agent and guard consult.
 - **#11** Tandem connector targets the retired backend (2026-07-02, ecosystem
   survey): `connectors/tandem.py` documents and delegates to tconnectsync
   against the t:connect cloud, which Tandem shut down in the US on 2024-09-30.

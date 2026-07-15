@@ -28,6 +28,7 @@ from dexta_intelligence.models import (
     GoalCheckpoint,
     GoalMetric,
     InvestigationRun,
+    MealEvent,
     OpenInvestigation,
     RunFinding,
 )
@@ -569,6 +570,56 @@ def test_serve_no_warning_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "WARNING" not in out.getvalue()
 
 
+# ── demo isolation: throwaway db, no real-data ingress ────────────────────────
+
+
+def _demo_client(tmp_path: Path) -> TestClient:
+    store = _store(tmp_path)
+    app = create_app(Config(), store_opener=_opener(Path(store._path)), demo=True)
+    return TestClient(app)
+
+
+def test_demo_blocks_all_sync_actions(tmp_path: Path) -> None:
+    client = _demo_client(tmp_path)
+    for path, data in (
+        ("/actions/sync", {}),
+        ("/actions/connectors/sync", {"scope": "all"}),
+        ("/actions/connectors/autosync", {"interval": "15"}),
+    ):
+        resp = client.post(path, data=data, follow_redirects=False)
+        assert resp.status_code == 303, path
+        assert resp.headers["location"] == "/connectors?flash=demo_sync", path
+
+
+def test_demo_autosync_stays_disabled_after_post(tmp_path: Path) -> None:
+    client = _demo_client(tmp_path)
+    client.post("/actions/connectors/autosync", data={"interval": "15"}, follow_redirects=False)
+    assert client.app.state.autosync.status().enabled is False
+
+
+def test_demo_connectors_page_shows_notice_and_flash(tmp_path: Path) -> None:
+    client = _demo_client(tmp_path)
+    html = client.get("/connectors?flash=demo_sync").text
+    assert "Demo mode: connector sync is disabled" in html
+
+
+def test_serve_demo_uses_throwaway_db(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("uvicorn.run", lambda *a, **kw: None)
+    iso = tmp_path / "demo-iso"
+    iso.mkdir()
+    monkeypatch.setattr("tempfile.mkdtemp", lambda prefix="": str(iso))
+    out = io.StringIO()
+    cmd_serve(config=Config(), db_path=None, out=out, demo=True, sync_every=5)
+    text = out.getvalue()
+    assert str(iso / "demo.db") in text
+    assert "seeded the synthetic demo patient" in text
+    assert "connector sync is disabled" in text
+    assert "auto-sync every" not in text
+    assert (iso / "demo.db").exists()
+
+
 # ── CSV upload ────────────────────────────────────────────────────────────────
 
 
@@ -933,3 +984,144 @@ def test_mask_dsn_hides_password() -> None:
     # no password -> unchanged; empty -> empty
     assert _mask_dsn("postgresql://db.example.com/dexta") == "postgresql://db.example.com/dexta"
     assert _mask_dsn("") == ""
+
+
+# ── timeline (temporal episode graph) ───────────────────────────────────────────
+
+
+def _seed_excursions(store: SQLiteStore) -> None:
+    """Seed a flat trace with one clinically significant high and one low run,
+    so the episode graph has hyper/hypo nodes to render."""
+    ts = FIXED_NOW - timedelta(days=2)
+    rows: list[GlucoseEvent] = []
+    while ts <= FIXED_NOW:
+        offset = (ts - (FIXED_NOW - timedelta(days=1))).total_seconds() / 60.0
+        if 0 <= offset < 40:
+            mg = 210  # hyper run (>180), ~40 min
+        elif 120 <= offset < 160:
+            mg = 60  # hypo run (<70), ~40 min
+        else:
+            mg = 120
+        rows.append(GlucoseEvent(ts=ts, mg_dl=mg))
+        ts += timedelta(minutes=5)
+    store.insert_glucose(rows)
+
+
+def test_timeline_page_renders(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    resp = _client(store).get("/timeline")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Temporal episode graph" in body
+    assert "tl-shell" in body
+    assert "timeline.js" in body
+    assert "High episodes" in body
+    # Navigator strip and focus relation view are both present.
+    assert "tl-navigator" in body
+    assert "tl-focus" in body
+    # Both lenses of the focus view: the Curve / Graph toggle drives off the same
+    # selected episode.
+    assert 'data-view="curve"' in body
+    assert 'data-view="graph"' in body
+    # Default selection is populated server-side, never blank: the shell carries a
+    # default episode id and the facts card is pre-rendered.
+    assert 'data-default-episode="' in body
+    assert "data-default-episode=\"\"" not in body
+    assert "episode-card" in body
+    store.close()
+
+
+def test_episodes_json_shape(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    resp = _client(store).get("/episodes.json")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert set(data) >= {"summary", "nodes", "window"}
+    assert isinstance(data["nodes"], list)
+    assert data["summary"]["num_hyper"] >= 1
+    assert data["summary"]["num_hypo"] >= 1
+    assert data["window"]["start"] < data["window"]["end"]
+    node = next(n for n in data["nodes"] if n["kind"] in ("hypo", "hyper"))
+    assert {"id", "kind", "start", "end", "duration_min", "links"} <= set(node)
+    store.close()
+
+
+def test_timeline_graph_lens_toggle(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    body = _client(store).get("/timeline").text
+    # The Curve / Graph switcher renders and defaults to the curve lens; both
+    # lenses drive off the same selected episode client-side.
+    assert 'class="tl-viewtoggle"' in body
+    assert 'data-view="curve"' in body
+    assert 'data-view="graph"' in body
+    assert 'id="tl-view-curve"' in body and 'aria-pressed="true"' in body
+    store.close()
+
+
+def test_episode_json_relation_view(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    client = _client(store)
+    nodes = client.get("/episodes.json").json()["nodes"]
+    hyper = next(n for n in nodes if n["kind"] == "hyper")
+    resp = client.get("/episode.json", params={"id": hyper["id"]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert set(data) >= {"episode", "series", "window", "target"}
+    assert data["episode"]["id"] == hyper["id"]
+    # The local glucose curve is a non-empty series sliced from the store, and it
+    # spans the episode plus padding on each side.
+    assert isinstance(data["series"], list) and len(data["series"]) > 1
+    assert all({"t", "v"} <= set(pt) for pt in data["series"])
+    assert data["window"]["start"] < data["episode"]["start"]
+    assert data["window"]["end"] > data["episode"]["end"]
+    store.close()
+
+
+def test_episode_json_carries_labelled_edges(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    # A meal shortly before the seeded high gives the episode a typed edge whose
+    # signed offset is what the focus view turns into "N min before".
+    high_start = FIXED_NOW - timedelta(days=1)
+    store.insert_meals([MealEvent(ts=high_start - timedelta(minutes=20), carbs_g=45)])
+    client = _client(store)
+    nodes = client.get("/episodes.json").json()["nodes"]
+    hyper = next(n for n in nodes if n["kind"] == "hyper")
+    data = client.get("/episode.json", params={"id": hyper["id"]}).json()
+    meals = [link for link in data["episode"]["links"] if link["kind"] == "meal"]
+    assert meals, "expected a meal edge on the episode"
+    assert meals[0]["detail"]["carbs_g"] == 45
+    assert meals[0]["offset_min"] < 0
+    store.close()
+
+
+def test_episode_json_missing_and_unknown(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    client = _client(store)
+    assert client.get("/episode.json").status_code == 400
+    assert client.get("/episode.json", params={"id": "hyper:nope"}).status_code == 404
+    store.close()
+
+
+def test_timeline_empty_store_degrades(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    resp = _client(store).get("/timeline")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "No episodes in this window" in body
+    assert "tl-shell" not in body
+    store.close()
+
+
+def test_episodes_json_empty_store(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    data = _client(store).get("/episodes.json").json()
+    assert data["nodes"] == []
+    assert data["summary"]["num_hyper"] == 0
+    assert "window" in data
+    store.close()

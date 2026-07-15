@@ -14,7 +14,9 @@ from dexta_intelligence.models import (
     ChatTurn,
     CoverageStats,
     DeviceEvent,
+    EdgeRelation,
     Finding,
+    FindingEdge,
     FindingStatus,
     GlucoseEvent,
     Goal,
@@ -77,6 +79,7 @@ class FakeStore:
         self.rollups: dict[tuple[RollupPeriod, datetime], Rollup] = {}
         self.rollup_upsert_calls: list[list[Rollup]] = []
         self.findings: list[Finding] = []
+        self.finding_edges: list[FindingEdge] = []
         self.hypotheses: list[Hypothesis] = []
         self.goals: list[Goal] = []
         self.goal_checkpoints: list[GoalCheckpoint] = []
@@ -259,6 +262,25 @@ class FakeStore:
         limit: int = 50,
     ) -> list[Finding]:
         return self.findings[:limit]
+
+    def add_finding_edge(self, edge: FindingEdge) -> int:
+        self.finding_edges.append(edge)
+        return len(self.finding_edges)
+
+    def get_finding_edges(
+        self,
+        *,
+        src_id: int | None = None,
+        dst_id: int | None = None,
+        relation: EdgeRelation | None = None,
+    ) -> list[FindingEdge]:
+        return [
+            e
+            for e in self.finding_edges
+            if (src_id is None or e.src_id == src_id)
+            and (dst_id is None or e.dst_id == dst_id)
+            and (relation is None or e.relation == relation)
+        ]
 
     def insert_hypothesis(self, hypothesis: Hypothesis) -> int:
         self.hypotheses.append(hypothesis)

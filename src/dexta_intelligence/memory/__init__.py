@@ -1,11 +1,14 @@
 """Agent memory - finding semantics over the store, plus its wiki projection."""
 
-from dexta_intelligence.memory import embeddings
+from dexta_intelligence.memory import curator, embeddings
 from dexta_intelligence.memory.findings import (
+    contradicts_edge,
     count_recurrence,
     find_contradictions,
     find_similar,
     recurrence_headline_suffix,
+    recurrence_line,
+    supersedes_edge,
 )
 from dexta_intelligence.memory.synthesis import (
     SynthesisResult,
@@ -25,15 +28,19 @@ __all__ = [
     "STALE_THRESHOLD",
     "SynthesisResult",
     "WikiReport",
+    "contradicts_edge",
     "count_recurrence",
+    "curator",
     "embeddings",
     "find_contradictions",
     "find_similar",
     "generate_wiki",
     "load_latest",
     "recurrence_headline_suffix",
+    "recurrence_line",
     "save",
     "staleness",
+    "supersedes_edge",
     "synthesize",
     "topic_slug",
 ]

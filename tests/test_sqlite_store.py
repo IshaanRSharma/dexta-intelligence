@@ -15,7 +15,9 @@ from dexta_intelligence.connectors.tandem import PROFILE_SOURCE_ID
 from dexta_intelligence.models import (
     ActivityEvent,
     DeviceEvent,
+    EdgeRelation,
     Finding,
+    FindingEdge,
     FindingStats,
     FindingStatus,
     GlucoseEvent,
@@ -571,6 +573,60 @@ class TestFindings:
         (active,) = store.get_findings(status=FindingStatus.ACTIVE)
         assert active.id == new_id
         assert active.superseded_by is None
+
+
+def _edge(src_id: int, dst_id: int, **overrides: object) -> FindingEdge:
+    base: dict[str, object] = {
+        "src_id": src_id,
+        "dst_id": dst_id,
+        "relation": EdgeRelation.SUPERSEDES,
+        "knowledge_time": T0,
+        "event_time": T0 - timedelta(days=1),
+        "evidence": "re-derived pattern_miner/overnight_low/overnight",
+    }
+    base.update(overrides)
+    return FindingEdge.model_validate(base)
+
+
+class TestFindingEdges:
+    def test_round_trip(self, store: SQLiteStore) -> None:
+        edge = _edge(2, 1)
+        eid = store.add_finding_edge(edge)
+        (got,) = store.get_finding_edges()
+        assert got == edge.model_copy(update={"id": eid})
+        assert got.knowledge_time.utcoffset() == timedelta(0)
+
+    def test_optional_event_time(self, store: SQLiteStore) -> None:
+        store.add_finding_edge(_edge(2, 1, event_time=None))
+        (got,) = store.get_finding_edges()
+        assert got.event_time is None
+
+    def test_filters_by_src_dst_relation(self, store: SQLiteStore) -> None:
+        store.add_finding_edge(_edge(2, 1))
+        store.add_finding_edge(
+            _edge(3, 1, relation=EdgeRelation.CONTRADICTS, evidence="opposite effect")
+        )
+        store.add_finding_edge(_edge(3, 2))
+        assert len(store.get_finding_edges(src_id=3)) == 2
+        assert len(store.get_finding_edges(dst_id=1)) == 2
+        (contra,) = store.get_finding_edges(relation=EdgeRelation.CONTRADICTS)
+        assert contra.src_id == 3
+        (both,) = store.get_finding_edges(src_id=3, dst_id=1)
+        assert both.relation is EdgeRelation.CONTRADICTS
+        assert store.get_finding_edges(src_id=99) == []
+
+    def test_ordered_by_id_ascending(self, store: SQLiteStore) -> None:
+        first = store.add_finding_edge(_edge(2, 1))
+        second = store.add_finding_edge(_edge(3, 2))
+        assert [e.id for e in store.get_finding_edges()] == [first, second]
+
+    def test_no_dedup_re_authoring_records_fresh_knowledge_time(
+        self, store: SQLiteStore
+    ) -> None:
+        store.add_finding_edge(_edge(2, 1))
+        store.add_finding_edge(_edge(2, 1, knowledge_time=T0 + timedelta(days=1)))
+        got = store.get_finding_edges(src_id=2, dst_id=1)
+        assert [e.knowledge_time for e in got] == [T0, T0 + timedelta(days=1)]
 
 
 class TestHypotheses:
