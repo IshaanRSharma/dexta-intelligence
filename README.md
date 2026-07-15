@@ -26,10 +26,7 @@ honest about it. Three principles:
 2. Statistical rigor before any claim. Discovery agents must pass permutation tests and
    false-discovery control, then survive an independent skeptic, before a finding is shown.
 3. Two hard safety rails. A faithfulness guard rejects any prose whose numbers do not trace to a
-   tool call, and a metric-ontology check catches a real number cited for the wrong metric (a
-   standard deviation reported as a coefficient of variation, a Glycemia Risk Index reported as one
-   of its components). A treatment gate blocks dosing, basal, carb-ratio, and correction
-   instructions. Always.
+   tool call. A treatment gate blocks dosing, basal, carb-ratio, and correction instructions. Always.
 
 ## The receipt: an external benchmark
 
