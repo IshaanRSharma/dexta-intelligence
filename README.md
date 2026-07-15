@@ -73,7 +73,8 @@ dexta demo                  # or: run one investigation end to end in the termin
 `dexta demo` / `--demo` is the fastest way to see it: it loads ~90 days of a realistic Tandem t:slim X2
 patient (CGM, boluses, Control-IQ basals, carb entries, two profile versions, logged forecast
 curves, manual notes) with a planted, explainable dinner-spike, then explains it with a visible
-plan and trace.
+plan and trace. The demo is fully isolated: it runs on a throwaway database and connector sync is
+disabled, so it never mixes with real data.
 
 ## Architecture
 
@@ -130,7 +131,7 @@ The web app is one clear feature per tab:
 | Tab | What it does |
 | --- | --- |
 | Chat | Instant question and answer with a live tool trace. |
-| Timeline | An interactive view of the temporal episode graph: high and low excursions and sensor gaps as nodes on a time axis, with typed edges to the meals, boluses, activity, and sleep around each one. Hover for detail, click through to an episode, filter by kind, brush to zoom. Rendered from the deterministic episode graph, no model in the drawing. |
+| Timeline | A focus-plus-context view of the temporal episode graph. A navigator strip places every high, low, and sensor gap on the time axis; selecting one opens a relation view with two lenses: Curve draws the local glucose trace with each meal, bolus, activity, and sleep placed at its real time and labelled with its relation to the episode ("meal 45g, 27 min before"), and Graph renders the same relations as a deterministic node-link ego-graph. Prev/next and keyboard navigation, filters by kind, both themes. Every number comes from the deterministic episode graph, no model in the drawing. |
 | Investigations | The deep, traced drill: plan to trace to evidence, plus deep analysis and the open-investigations queue. |
 | Findings | Durable memory: active, hypotheses, rejected, and the investigation log, with evidence strength and counter-evidence. Prediction reconciliation lives here. |
 | Reports | A clinician discussion brief (review now, monitor, questions to ask), grounded in your evidence and PubMed, with Markdown export. |
