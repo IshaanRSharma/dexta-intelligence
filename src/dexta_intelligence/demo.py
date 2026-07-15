@@ -22,6 +22,7 @@ import json
 import math
 import random
 from datetime import UTC, date, datetime, timedelta
+from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from dexta_intelligence.models import (
@@ -215,6 +216,126 @@ def _with_prolonged_highs(glucose: list[GlucoseEvent]) -> list[GlucoseEvent]:
         else:
             out.append(g)
     return out
+
+
+#: Planted "story" days for the episode graph (offsets in days before the hero
+#: spike). Chosen off the dinner days (multiples of 5) and the forecast-miss
+#: days so the explain_spike and reconciliation contracts are untouched, and
+#: every planted peak stays below the 246 hero peak.
+_CHAIN_DAY_OFFSETS = (6, 13, 27, 34)  # low -> rescue carbs -> rebound high
+_SEVERE_CHAIN_OFFSET = 13  # this rebound day dips below 54 (one severe low)
+_CHAIN_CORRECTION_OFFSETS = (6, 34)  # these rebounds get a manual correction
+_STACK_DAY_OFFSET = 11  # evening high, stacked corrections, night low
+_WORKOUT_LOW_OFFSETS = (8, 29, 43)  # afternoon run, low ~90 min later
+_GAP_DAY_OFFSET = 26  # 02:00-03:30 sensor gap
+
+
+def _day(offset: int) -> date:
+    return DEMO_SPIKE_DATE - timedelta(days=offset)
+
+
+def _at(day: date, hh: int, mm: int, plus_days: int = 0) -> datetime:
+    return datetime(day.year, day.month, day.day, hh, mm, tzinfo=UTC) + timedelta(
+        days=plus_days
+    )
+
+
+def _story_segments() -> list[list[tuple[datetime, float]]]:
+    """Hand-shaped glucose checkpoints for each story day, linearly interpolated."""
+    segments: list[list[tuple[datetime, float]]] = []
+    for off in _CHAIN_DAY_OFFSETS:
+        day = _day(off)
+        nadir = 48.0 if off == _SEVERE_CHAIN_OFFSET else 55.0 + off % 3
+        peak = 204.0 + (off * 3) % 11
+        segments.append([
+            (_at(day, 15, 30), 118.0), (_at(day, 15, 50), nadir),
+            (_at(day, 16, 5), 66.0), (_at(day, 16, 10), 74.0),
+            (_at(day, 16, 40), 110.0), (_at(day, 17, 10), peak),
+            (_at(day, 17, 50), 150.0), (_at(day, 18, 20), 122.0),
+        ])
+    day = _day(_STACK_DAY_OFFSET)
+    segments.append([
+        (_at(day, 20, 20), 130.0), (_at(day, 21, 0), 232.0),
+        (_at(day, 22, 20), 225.0), (_at(day, 23, 0), 140.0),
+        (_at(day, 23, 40), 62.0), (_at(day, 0, 10, 1), 68.0),
+        (_at(day, 0, 40, 1), 96.0), (_at(day, 1, 10, 1), 112.0),
+    ])
+    for off in _WORKOUT_LOW_OFFSETS:
+        day = _day(off)
+        segments.append([
+            (_at(day, 16, 20), 112.0), (_at(day, 16, 50), 63.0),
+            (_at(day, 17, 20), 58.0), (_at(day, 17, 50), 75.0),
+            (_at(day, 18, 20), 105.0),
+        ])
+    return segments
+
+
+def _interp(ts: datetime, points: list[tuple[datetime, float]]) -> float:
+    for (t0, v0), (t1, v1) in pairwise(points):
+        if t0 <= ts <= t1:
+            frac = (ts - t0).total_seconds() / max(1.0, (t1 - t0).total_seconds())
+            return v0 + (v1 - v0) * frac
+    return points[-1][1]
+
+
+def _with_story_days(glucose: list[GlucoseEvent]) -> list[GlucoseEvent]:
+    """Overwrite the story windows with their hand-shaped curves: rebound chains
+    (low, rescue carbs, high), one stacked-correction evening ending in a night
+    low, and post-workout lows. Jitter-free so episode boundaries are stable."""
+    segments = _story_segments()
+    out: list[GlucoseEvent] = []
+    for g in glucose:
+        value: float | None = None
+        for points in segments:
+            if points[0][0] <= g.ts <= points[-1][0]:
+                value = _interp(g.ts, points)
+                break
+        out.append(g if value is None else g.model_copy(update={"mg_dl": round(value)}))
+    return out
+
+
+def _drop_sensor_gap(glucose: list[GlucoseEvent]) -> list[GlucoseEvent]:
+    """A 90-minute pre-dawn hole so the graph has a real sensor-gap node."""
+    day = _day(_GAP_DAY_OFFSET)
+    lo, hi = _at(day, 2, 0), _at(day, 3, 30)
+    return [g for g in glucose if not (lo <= g.ts <= hi)]
+
+
+def _story_events() -> tuple[list[MealEvent], list[InsulinEvent], list[ActivityEvent]]:
+    """The context events that make the story days legible in the graph: rescue
+    carbs bridging each rebound (unbolused, so they stay a bare meal edge), the
+    manual correction stack, the in-gap correction that bridges the night low,
+    and the runs that precede the post-workout lows."""
+    meals: list[MealEvent] = []
+    insulin: list[InsulinEvent] = []
+    activity: list[ActivityEvent] = []
+    for off in _CHAIN_DAY_OFFSETS:
+        day = _day(off)
+        meals.append(MealEvent(ts=_at(day, 16, 15), carbs_g=16.0, note="rescue carbs"))
+        if off in _CHAIN_CORRECTION_OFFSETS:
+            insulin.append(InsulinEvent(
+                ts=_at(day, 17, 30), kind=InsulinKind.BOLUS, units=1.5, automatic=False,
+            ))
+    day = _day(_STACK_DAY_OFFSET)
+    # A cleanly paired dinner treatment before the high, so the graph shows a
+    # "treatment" edge: 52 g and its bolus three minutes later merge into one node.
+    meals.append(MealEvent(ts=_at(day, 19, 30), carbs_g=52.0, note="dinner"))
+    insulin.append(InsulinEvent(
+        ts=_at(day, 19, 33), kind=InsulinKind.BOLUS, units=5.2, automatic=False,
+    ))
+    for hh, mm, units in (
+        (21, 10, 1.6), (21, 35, 1.2), (21, 55, 1.0),
+        (22, 15, 0.8), (22, 35, 0.9), (22, 55, 1.4),
+    ):
+        insulin.append(InsulinEvent(
+            ts=_at(day, hh, mm), kind=InsulinKind.BOLUS, units=units, automatic=False,
+        ))
+    for off in _WORKOUT_LOW_OFFSETS:
+        day = _day(off)
+        activity.append(ActivityEvent(
+            ts=_at(day, 15, 0), kind="run", duration_min=60.0, intensity=0.8,
+        ))
+    return meals, insulin, activity
 
 
 def _demo_predictions(glucose: list[GlucoseEvent]) -> list[PredictionEvent]:
@@ -444,17 +565,22 @@ def seed_demo(store: StoragePort) -> None:
     Postgres. Beyond the hero CGM/insulin/meal timeline it adds a full Tandem
     t:slim X2 / Control-IQ treatment record (multi-segment profile, temp basals,
     corrections, suspends, three meals a day), sleep, activity, logged forecast
-    curves, two therapy-profile versions, and manual notes - so every surface has
-    data."""
+    curves, two therapy-profile versions, manual notes, and the episode-graph
+    story days (rebound chains bridged by rescue carbs, a stacked-correction
+    evening ending in a night low, post-workout lows, one sensor gap) - so every
+    surface has data."""
     glucose, insulin, meals = _patient()
     glucose = _with_prolonged_highs(glucose)
+    glucose = _with_story_days(glucose)
+    glucose = _drop_sensor_gap(glucose)
     store.insert_glucose(glucose)
     rng = random.Random(_SEED + 1)  # separate stream so the hero timeline is unchanged
     extra_meals, extra_insulin = _tandem_treatment(rng)
-    store.insert_insulin(insulin + extra_insulin)
-    store.insert_meals(meals + extra_meals)
+    story_meals, story_insulin, story_activity = _story_events()
+    store.insert_insulin(insulin + extra_insulin + story_insulin)
+    store.insert_meals(meals + extra_meals + story_meals)
     store.insert_sleep(_demo_sleep(rng))
-    store.insert_activity(_demo_activity(rng))
+    store.insert_activity(_demo_activity(rng) + story_activity)
     store.insert_predictions(_demo_predictions(glucose))
     for profile in _demo_profiles():
         store.add_profile_version(profile)
