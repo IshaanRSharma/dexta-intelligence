@@ -365,10 +365,51 @@
       root.appendChild(label);
     });
 
+    chainSegments().forEach(function (seg) {
+      root.appendChild(seg);
+    });
     orderedEpisodes().forEach(function (ep) {
       root.appendChild(navMark(ep));
     });
     navEl.appendChild(root);
+  }
+
+  // Confident chains (rebound_after_low / low_after_high) as baseline segments
+  // between the two marks; "follows" stays out of the navigator to avoid noise.
+  function chainSegments() {
+    const edges = (state.data && state.data.edges) || [];
+    return edges.filter(function (e) { return e.relation !== "follows"; })
+      .map(function (e) {
+        const a = nodeById(e.src_id);
+        const b = nodeById(e.dst_id);
+        if (!a || !b) return null;
+        const x1 = clamp((xFull(ms(a.start)) + xFull(ms(a.end))) / 2, NV_PAD_L, NV_W - NV_PAD_R);
+        const x2 = clamp((xFull(ms(b.start)) + xFull(ms(b.end))) / 2, NV_PAD_L, NV_W - NV_PAD_R);
+        const seg = svg("line", {
+          x1: x1.toFixed(1), y1: NV_BASE_Y, x2: x2.toFixed(1), y2: NV_BASE_Y,
+          class: "tl-nv-chain rel-" + e.relation,
+        });
+        seg.addEventListener("mouseenter", function (evt) {
+          showTooltip(chainTooltip(e), evt);
+        });
+        seg.addEventListener("mousemove", positionTooltip);
+        seg.addEventListener("mouseleave", hideTooltip);
+        return seg;
+      })
+      .filter(function (seg) { return seg != null; });
+  }
+
+  function relationWords(relation) {
+    return String(relation || "").replace(/_/g, " ");
+  }
+
+  function chainTooltip(edge) {
+    const rows = ['<div class="tl-tt-title">' + relationWords(edge.relation) + "</div>"];
+    if (num(edge.gap_min)) rows.push('<div class="tl-tt-row">' + relMag(edge.gap_min) + " gap</div>");
+    if (edge.bridge) {
+      rows.push('<div class="tl-tt-row">via ' + glyphLabel(edge.bridge.kind, edge.bridge.detail) + "</div>");
+    }
+    return rows.join("");
   }
 
   function navSideLabel(text, y) {
@@ -741,6 +782,9 @@
 
     const nodes = layoutGraphNodes(links);
     nodes.forEach(function (p) { drawGraphEdge(root, p, cx, cy); });
+    const chain = detail.chain || {};
+    (chain.in || []).forEach(function (row) { drawChainNeighbour(root, row, false, cy); });
+    (chain.out || []).forEach(function (row) { drawChainNeighbour(root, row, true, cy); });
     drawCenterNode(root, ep, cx, cy);
     nodes.forEach(function (p) { drawGraphNode(root, p, cx); });
 
@@ -752,6 +796,57 @@
       root.appendChild(note);
     }
     plotEl.appendChild(root);
+  }
+
+  // A chained previous/next episode as a small selectable box on the midline,
+  // outside the satellite field: predecessor left, successor right.
+  function drawChainNeighbour(root, row, isNext, cy) {
+    const other = row.other;
+    if (!other) return;
+    const bw = 150;
+    const bh = 60;
+    const bx = isNext ? G_W - 96 : 96;
+    const x1 = isNext ? G_W / 2 + 96 : G_W / 2 - 96;
+    const x2 = isNext ? bx - bw / 2 : bx + bw / 2;
+    root.appendChild(svg("line", {
+      x1: x1, y1: cy, x2: x2, y2: cy,
+      class: "tl-g-chain-edge rel-" + row.relation,
+    }));
+    const mx = (x1 + x2) / 2;
+    const rel = svg("text", { x: mx, y: cy - 12, class: "tl-g-chain-label", "text-anchor": "middle" });
+    rel.textContent = relationWords(row.relation);
+    root.appendChild(rel);
+    const subParts = [];
+    if (num(row.gap_min)) subParts.push(relMag(row.gap_min) + " gap");
+    if (row.bridge) subParts.push("via " + glyphLabel(row.bridge.kind, row.bridge.detail));
+    if (subParts.length) {
+      const sub = svg("text", { x: mx, y: cy + 18, class: "tl-g-chain-sub", "text-anchor": "middle" });
+      sub.textContent = subParts.join(" · ");
+      root.appendChild(sub);
+    }
+
+    const g = svg("g", { class: "tl-g-chain tl-g-chain-" + other.kind, tabindex: 0, role: "button" });
+    g.setAttribute("aria-label", (isNext ? "Next" : "Previous") + " episode in the chain: "
+      + relationWords(row.relation) + ". " + (KIND_TITLE[other.kind] || "Episode") + ", "
+      + centerSub(other) + ". Select to view.");
+    g.appendChild(svg("rect", {
+      x: bx - bw / 2, y: cy - bh / 2, width: bw, height: bh, rx: 10,
+      class: "tl-g-chain-box", filter: "url(#g-shadow)",
+    }));
+    const title = svg("text", { x: bx, y: cy - 8, class: "tl-g-chain-title", "text-anchor": "middle" });
+    title.textContent = KIND_TITLE[other.kind] || "Episode";
+    g.appendChild(title);
+    const sub2 = svg("text", { x: bx, y: cy + 10, class: "tl-g-chain-boxsub", "text-anchor": "middle" });
+    sub2.textContent = centerSub(other);
+    g.appendChild(sub2);
+    g.addEventListener("click", function () { select(other.id); });
+    g.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        select(other.id);
+      }
+    });
+    root.appendChild(g);
   }
 
   function centerSub(ep) {

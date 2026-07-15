@@ -27,6 +27,8 @@ from dexta_intelligence.models import (
     Goal,
     GoalCheckpoint,
     GoalMetric,
+    InsulinEvent,
+    InsulinKind,
     InvestigationRun,
     MealEvent,
     OpenInvestigation,
@@ -1193,6 +1195,43 @@ def test_episode_json_carries_labelled_edges(tmp_path: Path) -> None:
     assert meals, "expected a meal edge on the episode"
     assert meals[0]["detail"]["carbs_g"] == 45
     assert meals[0]["offset_min"] < 0
+    store.close()
+
+
+def test_episodes_json_includes_chain_edges(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    data = _client(store).get("/episodes.json").json()
+    assert "edges" in data
+    # The seeded high and low sit ~85 min apart with nothing in the gap: a
+    # weak "follows", never a confident causal name.
+    assert any(e["relation"] == "follows" for e in data["edges"])
+    store.close()
+
+
+def test_episode_json_chain_names_bridge_and_neighbour(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    high_start = FIXED_NOW - timedelta(days=1)
+    # A correction bolus in the gap between the seeded high and low makes the
+    # chain a confident low_after_high with the bolus as its bridge.
+    store.insert_insulin([
+        InsulinEvent(
+            ts=high_start + timedelta(minutes=70), kind=InsulinKind.BOLUS, units=2.0
+        )
+    ])
+    client = _client(store)
+    nodes = client.get("/episodes.json").json()["nodes"]
+    hypo = next(n for n in nodes if n["kind"] == "hypo")
+    data = client.get("/episode.json", params={"id": hypo["id"]}).json()
+    incoming = data["chain"]["in"]
+    assert len(incoming) == 1
+    edge = incoming[0]
+    assert edge["relation"] == "low_after_high"
+    assert edge["bridge"]["kind"] == "bolus"
+    assert edge["bridge"]["detail"]["units"] == 2.0
+    assert edge["other"]["kind"] == "hyper"
+    assert edge["other"]["id"] == edge["src_id"]
     store.close()
 
 

@@ -255,6 +255,25 @@
 .tl-g-node-label { font-size: 12px; font-weight: 600; fill: var(--text); font-family: inherit; font-variant-numeric: tabular-nums; }
 .tl-g-cluster .tl-g-node-halo { stroke-width: 1.6; stroke-dasharray: 3 2; }
 .tl-g-cluster-count { font-size: 10px; font-weight: 700; fill: var(--muted); font-family: inherit; }
+
+/* episode-to-episode chains */
+.tl-nv-chain { stroke: var(--border-strong); stroke-width: 4; stroke-linecap: round; opacity: 0.55; }
+.tl-nv-chain.rel-rebound_after_low { stroke: var(--tl-hyper); }
+.tl-nv-chain.rel-low_after_high { stroke: var(--tl-hypo); }
+.tl-nv-chain:hover { opacity: 0.9; }
+
+.tl-g-chain-edge { stroke: var(--border-strong); stroke-width: 1.6; stroke-dasharray: 6 4; }
+.tl-g-chain-edge.rel-rebound_after_low { stroke: var(--tl-hyper); }
+.tl-g-chain-edge.rel-low_after_high { stroke: var(--tl-hypo); }
+.tl-g-chain-label { font-size: 12px; font-weight: 700; fill: var(--text); font-family: inherit; }
+.tl-g-chain-sub { font-size: 11px; fill: var(--muted); font-family: inherit; font-variant-numeric: tabular-nums; }
+.tl-g-chain-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.2; }
+.tl-g-chain { cursor: pointer; }
+.tl-g-chain:hover .tl-g-chain-box { stroke: var(--border-strong); }
+.tl-g-chain:focus { outline: none; }
+.tl-g-chain:focus-visible .tl-g-chain-box { stroke: var(--accent); stroke-width: 2.6; }
+.tl-g-chain-title { font-size: 12px; font-weight: 700; fill: var(--text); font-family: inherit; }
+.tl-g-chain-boxsub { font-size: 11px; fill: var(--muted); font-family: inherit; font-variant-numeric: tabular-nums; }
 .tl-g-node:hover .tl-g-node-halo { stroke: var(--border-strong); }
 .tl-g-node:focus { outline: none; }
 .tl-g-node:focus-visible .tl-f-shape { stroke: var(--accent); stroke-width: 3; }

@@ -39,6 +39,7 @@ __all__ = [
     "CLINICAL_MIN_MINUTES",
     "ContextLink",
     "Episode",
+    "EpisodeEdge",
     "EpisodeGraph",
     "build_graph",
     "detect_episodes",
@@ -71,6 +72,10 @@ _POST_MIN = 60.0
 #: A meal and a manual bolus this close (minutes) are candidates for one
 #: treatment (a single bolus-wizard action recorded as two events).
 TREATMENT_PAIR_MAX_MIN = 15.0
+
+#: Consecutive excursions further apart than this (first end to next start,
+#: minutes) are independent events, not a chain.
+CHAIN_MAX_GAP_MIN = 180.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +126,31 @@ class Episode:
             "extreme_mg_dl": self.extreme_mg_dl,
             "extreme_ts": self.extreme_ts.isoformat() if self.extreme_ts else None,
             "links": [link.to_dict() for link in self.links],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class EpisodeEdge:
+    """A typed edge between consecutive excursions (first END to next START).
+
+    Relation names are descriptive geometry, never blame: ``rebound_after_low``
+    is a low, then a carb-bearing bridge event in the gap, then a high;
+    ``low_after_high`` is the insulin-bridged mirror; anything else within the
+    chain window is the weak ``follows``. ``bridge`` is the load-bearing event
+    in the gap, its ``offset_min`` measured from the first episode's end.
+    """
+
+    src_id: str
+    dst_id: str
+    relation: str  # "rebound_after_low" | "low_after_high" | "follows"
+    gap_min: float
+    bridge: ContextLink | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "src_id": self.src_id, "dst_id": self.dst_id, "relation": self.relation,
+            "gap_min": self.gap_min,
+            "bridge": self.bridge.to_dict() if self.bridge else None,
         }
 
 
@@ -251,14 +281,20 @@ def pair_treatments(
     return pairs, rest_m, rest_b
 
 
-def _attach_context(episodes: list[Episode], store: StoragePort,
-                    start: datetime, end: datetime) -> list[Episode]:
-    """Bind meals/boluses/activity/sleep to each excursion episode as edges.
+@dataclass(frozen=True, slots=True)
+class _WindowContext:
+    """Every context event in (a widened) analysis window, treatments resolved."""
 
-    Context is fetched over a window widened by the largest pre-episode reach, so
-    an event that precedes the analysis window but still bears on an early episode
-    is available to link.
-    """
+    treatments: list[tuple[MealEvent, InsulinEvent]]
+    meals: list[MealEvent]
+    boluses: list[InsulinEvent]
+    activity: list[Any]
+    sleep: list[Any]
+
+
+def _fetch_context(store: StoragePort, start: datetime, end: datetime) -> _WindowContext:
+    """Fetch over a window widened by the largest pre-episode reach, so an event
+    preceding the analysis window but bearing on an early episode is available."""
     lo = start - timedelta(minutes=max(_PRE_MIN.values()))
     hi = end + timedelta(minutes=_POST_MIN)
     all_meals = store.get_meals(lo, hi)
@@ -266,8 +302,16 @@ def _attach_context(episodes: list[Episode], store: StoragePort,
     # Resolve carb+bolus pairs into treatments before attaching, so an episode
     # links to one "treatment 58 g + 5.2 U" node instead of two halves.
     treatments, meals, boluses = pair_treatments(all_meals, all_boluses)
-    activity = store.get_activity(lo, hi)
-    sleep = store.get_sleep(lo, hi)
+    return _WindowContext(
+        treatments=treatments, meals=meals, boluses=boluses,
+        activity=store.get_activity(lo, hi), sleep=store.get_sleep(lo, hi),
+    )
+
+
+def _attach_context(episodes: list[Episode], ctx: _WindowContext) -> list[Episode]:
+    """Bind treatments/meals/boluses/activity/sleep to each excursion as edges."""
+    treatments, meals, boluses = ctx.treatments, ctx.meals, ctx.boluses
+    activity, sleep = ctx.activity, ctx.sleep
 
     def in_window(ts: datetime, ep: Episode, kind: str) -> bool:
         return (ep.start - timedelta(minutes=_PRE_MIN[kind]) <= ts
@@ -308,6 +352,22 @@ def _attach_context(episodes: list[Episode], store: StoragePort,
     return out
 
 
+def _detect(
+    store: StoragePort, start: datetime, end: datetime, *,
+    target_low: int, target_high: int, gap_min: float,
+) -> tuple[list[Episode], _WindowContext | None]:
+    readings = [(g.ts, g.mg_dl) for g in store.get_glucose(start, end)]
+    readings.sort(key=lambda r: r[0])
+    if not readings:
+        return [], None
+    ctx = _fetch_context(store, start, end)
+    episodes = _excursions(readings, low=target_low, high=target_high)
+    episodes = _attach_context(episodes, ctx)
+    episodes += _sensor_gaps(readings, gap_min)
+    episodes.sort(key=lambda e: e.start)
+    return episodes, ctx
+
+
 def detect_episodes(
     store: StoragePort, start: datetime, end: datetime, *,
     target_low: int = TARGET_LOW, target_high: int = TARGET_HIGH,
@@ -318,30 +378,101 @@ def detect_episodes(
 
     Deterministic and model-free. Returns an empty list when there are no readings.
     """
-    readings = [(g.ts, g.mg_dl) for g in store.get_glucose(start, end)]
-    readings.sort(key=lambda r: r[0])
-    if not readings:
-        return []
-    episodes = _excursions(readings, low=target_low, high=target_high)
-    episodes = _attach_context(episodes, store, start, end)
-    episodes += _sensor_gaps(readings, gap_min)
-    episodes.sort(key=lambda e: e.start)
+    episodes, _ = _detect(
+        store, start, end, target_low=target_low, target_high=target_high, gap_min=gap_min
+    )
     return episodes
+
+
+def _gap_events(
+    ctx: _WindowContext, lo: datetime, hi: datetime,
+) -> list[tuple[str, datetime, dict[str, Any]]]:
+    """Every carb- or insulin-bearing event inside ``[lo, hi]`` as (kind, ts, detail)."""
+    out: list[tuple[str, datetime, dict[str, Any]]] = []
+    for m, b in ctx.treatments:
+        if lo <= m.ts <= hi:
+            out.append(("treatment", m.ts, {
+                "carbs_g": m.carbs_g, "units": b.units, "automatic": b.automatic,
+                "note": m.note,
+            }))
+    for m in ctx.meals:
+        if lo <= m.ts <= hi:
+            out.append(("meal", m.ts, {"carbs_g": m.carbs_g, "note": m.note}))
+    for b in ctx.boluses:
+        if lo <= b.ts <= hi:
+            out.append(("bolus", b.ts, {"units": b.units, "automatic": b.automatic}))
+    return out
+
+
+def _pick_bridge(
+    events: list[tuple[str, datetime, dict[str, Any]]], key: str, anchor: datetime,
+) -> ContextLink | None:
+    """The most load-bearing event (largest ``key`` amount, earliest on a tie),
+    offset from the first episode's end."""
+    loaded = [
+        (kind, ts, detail) for kind, ts, detail in events
+        if isinstance(detail.get(key), (int, float)) and detail[key] > 0
+    ]
+    if not loaded:
+        return None
+    kind, ts, detail = max(loaded, key=lambda e: (e[2][key], -e[1].timestamp()))
+    return ContextLink(kind=kind, ts=ts,
+                       offset_min=round(_minutes(ts, anchor), 1), detail=detail)
+
+
+def _chain_episodes(episodes: list[Episode], ctx: _WindowContext) -> list[EpisodeEdge]:
+    """Edges between consecutive excursions no more than CHAIN_MAX_GAP_MIN apart.
+
+    A confident relation needs a load-bearing bridge event in the gap (carbs for
+    low-then-high, insulin for high-then-low); everything else stays the weak
+    "follows". Names describe the geometry and never assign blame.
+    """
+    excursions = [e for e in episodes if e.kind != "sensor_gap"]
+    edges: list[EpisodeEdge] = []
+    for a, b in pairwise(excursions):
+        gap = round(_minutes(b.start, a.end), 1)
+        if gap < 0 or gap > CHAIN_MAX_GAP_MIN:
+            continue
+        events = _gap_events(ctx, a.end, b.start)
+        relation = "follows"
+        bridge: ContextLink | None = None
+        if a.kind == "hypo" and b.kind == "hyper":
+            bridge = _pick_bridge(events, "carbs_g", a.end)
+            if bridge is not None:
+                relation = "rebound_after_low"
+        elif a.kind == "hyper" and b.kind == "hypo":
+            bridge = _pick_bridge(events, "units", a.end)
+            if bridge is not None:
+                relation = "low_after_high"
+        edges.append(EpisodeEdge(
+            src_id=a.id, dst_id=b.id, relation=relation, gap_min=gap, bridge=bridge,
+        ))
+    return edges
 
 
 @dataclass(frozen=True, slots=True)
 class EpisodeGraph:
     """An addressable, traversable view over a window's episodes.
 
-    Nodes are :class:`Episode` objects keyed by ``id``; edges are their
-    :class:`ContextLink`\\ s. ``node`` and ``at`` are the two entry points an agent
-    uses: name a node, or find the one covering a moment, then read its edges.
+    Nodes are :class:`Episode` objects keyed by ``id``; context edges are their
+    :class:`ContextLink`\\ s and ``edges`` holds the episode-to-episode
+    :class:`EpisodeEdge` chains. ``node`` and ``at`` are the two entry points an
+    agent uses: name a node, or find the one covering a moment, then read its
+    edges; ``edges_for`` walks the chain either direction.
     """
 
     episodes: tuple[Episode, ...]
+    edges: tuple[EpisodeEdge, ...] = ()
 
     def node(self, episode_id: str) -> Episode | None:
         return next((e for e in self.episodes if e.id == episode_id), None)
+
+    def edges_for(self, episode_id: str) -> dict[str, list[EpisodeEdge]]:
+        """Chain edges touching an episode: ``in`` arrives at it, ``out`` leaves it."""
+        return {
+            "in": [e for e in self.edges if e.dst_id == episode_id],
+            "out": [e for e in self.edges if e.src_id == episode_id],
+        }
 
     def at(self, ts: datetime) -> Episode | None:
         """The excursion covering ``ts``, else the nearest excursion by start time.
@@ -359,7 +490,11 @@ class EpisodeGraph:
         return summarize(list(self.episodes))
 
     def to_dict(self) -> dict[str, Any]:
-        return {"summary": self.summary(), "nodes": [e.to_dict() for e in self.episodes]}
+        return {
+            "summary": self.summary(),
+            "nodes": [e.to_dict() for e in self.episodes],
+            "edges": [e.to_dict() for e in self.edges],
+        }
 
 
 def build_graph(
@@ -367,11 +502,13 @@ def build_graph(
     target_low: int = TARGET_LOW, target_high: int = TARGET_HIGH,
     gap_min: float = GAP_MIN_MINUTES,
 ) -> EpisodeGraph:
-    """Detect episodes over ``[start, end]`` and wrap them as a traversable graph."""
-    episodes = detect_episodes(
+    """Detect episodes over ``[start, end]`` and wrap them as a traversable graph,
+    chained episode to episode where consecutive excursions sit close enough."""
+    episodes, ctx = _detect(
         store, start, end, target_low=target_low, target_high=target_high, gap_min=gap_min
     )
-    return EpisodeGraph(episodes=tuple(episodes))
+    edges = _chain_episodes(episodes, ctx) if ctx is not None else []
+    return EpisodeGraph(episodes=tuple(episodes), edges=tuple(edges))
 
 
 def summarize(episodes: list[Episode]) -> dict[str, Any]:

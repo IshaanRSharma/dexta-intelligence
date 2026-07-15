@@ -253,6 +253,88 @@ def test_two_meals_near_one_bolus_pair_nothing() -> None:
     assert len(rest_meals) == 2 and len(rest_boluses) == 1
 
 
+def _graph(store: SQLiteStore) -> EpisodeGraph:
+    return build_graph(store, _ts(-10), _ts(100000))
+
+
+# ── episode-to-episode chains ─────────────────────────────────────────────────
+
+
+def test_low_then_carbs_then_high_is_a_rebound_chain() -> None:
+    # hypo ends at min 10; 15 g rescue carbs at 20 (in the gap); hyper starts at 40
+    meals = [MealEvent(ts=_ts(20), carbs_g=15.0, note="rescue")]
+    store = _store(
+        [(0, 60), (5, 55), (10, 65), (40, 200), (45, 220), (50, 120)], meals=meals
+    )
+    graph = _graph(store)
+    edges = [e for e in graph.edges]
+    assert len(edges) == 1
+    edge = edges[0]
+    assert edge.relation == "rebound_after_low"
+    assert edge.src_id.startswith("hypo:") and edge.dst_id.startswith("hyper:")
+    assert edge.gap_min == 30.0
+    assert edge.bridge is not None
+    assert edge.bridge.kind == "meal" and edge.bridge.detail["carbs_g"] == 15.0
+    assert edge.bridge.offset_min == 10.0  # from the low's END
+
+
+def test_high_then_insulin_then_low_is_low_after_high() -> None:
+    insulin = [InsulinEvent(ts=_ts(25), kind=InsulinKind.BOLUS, units=2.0)]
+    store = _store(
+        [(0, 200), (5, 220), (10, 210), (30, 120), (60, 60), (65, 55), (70, 120)],
+        insulin=insulin,
+    )
+    graph = _graph(store)
+    assert len(graph.edges) == 1
+    edge = graph.edges[0]
+    assert edge.relation == "low_after_high"
+    assert edge.bridge is not None and edge.bridge.kind == "bolus"
+
+
+def test_no_bridge_is_a_weak_follows() -> None:
+    store = _store([(0, 60), (5, 55), (15, 120), (40, 200), (45, 220), (50, 120)])
+    graph = _graph(store)
+    assert len(graph.edges) == 1
+    assert graph.edges[0].relation == "follows"
+    assert graph.edges[0].bridge is None
+
+
+def test_far_apart_episodes_do_not_chain() -> None:
+    store = _store(
+        [(0, 200), (5, 210), (10, 120)]
+        + [(10 + 30 * i, 120) for i in range(1, 8)]
+        + [(250, 60), (255, 55), (260, 120)]
+    )
+    graph = _graph(store)
+    assert graph.edges == ()
+
+
+def test_largest_carb_event_in_gap_is_the_bridge() -> None:
+    meals = [
+        MealEvent(ts=_ts(15), carbs_g=8.0),
+        MealEvent(ts=_ts(22), carbs_g=20.0),
+    ]
+    store = _store(
+        [(0, 60), (5, 55), (10, 65), (40, 200), (45, 220), (50, 120)], meals=meals
+    )
+    edge = _graph(store).edges[0]
+    assert edge.relation == "rebound_after_low"
+    assert edge.bridge is not None and edge.bridge.detail["carbs_g"] == 20.0
+
+
+def test_edges_for_walks_both_directions() -> None:
+    meals = [MealEvent(ts=_ts(20), carbs_g=15.0)]
+    store = _store(
+        [(0, 60), (5, 55), (10, 65), (40, 200), (45, 220), (50, 120)], meals=meals
+    )
+    graph = _graph(store)
+    low = next(e for e in graph.episodes if e.kind == "hypo")
+    high = next(e for e in graph.episodes if e.kind == "hyper")
+    assert [e.dst_id for e in graph.edges_for(low.id)["out"]] == [high.id]
+    assert [e.src_id for e in graph.edges_for(high.id)["in"]] == [low.id]
+    assert graph.to_dict()["edges"][0]["relation"] == "rebound_after_low"
+
+
 def test_two_clean_pairs_both_pair() -> None:
     meals = [
         MealEvent(ts=_ts(0), carbs_g=40.0),

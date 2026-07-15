@@ -69,6 +69,11 @@ def episode_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec
         if ep is None:
             return {"error": "no episode matched; call episodes to list valid ids"}, {}
         result = ep.to_dict()
+        chain = graph.edges_for(ep.id)
+        result["chain"] = {
+            "in": [e.to_dict() for e in chain["in"]],
+            "out": [e.to_dict() for e in chain["out"]],
+        }
         numbers: dict[str, Any] = {"duration_min": ep.duration_min}
         if ep.extreme_mg_dl is not None:
             numbers["extreme_mg_dl"] = ep.extreme_mg_dl
@@ -106,7 +111,10 @@ def episode_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec
                 "action appear as a single 'treatment' edge (carbs + units). Name it "
                 "by episode_id (from episodes) or locate it by timestamp. The "
                 "instrument for 'why did I go high/low then' - traverse the episode "
-                "to its context instead of guessing from a trace."
+                "to its context instead of guessing from a trace. Includes 'chain': "
+                "typed edges to the previous/next episode when they sit within 3 h "
+                "(rebound_after_low, low_after_high, follows), each with the "
+                "load-bearing bridge event in the gap when one exists."
             ),
             parameters={
                 "type": "object",
