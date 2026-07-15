@@ -49,7 +49,14 @@ from dexta_intelligence.config import (
     secrets_path_for,
 )
 from dexta_intelligence.connectors.base import HealthReport
-from dexta_intelligence.models import ChatTurn, FindingStatus, ManualEvent
+from dexta_intelligence.models import (
+    ChatTurn,
+    FindingStatus,
+    InsulinEvent,
+    InsulinKind,
+    ManualEvent,
+    MealEvent,
+)
 from dexta_intelligence.server._format import _relative_time
 from dexta_intelligence.server.autosync import AutoSyncController
 from dexta_intelligence.server.render import markdown_to_html
@@ -425,6 +432,39 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
         return RedirectResponse("/log?flash=log_ok", status_code=303)
+
+    @app.post("/actions/log-treatment")
+    def action_log_treatment(
+        treatment_ts: str = Form(""),
+        carbs_g: str = Form(""),
+        units: str = Form(""),
+        note: str = Form(""),
+    ) -> Any:
+        """Record a treatment the user already took: carbs, insulin units, or
+        both, at one time. Both halves land at the same timestamp so the episode
+        graph pairs them into a single treatment edge. Pure data entry; dexta
+        never suggests what to take."""
+        ok_carbs, carbs = _parse_amount(carbs_g, upper=400.0)
+        ok_units, dose = _parse_amount(units, upper=60.0)
+        if not ok_carbs or not ok_units:
+            return RedirectResponse("/log?flash=treatment_badnum", status_code=303)
+        if carbs is None and dose is None:
+            return RedirectResponse("/log?flash=treatment_empty", status_code=303)
+        tz = _analysis_tz(config)
+        when = _parse_local_dt(treatment_ts, tz) or datetime.now(UTC)
+        store = store_opener(config, None)
+        try:
+            if carbs is not None:
+                store.insert_meals([
+                    MealEvent(ts=when, carbs_g=carbs, note=note.strip() or None)
+                ])
+            if dose is not None:
+                store.insert_insulin([
+                    InsulinEvent(ts=when, kind=InsulinKind.BOLUS, units=dose, automatic=False)
+                ])
+        finally:
+            _close(store, store_opener)
+        return RedirectResponse("/log?flash=treatment_ok", status_code=303)
 
     # ── conversational capture: propose (LLM) → validate → confirm (user) ────
 
@@ -2113,9 +2153,37 @@ def _parse_local_dt(value: str, tz: ZoneInfo) -> datetime | None:
     return dt.astimezone(UTC)
 
 
+def _parse_amount(text: str, *, upper: float) -> tuple[bool, float | None]:
+    """A blank field is fine (True, None); a non-numeric, non-positive, or
+    implausibly large value is a rejected entry (False, None)."""
+    raw = text.strip()
+    if not raw:
+        return True, None
+    try:
+        value = float(raw)
+    except ValueError:
+        return False, None
+    if not (0 < value <= upper):
+        return False, None
+    return True, value
+
+
 _LOG_FLASHES: dict[str, dict[str, str]] = {
     "log_ok": {"kind": "ok", "text": "Context logged. It is now part of your timeline."},
     "log_badtype": {"kind": "warn", "text": "Unknown event type. Nothing was logged."},
+    "treatment_ok": {
+        "kind": "ok",
+        "text": "Treatment recorded. It will appear as one node on the timeline.",
+    },
+    "treatment_empty": {
+        "kind": "warn",
+        "text": "Enter carbs, units, or both. Nothing was logged.",
+    },
+    "treatment_badnum": {
+        "kind": "warn",
+        "text": "Carbs and units must be positive numbers in a plausible range. "
+        "Nothing was logged.",
+    },
     "capture_empty": {"kind": "warn", "text": "Describe what happened first."},
     "capture_nomodel": {
         "kind": "warn",

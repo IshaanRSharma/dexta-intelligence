@@ -570,6 +570,81 @@ def test_serve_no_warning_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "WARNING" not in out.getvalue()
 
 
+# ── treatment logger ──────────────────────────────────────────────────────────
+
+
+def _logged_treatments(store: SQLiteStore) -> tuple[list[Any], list[Any]]:
+    lo = FIXED_NOW - timedelta(days=2)
+    hi = FIXED_NOW + timedelta(days=2)
+    return store.get_meals(lo, hi), store.get_insulin(lo, hi)
+
+
+def test_log_treatment_writes_paired_meal_and_bolus(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    resp = client.post(
+        "/actions/log-treatment",
+        data={
+            "treatment_ts": "2025-06-10T12:00",
+            "carbs_g": "58",
+            "units": "5.2",
+            "note": "dinner",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/log?flash=treatment_ok"
+    meals, insulin = _logged_treatments(store)
+    assert len(meals) == 1 and meals[0].carbs_g == 58.0 and meals[0].note == "dinner"
+    assert len(insulin) == 1 and insulin[0].units == 5.2
+    assert insulin[0].automatic is False
+    assert meals[0].ts == insulin[0].ts  # dt = 0, so the episode graph pairs them
+    store.close()
+
+
+def test_log_treatment_carbs_only_writes_meal_only(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    client.post(
+        "/actions/log-treatment",
+        data={"treatment_ts": "2025-06-10T12:00", "carbs_g": "15", "units": ""},
+        follow_redirects=False,
+    )
+    meals, insulin = _logged_treatments(store)
+    assert len(meals) == 1 and insulin == []
+    store.close()
+
+
+def test_log_treatment_rejects_empty_and_bad_numbers(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    empty = client.post(
+        "/actions/log-treatment",
+        data={"treatment_ts": "2025-06-10T12:00", "carbs_g": "", "units": ""},
+        follow_redirects=False,
+    )
+    assert empty.headers["location"] == "/log?flash=treatment_empty"
+    for carbs, units in (("abc", ""), ("-5", ""), ("", "900"), ("", "0")):
+        bad = client.post(
+            "/actions/log-treatment",
+            data={"treatment_ts": "2025-06-10T12:00", "carbs_g": carbs, "units": units},
+            follow_redirects=False,
+        )
+        assert bad.headers["location"] == "/log?flash=treatment_badnum", (carbs, units)
+    meals, insulin = _logged_treatments(store)
+    assert meals == [] and insulin == []
+    store.close()
+
+
+def test_log_page_shows_treatment_form(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    body = _client(store).get("/log").text
+    assert "Log a treatment" in body
+    assert 'action="/actions/log-treatment"' in body
+    assert "never suggests a dose" in body
+    store.close()
+
+
 # ── sync targets the served store ─────────────────────────────────────────────
 
 
