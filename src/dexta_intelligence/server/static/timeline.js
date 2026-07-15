@@ -834,7 +834,7 @@
         plotEl.classList.remove("tl-loading");
         if (state.selectedId !== id) return;
         if (!detail || !detail.episode) {
-          plotEl.innerHTML = '<p class="muted small">Could not load this episode.</p>';
+          showDetailError();
           return;
         }
         state.detail = detail;
@@ -842,8 +842,16 @@
       })
       .catch(function () {
         plotEl.classList.remove("tl-loading");
-        plotEl.innerHTML = '<p class="muted small">Could not load this episode.</p>';
+        if (state.selectedId === id) showDetailError();
       });
+  }
+
+  // A failed fetch must never leave a previous episode's detail around: a lens
+  // toggle would silently re-render it under the newly selected header.
+  function showDetailError() {
+    state.detail = null;
+    plotEl.innerHTML = '<p class="muted small">Could not load this episode.'
+      + " The episode list may be out of date; reload the page.</p>";
   }
 
   function step(dir, wrap) {
@@ -886,7 +894,11 @@
     if (state.view === view) return;
     state.view = view;
     updateViewToggle();
-    if (state.detail) renderFocus(state.detail);
+    if (state.detail && state.detail.episode && state.detail.episode.id === state.selectedId) {
+      renderFocus(state.detail);
+    } else if (state.selectedId) {
+      fetchDetail(state.selectedId);
+    }
   }
 
   function updateViewToggle() {
