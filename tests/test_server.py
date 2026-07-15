@@ -570,6 +570,28 @@ def test_serve_no_warning_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "WARNING" not in out.getvalue()
 
 
+# ── sync targets the served store ─────────────────────────────────────────────
+
+
+def test_action_sync_uses_served_store_opener(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    store = _store(tmp_path)
+    opener = _opener(_db_path(tmp_path))
+    app = create_app(Config(), store_opener=opener)
+    captured: dict[str, Any] = {}
+
+    def fake_cmd_sync(**kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("dexta_intelligence.cli.data.cmd_sync", fake_cmd_sync)
+    resp = TestClient(app).post("/actions/sync", follow_redirects=False)
+    assert resp.status_code == 303
+    assert captured["opener"] is opener
+    store.close()
+
+
 # ── demo isolation: throwaway db, no real-data ingress ────────────────────────
 
 

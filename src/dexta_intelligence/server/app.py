@@ -308,7 +308,9 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         from dexta_intelligence.cli.data import cmd_sync  # noqa: PLC0415
 
         buf = io.StringIO()
-        code = cmd_sync(config=config, db_path=None, out=buf)
+        # Sync into the served store (store_opener carries any --db override),
+        # not whatever database the config would resolve on its own.
+        code = cmd_sync(config=config, db_path=None, out=buf, opener=store_opener)
         flash = "sync_ok" if code == 0 else "sync_fail"
         _invalidate_status_pill(request.app)
         return RedirectResponse(f"/connectors?flash={flash}", status_code=303)
