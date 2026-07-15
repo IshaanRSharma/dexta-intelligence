@@ -96,15 +96,26 @@ The danger is not obvious error, it is **confident, plausible, untraceable error
 tells a patient their overnight average is 124 when it is 149. That is what the faithfulness rail
 exists to prevent, demonstrated head-to-head on a peer-reviewed benchmark.
 
-## Two tools added (after the baseline, per plan): dexta 11/14 -> 14/14
-The three dexta non-hits were all missing-tool / literal-answer gaps, now fixed:
+## Two tools added (after the baseline, per plan)
+The three non-exact answers above were all missing-tool / literal-answer gaps. Two tools,
+both present in the current code (`agents/tools/glucose.py`), close them:
 - **`find_lows`** (hypo analog of find_spikes): contiguous lows with nadir + duration +
-  `clinically_significant` (>=15 min), `n_lows`, `n_clinically_significant`. Q18 now answers
-  **65** (matches the benchmark) AND adds "25 clinically significant", nuance the benchmark lacks.
+  `clinically_significant` (>=15 min), `n_lows`, `n_clinically_significant`. With it, Q18 can
+  return **65** (matching the benchmark's definition) AND add "25 clinically significant",
+  nuance the benchmark lacks - but see the caveat below on which answer is actually better.
 - **`glucose_extremes`**: timestamp + local time + period of the single highest/lowest reading.
   Q12 -> "07:30, morning, 224"; Q20 -> "morning". Both literal and exact.
-Re-run (live): the agent **autonomously selected** `glucose_extremes` for Q12/Q20 and `find_lows`
-for Q18; all three now score correct. dexta: **14/14** on the curated subset.
+
+**Provenance caveat (read before quoting a number).** The committed artifact
+(`bench/results/llmcgm_raw.json`) is the run **without** these two tools: auto-scored 13/14, with
+Q18 the principled decline. A follow-up live run with the tools available had the agent select
+them and answer all three literally, but **that run's result file is not committed**, so this doc
+does not headline a "14/14". The honest, reproducible receipt is the **11 exact / 2 interpretation
+/ 1 principled-decline** tally above. Note the tension the tools create: giving the agent
+`find_lows` lets it answer Q18 with "65", but "65" is the benchmark's per-5-min-crossing artifact,
+not a clinically meaningful episode count - so the tool-assisted "match" is arguably a *worse*
+answer than the decline. That is itself a finding to raise with the benchmark authors, not a score
+to inflate.
 
 ## Honest framing for any public claim
 - This is "dexta computes CGM statistics exactly where a frontier model confabulates them,
@@ -112,6 +123,9 @@ for Q18; all three now score correct. dexta: **14/14** on the curated subset.
   exact arithmetic over long sequences; code-execution setups also close this gap).
 - The contribution is the **clinical-stakes demonstration + every-number-traceable verification
   + the honest methodology** (catching the loose-tolerance artifact), not "tools help math."
+- Quote **"every well-defined statistic exact, 11/14, with one principled decline"**, not
+  "14/14" - the 14/14 run is uncommitted and the decline is the more honest (and more
+  interesting) result. See the provenance caveat above.
 - Still synthetic, one patient, single pass, 14/30 tasks. A claim, not a clinical result.
 
 ## Next to harden (when worth the credits)

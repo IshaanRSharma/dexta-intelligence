@@ -39,8 +39,11 @@ complete raw data in-context; dexta computes through its tools.
 
 The plain model confidently narrates computation it cannot do and tells the patient their
 overnight average is 25 mg/dL lower than it is. dexta's every number traces to a tool call:
-mean absolute error **14.7 vs 0.15 (~100x lower)**, and 14/14 on the curated subset. That
-confident, plausible, untraceable error is exactly what the faithfulness rail exists to prevent.
+mean absolute error **14.7 vs 0.15 (~100x lower)**, every well-defined statistic exact. On the
+14-question subset its only non-exact answers are two genuine interpretation differences and one
+principled decline (it refused to fabricate a hypoglycemia-episode count the benchmark defines by
+counting every 5-minute dip, and said so). That confident, plausible, untraceable error is exactly
+what the faithfulness rail exists to prevent.
 
 Scope, stated plainly: synthetic data, one patient, single pass, 14 of 30 tasks. A controlled
 probe, not a clinical claim. Scripts, raw dumps, hand-verified tables, and the honest negatives
