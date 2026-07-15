@@ -152,6 +152,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     store_opener: StoreOpener = open_sqlite_store,
     config_path: Path | None = None,
     host: str = "127.0.0.1",
+    demo: bool = False,
 ) -> FastAPI:
     """Build the GUI app bound to a config and a store-opener seam.
 
@@ -160,6 +161,8 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     here, never re-resolved per request). Falls back to the boot-time default.
     ``host`` is the bind address: a non-loopback bind disables credential
     editing (status-only) unless ``DEXTA_ALLOW_REMOTE_SETTINGS=1``.
+    ``demo`` marks the app as a synthetic-data tour: every connector sync
+    action is rejected so no real data can ever enter the demo database.
     """
     _require_gui()
 
@@ -177,6 +180,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
     app = FastAPI(title="dexta", docs_url=None, redoc_url=None)
     app.state.config_path = settings_path
     app.state.bind_host = host
+    app.state.demo = demo
     # Runtime-managed background sync. Constructed here (idle); cmd_serve enables
     # it from config at boot, and the Connectors page retunes it live.
     app.state.autosync = AutoSyncController(config, store_opener)
@@ -299,6 +303,8 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
 
     @app.post("/actions/sync")
     def action_sync(request: Request) -> Any:
+        if request.app.state.demo:
+            return RedirectResponse("/connectors?flash=demo_sync", status_code=303)
         from dexta_intelligence.cli.data import cmd_sync  # noqa: PLC0415
 
         buf = io.StringIO()
@@ -741,6 +747,10 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         "sync_none": ("bad", "Select at least one source, or use Sync all."),
         "sync_ok": ("ok", "Sync finished successfully."),
         "sync_fail": ("bad", "Sync failed. Check the source credentials in Settings."),
+        "demo_sync": (
+            "bad",
+            "Demo mode: connector sync is disabled so no real data can enter the demo database.",
+        ),
     }
 
     @app.get("/connectors", response_class=HTMLResponse)
@@ -768,6 +778,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             sources=sources,
             autosync=autosync,
             flash=flash,
+            demo=request.app.state.demo,
         )
 
     @app.get("/system", response_class=HTMLResponse)
@@ -882,6 +893,8 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
 
     @app.post("/actions/connectors/sync")
     async def action_connectors_sync(request: Request) -> Any:
+        if request.app.state.demo:
+            return RedirectResponse("/connectors?flash=demo_sync", status_code=303)
         from dexta_intelligence.workflows.sync import sync_all  # noqa: PLC0415
 
         form = await request.form()
@@ -904,6 +917,8 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
 
     @app.post("/actions/connectors/autosync")
     async def action_connectors_autosync(request: Request) -> Any:
+        if request.app.state.demo:
+            return RedirectResponse("/connectors?flash=demo_sync", status_code=303)
         form = await request.form()
         raw = form.get("interval")
         try:

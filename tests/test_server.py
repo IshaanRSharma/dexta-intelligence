@@ -570,6 +570,56 @@ def test_serve_no_warning_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "WARNING" not in out.getvalue()
 
 
+# ── demo isolation: throwaway db, no real-data ingress ────────────────────────
+
+
+def _demo_client(tmp_path: Path) -> TestClient:
+    store = _store(tmp_path)
+    app = create_app(Config(), store_opener=_opener(Path(store._path)), demo=True)
+    return TestClient(app)
+
+
+def test_demo_blocks_all_sync_actions(tmp_path: Path) -> None:
+    client = _demo_client(tmp_path)
+    for path, data in (
+        ("/actions/sync", {}),
+        ("/actions/connectors/sync", {"scope": "all"}),
+        ("/actions/connectors/autosync", {"interval": "15"}),
+    ):
+        resp = client.post(path, data=data, follow_redirects=False)
+        assert resp.status_code == 303, path
+        assert resp.headers["location"] == "/connectors?flash=demo_sync", path
+
+
+def test_demo_autosync_stays_disabled_after_post(tmp_path: Path) -> None:
+    client = _demo_client(tmp_path)
+    client.post("/actions/connectors/autosync", data={"interval": "15"}, follow_redirects=False)
+    assert client.app.state.autosync.status().enabled is False
+
+
+def test_demo_connectors_page_shows_notice_and_flash(tmp_path: Path) -> None:
+    client = _demo_client(tmp_path)
+    html = client.get("/connectors?flash=demo_sync").text
+    assert "Demo mode: connector sync is disabled" in html
+
+
+def test_serve_demo_uses_throwaway_db(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("uvicorn.run", lambda *a, **kw: None)
+    iso = tmp_path / "demo-iso"
+    iso.mkdir()
+    monkeypatch.setattr("tempfile.mkdtemp", lambda prefix="": str(iso))
+    out = io.StringIO()
+    cmd_serve(config=Config(), db_path=None, out=out, demo=True, sync_every=5)
+    text = out.getvalue()
+    assert str(iso / "demo.db") in text
+    assert "seeded the synthetic demo patient" in text
+    assert "connector sync is disabled" in text
+    assert "auto-sync every" not in text
+    assert (iso / "demo.db").exists()
+
+
 # ── CSV upload ────────────────────────────────────────────────────────────────
 
 
