@@ -247,6 +247,8 @@
 
 .tl-g-node-halo { fill: var(--surface); stroke: var(--border); stroke-width: 1; opacity: 0.9; }
 .tl-g-node-label { font-size: 12px; font-weight: 600; fill: var(--text); font-family: inherit; font-variant-numeric: tabular-nums; }
+.tl-g-cluster .tl-g-node-halo { stroke-width: 1.6; stroke-dasharray: 3 2; }
+.tl-g-cluster-count { font-size: 10px; font-weight: 700; fill: var(--muted); font-family: inherit; }
 .tl-g-node:hover .tl-g-node-halo { stroke: var(--border-strong); }
 .tl-g-node:focus { outline: none; }
 .tl-g-node:focus-visible .tl-f-shape { stroke: var(--accent); stroke-width: 3; }

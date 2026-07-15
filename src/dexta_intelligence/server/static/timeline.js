@@ -12,6 +12,92 @@
 (function () {
   "use strict";
 
+  // ── pure layout (no DOM; exported for headless tests) ────────────────────────
+  function num(v) {
+    return typeof v === "number" && isFinite(v);
+  }
+
+  function clamp(v, lo, hi) {
+    return v < lo ? lo : v > hi ? hi : v;
+  }
+
+  // Ego-graph geometry: side by sign of offset_min (before left, after right),
+  // angular sector by kind, radius by |offset_min|. Same-side same-kind groups
+  // larger than G_CLUSTER_MAX collapse into one cluster node so dense runs (six
+  // rescue carbs, stacked corrections) stay legible; smaller groups are spread
+  // and pushed apart radially until nodes sit at least G_MIN_GAP apart.
+  const G_KIND_SLOT = { meal: -45, bolus: -15, activity: 15, sleep: 45 };
+  const G_W = 960;
+  const G_H = 620;
+  const G_R_MIN = 140;
+  const G_R_MAX = 250;
+  const G_CLUSTER_MAX = 3;
+  const G_MIN_GAP = 36;
+
+  function graphAngleDeg(kind, side) {
+    const base = G_KIND_SLOT[kind] != null ? G_KIND_SLOT[kind] : 0;
+    return side === "before" ? 180 - base : base;
+  }
+
+  function layoutGraphNodes(links) {
+    const cx = G_W / 2;
+    const cy = G_H / 2;
+    const maxAbs = links.reduce(function (m, l) {
+      return num(l.offset_min) ? Math.max(m, Math.abs(l.offset_min)) : m;
+    }, 1);
+    const groups = {};
+    links.forEach(function (l) {
+      const side = num(l.offset_min) && l.offset_min < 0 ? "before" : "after";
+      const key = side + ":" + l.kind;
+      (groups[key] = groups[key] || []).push(l);
+    });
+    const radius = function (link) {
+      const off = num(link.offset_min) ? Math.abs(link.offset_min) : 0;
+      return G_R_MIN + (off / maxAbs) * (G_R_MAX - G_R_MIN);
+    };
+    const out = [];
+    Object.keys(groups).sort().forEach(function (key) {
+      const arr = groups[key].slice().sort(function (a, b) {
+        return (a.offset_min || 0) - (b.offset_min || 0);
+      });
+      const side = key.indexOf("before:") === 0 ? "before" : "after";
+      const kind = key.slice(side.length + 1);
+      const base = graphAngleDeg(kind, side);
+      if (arr.length > G_CLUSTER_MAX) {
+        const a = base * Math.PI / 180;
+        const r = radius(arr[(arr.length - 1) >> 1]);
+        out.push({
+          cluster: true, kind: kind, side: side, links: arr,
+          x: cx + r * Math.cos(a), y: cy + r * Math.sin(a),
+        });
+        return;
+      }
+      let prev = null;
+      arr.forEach(function (link, i) {
+        const a = (base + (i - (arr.length - 1) / 2) * 14) * Math.PI / 180;
+        let r = radius(link);
+        let x = cx + r * Math.cos(a);
+        let y = cy + r * Math.sin(a);
+        while (prev && Math.hypot(x - prev.x, y - prev.y) < G_MIN_GAP && r < G_R_MAX + 80) {
+          r += 8;
+          x = cx + r * Math.cos(a);
+          y = cy + r * Math.sin(a);
+        }
+        out.push({ link: link, kind: link.kind, side: side, x: x, y: y });
+        prev = { x: x, y: y };
+      });
+    });
+    return out;
+  }
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+      layoutGraphNodes: layoutGraphNodes,
+      G_W: G_W, G_H: G_H, G_CLUSTER_MAX: G_CLUSTER_MAX, G_MIN_GAP: G_MIN_GAP,
+    };
+    return;
+  }
+
   const shellEl = document.querySelector(".tl-shell");
   if (!shellEl) return;
   const navEl = document.getElementById("tl-navigator");
@@ -54,14 +140,6 @@
   function ms(iso) {
     const t = Date.parse(iso);
     return Number.isNaN(t) ? null : t;
-  }
-
-  function clamp(v, lo, hi) {
-    return v < lo ? lo : v > hi ? hi : v;
-  }
-
-  function num(v) {
-    return typeof v === "number" && isFinite(v);
   }
 
   function trimNum(v) {
@@ -118,12 +196,50 @@
   }
 
   // Signed offset (minutes from episode start) as a plain-language relation.
+  function relMag(absMin) {
+    return absMin >= 90 ? (absMin / 60).toFixed(1) + " h" : Math.round(absMin) + " min";
+  }
+
   function relationWord(offsetMin) {
     if (!num(offsetMin)) return "";
     const a = Math.abs(offsetMin);
     if (a < 1) return "at onset";
-    const mag = a >= 90 ? (a / 60).toFixed(1) + " h" : Math.round(a) + " min";
-    return mag + (offsetMin < 0 ? " before" : " after");
+    return relMag(a) + (offsetMin < 0 ? " before" : " after");
+  }
+
+  // Nearest-to-farthest offset span of a same-side cluster ("12 min to 1.6 h after").
+  function relationRange(links) {
+    const offs = links.map(function (l) { return num(l.offset_min) ? Math.abs(l.offset_min) : 0; })
+      .sort(function (a, b) { return a - b; });
+    const word = (links[0].offset_min || 0) < 0 ? " before" : " after";
+    const lo = relMag(offs[0]);
+    const hi = relMag(offs[offs.length - 1]);
+    return lo === hi ? lo + word : lo + " to " + hi + word;
+  }
+
+  // One-line summary of a collapsed same-kind cluster ("6 meals · 132g").
+  function clusterLabel(kind, links) {
+    const n = links.length;
+    const total = function (get) {
+      let sum = 0;
+      let any = false;
+      links.forEach(function (l) {
+        const v = get(l.detail || {});
+        if (num(v)) { sum += v; any = true; }
+      });
+      return any ? sum : null;
+    };
+    if (kind === "meal") {
+      const g = total(function (d) { return d.carbs_g; });
+      return n + " meals" + (g != null ? " · " + trimNum(g) + "g" : "");
+    }
+    if (kind === "bolus") {
+      const u = total(function (d) { return d.units; });
+      return n + " boluses" + (u != null ? " · " + trimNum(u) + "U" : "");
+    }
+    if (kind === "activity") return n + " activity events";
+    if (kind === "sleep") return n + " sleep entries";
+    return n + " " + kind + " events";
   }
 
   // ── tooltip ──────────────────────────────────────────────────────────────────
@@ -583,51 +699,8 @@
 
   // ── ego-graph lens ─────────────────────────────────────────────────────────────
   // The selected episode as a centre node with its typed context events as
-  // satellites. Layout is deterministic: side by the sign of offset_min (before
-  // left, after right), angular sector by kind, radius by |offset_min|. No
-  // physics, no jitter; the same links always yield the same picture.
-  const G_KIND_SLOT = { meal: -45, bolus: -15, activity: 15, sleep: 45 };
-  const G_W = 960;
-  const G_H = 620;
-  const G_R_MIN = 140;
-  const G_R_MAX = 250;
-
-  function graphAngleDeg(kind, side) {
-    const base = G_KIND_SLOT[kind] != null ? G_KIND_SLOT[kind] : 0;
-    return side === "before" ? 180 - base : base;
-  }
-
-  function layoutGraphNodes(links) {
-    const cx = G_W / 2;
-    const cy = G_H / 2;
-    const maxAbs = links.reduce(function (m, l) {
-      return num(l.offset_min) ? Math.max(m, Math.abs(l.offset_min)) : m;
-    }, 1);
-    const groups = {};
-    links.forEach(function (l) {
-      const side = num(l.offset_min) && l.offset_min < 0 ? "before" : "after";
-      const key = side + ":" + l.kind;
-      (groups[key] = groups[key] || []).push(l);
-    });
-    const out = [];
-    Object.keys(groups).sort().forEach(function (key) {
-      const arr = groups[key].slice().sort(function (a, b) {
-        return (a.offset_min || 0) - (b.offset_min || 0);
-      });
-      const side = key.indexOf("before:") === 0 ? "before" : "after";
-      const kind = key.slice(side.length + 1);
-      const base = graphAngleDeg(kind, side);
-      const n = arr.length;
-      arr.forEach(function (link, i) {
-        const a = (base + (i - (n - 1) / 2) * 9) * Math.PI / 180;
-        const off = num(link.offset_min) ? Math.abs(link.offset_min) : 0;
-        const r = G_R_MIN + (off / maxAbs) * (G_R_MAX - G_R_MIN);
-        out.push({ link: link, x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
-      });
-    });
-    return out;
-  }
-
+  // satellites (layout in the pure section above). No physics, no jitter; the
+  // same links always yield the same picture.
   function renderGraph(detail) {
     plotEl.innerHTML = "";
     plotEl.setAttribute("aria-label", "Node-link ego graph: the selected episode at the centre"
@@ -693,12 +766,11 @@
   }
 
   function drawGraphEdge(root, p, cx, cy) {
-    const link = p.link;
     root.appendChild(svg("line", {
       x1: cx, y1: cy, x2: p.x.toFixed(1), y2: p.y.toFixed(1),
-      class: "tl-g-edge tl-g-edge-" + link.kind,
+      class: "tl-g-edge tl-g-edge-" + p.kind,
     }));
-    const rel = relationWord(link.offset_min);
+    const rel = p.cluster ? relationRange(p.links) : relationWord(p.link.offset_min);
     if (rel) {
       const lx = cx + (p.x - cx) * 0.58;
       const ly = cy + (p.y - cy) * 0.58;
@@ -708,20 +780,41 @@
     }
   }
 
+  function clusterAria(p) {
+    return clusterLabel(p.kind, p.links) + ", " + relationRange(p.links)
+      + ". Grouped because they are the same kind on the same side; hover for each event.";
+  }
+
+  function clusterTooltip(p) {
+    const rows = ['<div class="tl-tt-title">' + clusterLabel(p.kind, p.links) + "</div>"];
+    p.links.forEach(function (link) {
+      const d = edgeDetail(link.kind, link.detail);
+      rows.push('<div class="tl-tt-row">' + fmtTime(ms(link.ts)) + " UTC"
+        + (d ? " · " + d : "") + " · " + relationWord(link.offset_min) + "</div>");
+    });
+    return rows.join("");
+  }
+
   function drawGraphNode(root, p, cx) {
-    const link = p.link;
-    const g = svg("g", { class: "tl-f-event tl-g-node tl-f-event-" + link.kind, tabindex: 0, role: "img" });
-    g.setAttribute("aria-label", eventAria(link));
-    g.appendChild(svg("circle", { cx: p.x.toFixed(1), cy: p.y.toFixed(1), r: 11, class: "tl-g-node-halo" }));
-    const shape = glyphShape(link.kind, p.x, p.y);
+    const g = svg("g", { class: "tl-f-event tl-g-node tl-f-event-" + p.kind + (p.cluster ? " tl-g-cluster" : ""), tabindex: 0, role: "img" });
+    g.setAttribute("aria-label", p.cluster ? clusterAria(p) : eventAria(p.link));
+    g.appendChild(svg("circle", { cx: p.x.toFixed(1), cy: p.y.toFixed(1), r: p.cluster ? 15 : 11, class: "tl-g-node-halo" }));
+    const shape = glyphShape(p.kind, p.x, p.y);
     shape.setAttribute("filter", "url(#g-shadow)");
     g.appendChild(shape);
+    if (p.cluster) {
+      const count = svg("text", { x: p.x.toFixed(1), y: (p.y - 20).toFixed(1), class: "tl-g-cluster-count", "text-anchor": "middle" });
+      count.textContent = "x" + p.links.length;
+      g.appendChild(count);
+    }
     const left = p.x < cx;
-    const tx = left ? p.x - 16 : p.x + 16;
+    const tx = left ? p.x - 20 : p.x + 20;
     const lab = svg("text", { x: tx.toFixed(1), y: (p.y + 4).toFixed(1), class: "tl-g-node-label", "text-anchor": left ? "end" : "start" });
-    lab.textContent = glyphLabel(link.kind, link.detail);
+    lab.textContent = p.cluster ? clusterLabel(p.kind, p.links) : glyphLabel(p.kind, p.link.detail);
     g.appendChild(lab);
-    g.addEventListener("mouseenter", function (e) { showTooltip(eventTooltip(link), e); });
+    g.addEventListener("mouseenter", function (e) {
+      showTooltip(p.cluster ? clusterTooltip(p) : eventTooltip(p.link), e);
+    });
     g.addEventListener("mousemove", positionTooltip);
     g.addEventListener("mouseleave", hideTooltip);
     root.appendChild(g);
