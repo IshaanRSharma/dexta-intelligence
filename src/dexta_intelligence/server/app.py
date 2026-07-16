@@ -72,7 +72,7 @@ from dexta_intelligence.server.settings_schema import (
     source_nav,
 )
 from dexta_intelligence.server.views_context import context_page_view
-from dexta_intelligence.server.views_episode import episode_card_view
+from dexta_intelligence.server.views_episode import episode_card_view, episode_chain_view
 from dexta_intelligence.server.views_evals import evals_page_view
 from dexta_intelligence.server.views_findings import (
     _active_card,
@@ -1028,11 +1028,9 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
         finally:
             _close(store, store_opener)
         episode_context = getattr(answer, "episode_context", None)
-        episode = (
-            episode_card_view(episode_context, _analysis_tz(config))
-            if episode_context
-            else None
-        )
+        tz = _analysis_tz(config)
+        episode = episode_card_view(episode_context, tz) if episode_context else None
+        chain = episode_chain_view(episode_context, tz) if episode_context else None
         return _render(
             "_answer.html",
             request,
@@ -1044,6 +1042,7 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
             faithful=answer.faithful,
             violations=list(answer.violations),
             episode=episode,
+            chain=chain,
         )
 
     @app.get("/api/ask/stream")
@@ -1131,9 +1130,17 @@ def create_app(  # noqa: PLR0915 - a route table; each handler is small
                 episode_html = None
                 episode_context = getattr(answer, "episode_context", None)
                 if episode_context:
-                    episode_html = templates.get_template("_episode_card.html").render(
-                        episode=episode_card_view(episode_context, _analysis_tz(config))
+                    tz = _analysis_tz(config)
+                    chain = episode_chain_view(episode_context, tz)
+                    chain_html = (
+                        templates.get_template("_episode_chain.html").render(chain=chain)
+                        if chain
+                        else ""
                     )
+                    card_html = templates.get_template("_episode_card.html").render(
+                        episode=episode_card_view(episode_context, tz)
+                    )
+                    episode_html = chain_html + card_html
                 events.put(
                     {
                         "kind": "answer",

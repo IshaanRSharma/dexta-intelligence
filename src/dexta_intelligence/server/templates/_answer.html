@@ -7,6 +7,7 @@
 <article class="card answer">
   <p class="qline muted">{{ question }}</p>
   <div class="prose">{{ answer_html|safe if answer_html else answer }}</div>
+  {% if chain %}{% include "_episode_chain.html" %}{% endif %}
   {% if episode %}{% include "_episode_card.html" %}{% endif %}
   {% if faithful is defined and not faithful %}
   <p class="faithfulness-note">

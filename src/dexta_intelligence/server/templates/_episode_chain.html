@@ -1,0 +1,35 @@
+{% if chain %}
+<div class="chain-strip" role="group" aria-label="Episode chain around this one">
+  {% for step in chain.incoming %}
+  <div class="chain-node chain-node-{{ step.node.kind }}">
+    <span class="chain-node-kind">{{ step.node.short }}</span>
+    {% if step.node.at %}<span class="chain-node-at">{{ step.node.at }}</span>{% endif %}
+  </div>
+  <div class="chain-link rel-{{ step.relation_key }}">
+    <span class="chain-rel">{{ step.relation }}</span>
+    {% if step.bridge %}<span class="chain-bridge">via {{ step.bridge }}</span>{% endif %}
+    {% if step.gap %}<span class="chain-gap">{{ step.gap }} gap</span>{% endif %}
+    <span class="chain-arrow" aria-hidden="true">&rarr;</span>
+  </div>
+  {% endfor %}
+
+  <div class="chain-node chain-node-this chain-node-{{ chain.this.kind }}">
+    <span class="chain-node-kind">{{ chain.this.short }}</span>
+    {% if chain.this.at %}<span class="chain-node-at">{{ chain.this.at }}</span>{% endif %}
+    <span class="chain-node-tag">this episode</span>
+  </div>
+
+  {% for step in chain.outgoing %}
+  <div class="chain-link rel-{{ step.relation_key }}">
+    <span class="chain-arrow" aria-hidden="true">&rarr;</span>
+    <span class="chain-rel">{{ step.relation }}</span>
+    {% if step.bridge %}<span class="chain-bridge">via {{ step.bridge }}</span>{% endif %}
+    {% if step.gap %}<span class="chain-gap">{{ step.gap }} gap</span>{% endif %}
+  </div>
+  <div class="chain-node chain-node-{{ step.node.kind }}">
+    <span class="chain-node-kind">{{ step.node.short }}</span>
+    {% if step.node.at %}<span class="chain-node-at">{{ step.node.at }}</span>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

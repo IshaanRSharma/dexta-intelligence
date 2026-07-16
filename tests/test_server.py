@@ -1198,6 +1198,85 @@ def test_episode_json_carries_labelled_edges(tmp_path: Path) -> None:
     store.close()
 
 
+def _chained_episode_dict() -> dict[str, Any]:
+    """An explain_episode-shaped dict: a rebound high with an incoming chain from
+    a low, bridged by rescue carbs."""
+    return {
+        "id": "hyper:2026-03-08T17:10:00+00:00",
+        "kind": "hyper",
+        "start": "2026-03-08T17:10:00+00:00",
+        "end": "2026-03-08T17:50:00+00:00",
+        "duration_min": 40.0,
+        "extreme_mg_dl": 206.0,
+        "links": [],
+        "chain": {
+            "in": [
+                {
+                    "src_id": "hypo:2026-03-08T15:50:00+00:00",
+                    "dst_id": "hyper:2026-03-08T17:10:00+00:00",
+                    "relation": "rebound_after_low",
+                    "gap_min": 55.0,
+                    "bridge": {
+                        "kind": "meal",
+                        "ts": "2026-03-08T16:15:00+00:00",
+                        "offset_min": 25.0,
+                        "detail": {"carbs_g": 16.0, "note": "rescue carbs"},
+                    },
+                }
+            ],
+            "out": [],
+        },
+    }
+
+
+def test_episode_chain_view_builds_the_sequence() -> None:
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    from dexta_intelligence.server.views_episode import episode_chain_view  # noqa: PLC0415
+
+    view = episode_chain_view(_chained_episode_dict(), ZoneInfo("UTC"))
+    assert view is not None
+    assert view["this"]["short"] == "High"
+    assert len(view["incoming"]) == 1 and view["outgoing"] == []
+    step = view["incoming"][0]
+    assert step["relation"] == "rebound after low"
+    assert step["relation_key"] == "rebound_after_low"
+    assert step["bridge"] == "16 g carbs, rescue carbs"
+    assert step["gap"] == "55 min"
+    assert step["node"]["short"] == "Low"
+
+
+def test_episode_chain_view_none_without_chain() -> None:
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    from dexta_intelligence.server.views_episode import episode_chain_view  # noqa: PLC0415
+
+    assert episode_chain_view({"id": "hyper:x", "kind": "hyper"}, ZoneInfo("UTC")) is None
+    assert episode_chain_view(
+        {"id": "hyper:x", "kind": "hyper", "chain": {"in": [], "out": []}}, ZoneInfo("UTC")
+    ) is None
+
+
+def test_chain_partial_renders_chain_strip() -> None:
+    from importlib import resources  # noqa: PLC0415
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    from jinja2 import Environment, FileSystemLoader, select_autoescape  # noqa: PLC0415
+
+    from dexta_intelligence.server.views_episode import episode_chain_view  # noqa: PLC0415
+
+    templates_dir = str(resources.files("dexta_intelligence.server") / "templates")
+    env = Environment(
+        loader=FileSystemLoader(templates_dir), autoescape=select_autoescape()
+    )
+    chain = episode_chain_view(_chained_episode_dict(), ZoneInfo("UTC"))
+    html = env.get_template("_episode_chain.html").render(chain=chain)
+    assert "chain-strip" in html
+    assert "rebound after low" in html
+    assert "via 16 g carbs, rescue carbs" in html
+    assert "this episode" in html
+
+
 def test_episodes_json_includes_chain_edges(tmp_path: Path) -> None:
     store = _store(tmp_path)
     _seed_excursions(store)

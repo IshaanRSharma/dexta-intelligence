@@ -1060,3 +1060,41 @@ button:hover, .btn:hover { background: var(--accent-hover); }
   color: var(--muted); font-size: 12px; padding: 24px 24px 32px;
   border-top: 1px solid var(--border);
 }
+
+/* Episode chain strip (chat "reasoning with the chain"): the deterministic
+   EpisodeEdge sequence the agent traversed, predecessor -> this -> successor,
+   each connector labelled with the relation and its bridge event. */
+.chain-strip {
+  display: flex; align-items: stretch; flex-wrap: nowrap; gap: 4px;
+  margin: 14px 0 4px; padding: 12px; overflow-x: auto;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.chain-node {
+  display: flex; flex-direction: column; justify-content: center; gap: 2px;
+  flex: none; min-width: 84px; padding: 8px 12px; text-align: center;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-xs);
+  background: var(--card, #fff);
+}
+.chain-node-kind { font-weight: 700; font-size: 13px; }
+.chain-node-at { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chain-node-hypo { border-color: var(--bad-border); background: var(--bad-soft); }
+.chain-node-hypo .chain-node-kind { color: var(--bad); }
+.chain-node-hyper { border-color: var(--warn-border); background: var(--warn-soft); }
+.chain-node-hyper .chain-node-kind { color: var(--warn); }
+.chain-node-this { border-width: 2px; border-color: var(--accent); }
+.chain-node-tag {
+  margin-top: 2px; font-size: 9px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--accent);
+}
+.chain-link {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; flex: none; min-width: 96px; padding: 0 4px; text-align: center;
+}
+.chain-rel { font-size: 12px; font-weight: 700; color: var(--text); }
+.chain-bridge { font-size: 11px; color: var(--muted); }
+.chain-gap { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chain-arrow { font-size: 16px; line-height: 1; color: var(--border-strong); }
+.chain-link.rel-rebound_after_low .chain-rel { color: var(--warn); }
+.chain-link.rel-low_after_high .chain-rel { color: var(--bad); }
+.chain-link.rel-follows .chain-rel { color: var(--muted); font-weight: 600; }
