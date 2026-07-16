@@ -38,6 +38,97 @@ def _node_row(ep: Episode) -> dict[str, Any]:
     }
 
 
+_KIND_WORD = {"hypo": "low", "hyper": "high", "sensor_gap": "sensor gap"}
+_EXTREME_NOUN = {"hypo": "nadir", "hyper": "peak"}
+
+
+def _hhmm(iso: Any) -> str:
+    if not isinstance(iso, str):
+        return ""
+    try:
+        return datetime.fromisoformat(iso).strftime("%H:%M")
+    except ValueError:
+        return ""
+
+
+def _id_parts(episode_id: Any) -> tuple[str, str]:
+    """``kind:isotimestamp`` -> (kind word, HH:MM)."""
+    if isinstance(episode_id, str) and ":" in episode_id:
+        kind, iso = episode_id.split(":", 1)
+        return _KIND_WORD.get(kind, "episode"), _hhmm(iso)
+    return "episode", ""
+
+
+def _num(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _bridge_phrase(bridge: dict[str, Any]) -> str:
+    """The load-bearing gap event as prose for the model, e.g. ``16 g carbs``."""
+    kind = str(bridge.get("kind", ""))
+    detail = bridge.get("detail") or {}
+    carbs, units, note = detail.get("carbs_g"), detail.get("units"), detail.get("note")
+    if kind in ("meal", "treatment"):
+        halves = []
+        if _num(carbs):
+            halves.append(f"{carbs:g} g carbs")
+        if kind == "treatment" and _num(units):
+            halves.append(f"{units:g} U")
+        phrase = " + ".join(halves) if halves else "carbs"
+        return f"{phrase} ({note})" if note else phrase
+    if kind == "bolus":
+        return f"{units:g} U insulin" if _num(units) else "insulin"
+    return kind
+
+
+def _edge_clause(edge: dict[str, Any], direction: str) -> str:
+    other_id = edge.get("src_id") if direction == "in" else edge.get("dst_id")
+    word, at = _id_parts(other_id)
+    relation = str(edge.get("relation", "")).replace("_", " ")
+    gap = edge.get("gap_min")
+    bridge = edge.get("bridge")
+    lead = "followed a" if direction == "in" else "was followed by a"
+    clause = f"{lead} {word} episode"
+    if at:
+        clause += f" at {at}"
+    clause += f" ({relation}"
+    if _num(gap):
+        clause += f", {gap:g} min gap"
+    clause += ")"
+    if isinstance(bridge, dict):
+        clause += f", bridged by {_bridge_phrase(bridge)}"
+    return clause
+
+
+def _episode_summary(result: dict[str, Any]) -> str:
+    """A deterministic one-to-three-sentence rendering of an episode and its chain,
+    handed to the model as the first thing it reads so it reasons over a curated
+    causal narrative instead of re-parsing nested JSON. Every value comes from the
+    result dict; no model, no re-derivation."""
+    kind = str(result.get("kind", ""))
+    word = _KIND_WORD.get(kind, "episode")
+    facts = []
+    ext, dur = result.get("extreme_mg_dl"), result.get("duration_min")
+    if _num(ext):
+        facts.append(f"{ext:g} mg/dL {_EXTREME_NOUN.get(kind, 'extreme')}")
+    if _num(dur):
+        facts.append(f"{dur:g} min")
+    head = f"A {word} episode"
+    if facts:
+        head += " (" + ", ".join(facts) + ")"
+    sentences = [head + "."]
+    chain = result.get("chain") or {}
+    clauses = [_edge_clause(e, "in") for e in chain.get("in") or []]
+    clauses += [_edge_clause(e, "out") for e in chain.get("out") or []]
+    if clauses:
+        sentences.append("It " + "; and it ".join(clauses) + ".")
+    n_links = len(result.get("links") or [])
+    if n_links:
+        kinds = sorted({str(link.get("kind")) for link in result["links"]})
+        sentences.append(f"Context around it: {n_links} event(s) ({', '.join(kinds)}).")
+    return " ".join(sentences)
+
+
 def episode_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
     low, high = toolkit.target_range()
 
@@ -68,12 +159,17 @@ def episode_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec
                 return {"error": "timestamp must be ISO-8601"}, {}
         if ep is None:
             return {"error": "no episode matched; call episodes to list valid ids"}, {}
-        result = ep.to_dict()
+        body = ep.to_dict()
         chain = graph.edges_for(ep.id)
-        result["chain"] = {
+        body["chain"] = {
             "in": [e.to_dict() for e in chain["in"]],
             "out": [e.to_dict() for e in chain["out"]],
         }
+        # ``summary`` first: a deterministic causal narrative the model reads before
+        # the raw fields, and the one field guaranteed to survive context-budget
+        # reduction (see reason._fit_tool_result), so the model always sees the
+        # chain it is meant to reason with.
+        result = {"summary": _episode_summary(body), **body}
         numbers: dict[str, Any] = {"duration_min": ep.duration_min}
         if ep.extreme_mg_dl is not None:
             numbers["extreme_mg_dl"] = ep.extreme_mg_dl

@@ -454,6 +454,54 @@ def test_explain_episode_traverses_to_context() -> None:
     assert numbers["meal_carbs_g"] == 45.0
 
 
+def test_explain_episode_summary_is_first_and_model_facing() -> None:
+    meals = [MealEvent(ts=_ts(-20), carbs_g=45.0, note="breakfast")]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals)
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    node_id = specs["episodes"].fn({})[0]["episodes"][0]["id"]
+    result, _ = specs["explain_episode"].fn({"episode_id": node_id})
+    # summary is the first key, so it survives context-budget reduction.
+    assert next(iter(result)) == "summary"
+    summary = result["summary"]
+    assert "high episode" in summary
+    assert "220 mg/dL peak" in summary  # the same number the structured field carries
+    assert "1 event(s)" in summary and "meal" in summary
+
+
+def test_explain_episode_summary_narrates_the_chain() -> None:
+    # low -> rescue carbs -> rebound high: the summary must name the relation and
+    # the bridge event, so the model reasons over the causal chain in prose.
+    meals = [MealEvent(ts=_ts(20), carbs_g=15.0, note="rescue")]
+    store = _store(
+        [(0, 60), (5, 55), (10, 65), (40, 200), (45, 220), (50, 120)], meals=meals
+    )
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    high_id = next(
+        n["id"] for n in specs["episodes"].fn({})[0]["episodes"] if n["kind"] == "hyper"
+    )
+    result, _ = specs["explain_episode"].fn({"episode_id": high_id})
+    summary = result["summary"]
+    assert "followed a low episode" in summary
+    assert "rebound after low" in summary
+    assert "bridged by 15 g carbs (rescue)" in summary
+    assert "30 min gap" in summary  # low ends at 00:10, high starts at 00:40
+    # the chain is still present as structured data alongside the prose.
+    assert result["chain"]["in"][0]["relation"] == "rebound_after_low"
+
+
+def test_explain_episode_summary_without_chain() -> None:
+    store = _store([(0, 200), (5, 220), (10, 120)])
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    node_id = specs["episodes"].fn({})[0]["episodes"][0]["id"]
+    result, _ = specs["explain_episode"].fn({"episode_id": node_id})
+    summary = result["summary"]
+    assert summary.startswith("A high episode")
+    assert "followed" not in summary  # no chain, no chain clause
+
+
 def test_explain_episode_by_timestamp() -> None:
     store = _store([(0, 200), (5, 220), (10, 120)])
     ctx, tk = _ctx_toolkit(store)

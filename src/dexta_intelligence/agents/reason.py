@@ -33,6 +33,11 @@ __all__ = [
 #: Default ceiling on reasoning turns - insurance against a model that loops.
 _DEFAULT_MAX_STEPS = 6
 
+#: Character budget for a single tool result serialized into the model's context.
+#: A conservative proxy for a token budget (~1 token per 4 chars). Results larger
+#: than this are reduced by :func:`_fit_tool_result`, never sliced blindly.
+_TOOL_RESULT_BUDGET = 4000
+
 #: Confidence at which the loop nudges the model to conclude rather than keep probing.
 _CONCLUDE_CONFIDENCE = 0.85
 #: Consecutive no-new-information rounds before the loop nudges the model to wrap up.
@@ -294,7 +299,7 @@ def _run_tool_calls(
             {
                 "role": "tool",
                 "tool_call_id": call.get("id", name),
-                "content": json.dumps(result, default=str)[:4000],
+                "content": _fit_tool_result(result, _TOOL_RESULT_BUDGET),
             }
         )
 
@@ -354,6 +359,43 @@ def _emit(on_event: Callable[[ReasoningEvent], None] | None, event: ReasoningEve
         on_event(event)
     except Exception:
         logger.debug("reasoning: on_event sink raised", exc_info=True)
+
+
+def _fit_tool_result(result: Any, budget: int) -> str:
+    """Serialize a tool result to fit ``budget`` characters as VALID JSON.
+
+    The old path sliced ``json.dumps(result)[:budget]``, which could hand the
+    model malformed JSON cut mid-structure and silently drop whichever field
+    happened to serialize last. Instead: if the full result fits, return it; if
+    not, reduce a dict by trimming its longest list-valued fields first (leaving
+    a machine-readable elision marker), which preserves small high-priority
+    fields like a leading ``summary`` and the ``chain``. The result is always
+    parseable JSON, and reduction is deterministic.
+    """
+    text = json.dumps(result, default=str)
+    if len(text) <= budget:
+        return text
+    if isinstance(result, dict):
+        reduced = dict(result)
+        # Each pass halves the largest list (down to empty if needed) and adds
+        # the dropped count to a sibling ``<key>_elided`` scalar. The list
+        # strictly shrinks every pass, so the loop always terminates, and the
+        # irreducible core is the non-list fields (a leading ``summary``, the
+        # ``chain`` dict) - exactly what the model must keep to reason.
+        while len(json.dumps(reduced, default=str)) > budget:
+            lists = [(k, v) for k, v in reduced.items() if isinstance(v, list) and v]
+            if not lists:
+                break
+            key, value = max(lists, key=lambda kv: len(json.dumps(kv[1], default=str)))
+            keep = len(value) // 2
+            reduced[key] = value[:keep]
+            reduced[f"{key}_elided"] = reduced.get(f"{key}_elided", 0) + (len(value) - keep)
+        text = json.dumps(reduced, default=str)
+        if len(text) <= budget:
+            return text
+    # Non-dict, or scalar fields alone still too large: wrap a preview as valid JSON.
+    preview = json.dumps(result, default=str)[: max(0, budget - 48)]
+    return json.dumps({"_truncated": True, "preview": preview})
 
 
 def _merge_evidence(pool: dict[str, Any], name: str, idx: int, result: Any) -> None:
