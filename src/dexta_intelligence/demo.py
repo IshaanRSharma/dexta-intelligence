@@ -54,7 +54,10 @@ _SPIKE_PEAK = 246
 _BOLUS_DELAY_MIN = 22
 
 _START = datetime(2025, 12, 15, 0, 2, tzinfo=UTC)
-_DAYS = 90
+#: Record length in days. The hero story runs in the first ~90 days (to the
+#: DEMO_SPIKE_DATE dinner spike); the remainder (to ~mid-June 2026) carries the
+#: extended excursion spread (:data:`_EXT_EXCURSIONS`).
+_DAYS = 185
 _N_DINNERS = 18
 _ONTIME_IDX = frozenset({3, 7, 11, 15})
 _BUMP_PRE = timedelta(minutes=20)
@@ -278,6 +281,60 @@ def _interp(ts: datetime, points: list[tuple[datetime, float]]) -> float:
     return points[-1][1]
 
 
+#: The extended record (Mar 15 - ~Jun 16 2026): a spread of excursions across every
+#: severity band so the demo shows regular and severe highs and lows beyond the
+#: story window. (day offset from _START, hour, minute, extreme mg/dL). Highs >180,
+#: very-high >250, lows <70, very-low <54. Each is held ~30 min so it registers as a
+#: clinically significant (or severe) episode. Spaced so none overlap.
+_EXT_EXCURSIONS: tuple[tuple[int, int, int, int], ...] = (
+    (93, 20, 0, 216),    # high
+    (97, 8, 30, 62),     # low
+    (101, 21, 30, 271),  # very high
+    (106, 3, 0, 48),     # very low (overnight)
+    (111, 13, 0, 228),   # high
+    (116, 16, 30, 57),   # low
+    (122, 20, 30, 241),  # high
+    (127, 2, 30, 44),    # very low (overnight)
+    (133, 19, 0, 293),   # very high
+    (139, 7, 0, 66),     # low
+    (145, 21, 0, 207),   # high
+    (151, 14, 30, 51),   # very low
+    (157, 20, 0, 233),   # high
+    (163, 4, 0, 60),     # low
+    (169, 19, 30, 264),  # very high
+    (175, 15, 30, 55),   # low
+    (181, 20, 0, 221),   # high
+)
+
+
+def _ext_day(offset: int) -> date:
+    return (_START + timedelta(days=offset)).date()
+
+
+def _with_extended_excursions(glucose: list[GlucoseEvent]) -> list[GlucoseEvent]:
+    """Overwrite the extended (Mar-Jun) window with the excursion spread. Each curve
+    ramps to its extreme, holds it ~30 min (so the episode clears the 15-min clinical
+    bar and any severe band), then recovers. Jitter-free so boundaries are stable."""
+    segments: list[list[tuple[datetime, float]]] = []
+    for off, hh, mm, extreme in _EXT_EXCURSIONS:
+        center = _at(_ext_day(off), hh, mm)
+        segments.append([
+            (center - timedelta(minutes=40), 118.0),
+            (center - timedelta(minutes=15), float(extreme)),
+            (center + timedelta(minutes=15), float(extreme)),
+            (center + timedelta(minutes=40), 120.0),
+        ])
+    out: list[GlucoseEvent] = []
+    for g in glucose:
+        value: float | None = None
+        for points in segments:
+            if points[0][0] <= g.ts <= points[-1][0]:
+                value = _interp(g.ts, points)
+                break
+        out.append(g if value is None else g.model_copy(update={"mg_dl": round(value)}))
+    return out
+
+
 def _with_story_days(glucose: list[GlucoseEvent]) -> list[GlucoseEvent]:
     """Overwrite the story windows with their hand-shaped curves: rebound chains
     (low, rescue carbs, high), one stacked-correction evening ending in a night
@@ -445,7 +502,9 @@ def _demo_profiles() -> list[TherapyProfile]:
     """Two profile versions: a spring sensitivity change splits the window."""
     v1 = _profile_payload("Winter", _WINTER_SCHEDULE)
     v2 = _profile_payload("Spring", _SPRING_SCHEDULE)
-    mid = _START + timedelta(days=_DAYS // 2)
+    # Fixed switch date (not _DAYS//2) so the DEMO_SPIKE_DATE spike stays under the
+    # Spring profile regardless of how long the record runs.
+    mid = _START + timedelta(days=45)
     return [
         TherapyProfile(
             source="tandem",
@@ -565,13 +624,15 @@ def seed_demo(store: StoragePort) -> None:
     Postgres. Beyond the hero CGM/insulin/meal timeline it adds a full Tandem
     t:slim X2 / Control-IQ treatment record (multi-segment profile, temp basals,
     corrections, suspends, three meals a day), sleep, activity, logged forecast
-    curves, two therapy-profile versions, manual notes, and the episode-graph
-    story days (rebound chains bridged by rescue carbs, a stacked-correction
-    evening ending in a night low, post-workout lows, one sensor gap) - so every
-    surface has data."""
+    curves, two therapy-profile versions, manual notes, the episode-graph story
+    days (rebound chains bridged by rescue carbs, a stacked-correction evening
+    ending in a night low, post-workout lows, one sensor gap), and an extended
+    Mar-Jun 2026 spread of highs, very-highs, lows, and very-lows - so every
+    surface and every severity band has data."""
     glucose, insulin, meals = _patient()
     glucose = _with_prolonged_highs(glucose)
     glucose = _with_story_days(glucose)
+    glucose = _with_extended_excursions(glucose)
     glucose = _drop_sensor_gap(glucose)
     store.insert_glucose(glucose)
     rng = random.Random(_SEED + 1)  # separate stream so the hero timeline is unchanged

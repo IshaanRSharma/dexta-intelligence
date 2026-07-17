@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from dexta_intelligence.agents.base import AgentContext
 from dexta_intelligence.cli import cmd_demo, main
@@ -133,6 +133,26 @@ def test_cmd_demo_output() -> None:
 
 def test_main_demo_subcommand() -> None:
     assert main(["demo"]) == 0
+
+
+def test_demo_extends_to_june_with_every_severity_band() -> None:
+    """The record runs into mid-June 2026 and the Mar-Jun extension carries at
+    least one of each: regular low, very low, regular high, very high."""
+    from dexta_intelligence.analytics.episodes import build_graph  # noqa: PLC0415
+
+    store = build_demo_store()
+    try:
+        cov = store.coverage()
+        assert cov.last_ts is not None and cov.last_ts.date() >= date(2026, 6, 1)
+        # the extended window only (after the story/hero period)
+        ext = build_graph(
+            store, datetime(2026, 3, 20, tzinfo=UTC), datetime(2026, 6, 20, tzinfo=UTC)
+        ).summary()
+    finally:
+        store.close()
+    assert ext["num_hypo"] >= 3 and ext["num_hyper"] >= 3   # regular lows and highs
+    assert ext["n_severe_hypo"] >= 1                        # a very low (<54)
+    assert ext["n_severe_hyper"] >= 1                       # a very high (>250)
 
 
 def test_demo_episode_graph_tells_the_story() -> None:

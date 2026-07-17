@@ -70,6 +70,16 @@ def cmd_serve(
 
         if seed_demo_if_empty(base_opener(config, None)):
             out.write("seeded the synthetic demo patient (no real data, no API key)\n")
+        # The synthetic record spans ~6 months; widen the analysis window so the
+        # whole record (the hero story AND the extended excursions) is in view,
+        # not just the default trailing 90 days.
+        config = config.model_copy(
+            update={
+                "analysis": config.analysis.model_copy(
+                    update={"deep_analysis_window_days": 240}
+                )
+            }
+        )
 
     # Capture the launched config path once so the settings panel reads/writes
     # the file the running server actually loaded - not a per-request re-resolve.
