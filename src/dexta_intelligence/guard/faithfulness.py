@@ -36,7 +36,14 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from dexta_intelligence.guard.metrics import is_percent, metric_for_key, metrics_in_context
+from dexta_intelligence.guard.metrics import (
+    compute_metric,
+    derived_values,
+    inputs_of,
+    is_percent,
+    metric_for_key,
+    metrics_in_context,
+)
 
 __all__ = [
     "DEFAULT_ALLOWED_CONSTANTS",
@@ -228,6 +235,11 @@ def audit(
     text = texts if isinstance(texts, str) else "\n".join(texts)
     pool = [abs(p) for p in extract_numbers(evidence)]
     provenance = build_provenance(evidence) if check_provenance else {}
+    # A value the ontology can derive from the evidence (a CV from sd+mean) is a
+    # legitimate figure to cite, so it counts as traceable - while the provenance
+    # pass below still catches the wrong metric cited for it.
+    if check_provenance:
+        pool += [abs(v) for v in derived_values(provenance)]
 
     violations: list[Violation] = []
     prov_violations: list[ProvenanceViolation] = []
@@ -261,34 +273,59 @@ def audit(
     )
 
 
+def _true_values(canonical: str, provenance: dict[str, list[float]]) -> list[float]:
+    """Every value the metric may legitimately have here: any stored directly, plus
+    one recomputed from its inputs (CV from sd+mean, GRI from its components). The
+    derived value pins metrics the tools never emitted, so a claim can be checked
+    even when nothing was computed to compare against."""
+    values = list(provenance.get(canonical, []))
+    derived = compute_metric(canonical, provenance)
+    if derived is not None:
+        values.append(derived)
+    return values
+
+
 def _check_provenance_at(
     cited: float, context: str, provenance: dict[str, list[float]],
     rel_tolerance: float,
 ) -> ProvenanceViolation | None:
     """Flag a traceable number that is cited for the wrong metric.
 
-    Fires only when the sentence names a metric we hold a value for, the number
-    does not match that metric, and it does match a different metric we hold.
-    That triple keeps it precise: ambiguous or unresolvable context never fires.
+    The metric a sentence NAMES gets a true value stored or recomputed from its
+    inputs. If the number matches it, the citation is correct. If not, name what
+    the number actually is, preferring "an input to the claimed metric" (the
+    standard deviation reported as a coefficient of variation) over an unrelated
+    coincidental match. Fires only when a named metric can be pinned to a value,
+    so ambiguous or unresolvable context never triggers it. ``sorted`` keeps the
+    chosen metric deterministic when a sentence names more than one.
     """
-    claimed = metrics_in_context(context)
-    claimed_present = [m for m in claimed if m in provenance]
-    if not claimed_present:
+    named = sorted(metrics_in_context(context))
+    pinned = [(m, tv) for m in named if (tv := _true_values(m, provenance))]
+    if not pinned:
         return None
-    if any(_matches_metric(cited, provenance[m], is_percent(m), rel_tolerance)
-           for m in claimed_present):
+    if any(_matches_metric(cited, tv, is_percent(m), rel_tolerance) for m, tv in pinned):
         return None
+
+    claimed, expected = pinned[0]
+    for inp in inputs_of(claimed):
+        if inp in provenance and _matches_metric(
+            cited, provenance[inp], is_percent(inp), rel_tolerance
+        ):
+            return ProvenanceViolation(
+                number=cited, claimed_metric=claimed, matched_metric=inp,
+                context=context, expected=tuple(expected),
+            )
+    named_set = set(named)
     matched = next(
         (o for o, vals in provenance.items()
-         if o not in claimed and _matches_metric(cited, vals, is_percent(o), rel_tolerance)),
+         if o not in named_set and _matches_metric(cited, vals, is_percent(o), rel_tolerance)),
         None,
     )
     if matched is None:
         return None
-    expected = tuple(provenance[claimed_present[0]])
     return ProvenanceViolation(
-        number=cited, claimed_metric=claimed_present[0], matched_metric=matched,
-        context=context, expected=expected,
+        number=cited, claimed_metric=claimed, matched_metric=matched,
+        context=context, expected=tuple(expected),
     )
 
 
