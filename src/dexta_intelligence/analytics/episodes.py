@@ -1,11 +1,13 @@
 """Temporal episode graph: glycemic excursions and sensor gaps as first-class,
 segmented objects with typed edges to the treatment/behaviour context around them.
 
-The LLM-CGM benchmark (Healey & Kohane, PSB 2025) found a code-execution agent's
-worst scores were all temporal-segmentation tasks: longest time in hyperglycemia,
-counting hypoglycemic episodes, meal-window extremes, sensor disconnects. The
-tool belt computes those on demand and throws the segments away. This module
-makes them durable, deterministic nodes:
+In the LLM-CGM benchmark (Healey & Kohane, PSB 2025) GPT-4 scored lowest on the
+anomaly-detection and pattern-recognition categories, with several individual
+temporal-extreme questions also low (longest hyperglycemia, counting hypoglycemic
+episodes, meal-window extremes, sensor disconnects). Those are all
+episode-boundary computations: contiguous excursions and gaps the tool belt
+computes on demand and throws away. This module makes them durable, deterministic
+nodes so the segmentation is held fixed:
 
 - an :class:`Episode` per contiguous excursion (hypo / hyper) or sensor gap, with
   its span, extreme, duration, and clinical-significance flag;
