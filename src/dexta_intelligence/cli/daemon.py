@@ -27,6 +27,7 @@ def cmd_daemon(
     interval: float = 5.0,
     deep_every: int = 12,
     once: bool = False,
+    curiosity: bool = False,
     opener: StoreOpener = open_sqlite_store,
     model: Any = None,
 ) -> int:
@@ -46,7 +47,9 @@ def cmd_daemon(
     if once:
         store = opener(config, db_path)
         try:
-            report = run_cycle(config, store, model=chat_model, notify=notify, deep=True)
+            report = run_cycle(
+                config, store, model=chat_model, notify=notify, deep=True, curiosity=curiosity
+            )
         finally:
             _maybe_close_store(store, opener)
         _print_cycle(out, report)
@@ -65,17 +68,21 @@ def cmd_daemon(
         deep_every=deep_every,
         model=chat_model,
         notify=notify,
+        curiosity=curiosity,
         on_cycle=lambda report: _print_cycle(out, report),
     )
 
 
 def _print_cycle(out: TextIO, report: CycleReport) -> None:
     deep = " deep" if report.deep_ran else ""
+    curious = (
+        f" · {report.curiosities_banked} wondered" if report.curiosities_banked else ""
+    )
     out.write(
         f"[{report.started_at.isoformat()}] synced {report.sources_synced} src · "
         f"{report.anomalies} anomaly(ies) · {report.goals_ticked} goal(s) ticked · "
         f"{report.findings_persisted} finding(s) · {report.stale_pruned} retired · "
-        f"{report.open_promoted} promoted{deep}\n"
+        f"{report.open_promoted} promoted{curious}{deep}\n"
     )
     for step, msg in report.errors:
         out.write(f"  ! {step}: {msg}\n")

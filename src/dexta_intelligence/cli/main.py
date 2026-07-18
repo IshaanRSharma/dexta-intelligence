@@ -184,6 +184,11 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_p.add_argument(
         "--once", action="store_true", help="Run a single cycle and exit (no sleep)"
     )
+    daemon_p.add_argument(
+        "--curiosity",
+        action="store_true",
+        help="Scan the episode graph each cycle and bank recurring patterns as open hypotheses",
+    )
 
     serve_p = sub.add_parser("serve", help="Run the local web GUI (needs the [gui] extra)")
     serve_p.add_argument(
@@ -324,6 +329,7 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: PLR0911, PLR0912
             interval=args.interval,
             deep_every=args.deep_every,
             once=args.once,
+            curiosity=args.curiosity,
         )
 
     if args.command == "goals":
