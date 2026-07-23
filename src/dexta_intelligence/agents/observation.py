@@ -20,7 +20,7 @@ from __future__ import annotations
 import statistics
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from dexta_intelligence.agents.base import (
     AgentContext,
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from dexta_intelligence.models import GlucoseEvent, InsulinEvent
+    from dexta_intelligence.store.port import StoragePort
 
 __all__ = [
     "AGENT_NAME",
@@ -59,8 +60,6 @@ EPISODE_MIN_DURATION_MINUTES = 15
 #: GMI affine map (Bergenstal et al. 2018) - mirrors rollups daily kernel.
 _GMI_INTERCEPT = 3.31
 _GMI_SLOPE = 0.02392
-
-_EpisodeKind = Literal["hypo", "hyper"]
 
 
 class ObservationAgent:
@@ -88,7 +87,7 @@ class ObservationAgent:
             return []
 
         findings: list[Finding] = []
-        glycemic = _glycemic_finding(glucose, window_start, window_end)
+        glycemic = _glycemic_finding(ctx.store, glucose, window_start, window_end)
         if glycemic is not None:
             findings.append(glycemic)
 
@@ -134,59 +133,29 @@ def _gmi(mean_mg_dl: float) -> float:
 
 
 def _count_episodes(
-    glucose: Sequence[GlucoseEvent],
+    store: StoragePort,
+    window_start: datetime,
+    window_end: datetime,
     *,
     target_low: int = TARGET_LOW_MG_DL,
     target_high: int = TARGET_HIGH_MG_DL,
 ) -> dict[str, int]:
-    """Count hypo/hyper episodes with minimum duration (15 min at 5-min cadence)."""
-    readings = sorted(glucose, key=lambda g: g.ts)
-    hypo = 0
-    hyper = 0
-    current_kind: _EpisodeKind | None = None
-    run_start: datetime | None = None
-    run_end: datetime | None = None
+    """Clinically-significant (>= 15 min) hypo/hyper episode counts, segmented by
+    the shared episode engine so they match the ``episodes`` tool and never let a
+    run silently span a sensor gap."""
+    from dexta_intelligence.analytics.episodes import build_graph  # noqa: PLC0415
 
-    def _close_run() -> None:
-        nonlocal hypo, hyper, current_kind, run_start, run_end
-        if current_kind is None or run_start is None or run_end is None:
-            return
-        duration = (run_end - run_start).total_seconds() / 60.0
-        if duration >= EPISODE_MIN_DURATION_MINUTES:
-            if current_kind == "hypo":
-                hypo += 1
-            else:
-                hyper += 1
-        current_kind = None
-        run_start = None
-        run_end = None
-
-    for reading in readings:
-        mg_dl = reading.mg_dl
-        if mg_dl < target_low:
-            kind: _EpisodeKind | None = "hypo"
-        elif mg_dl > target_high:
-            kind = "hyper"
-        else:
-            kind = None
-
-        if kind is None:
-            _close_run()
-            continue
-
-        if current_kind == kind:
-            run_end = reading.ts
-        else:
-            _close_run()
-            current_kind = kind
-            run_start = reading.ts
-            run_end = reading.ts
-
-    _close_run()
-    return {"hypo": hypo, "hyper": hyper}
+    summary = build_graph(
+        store, window_start, window_end, target_low=target_low, target_high=target_high
+    ).summary()
+    return {
+        "hypo": summary["n_clinically_significant_hypo"],
+        "hyper": summary["n_clinically_significant_hyper"],
+    }
 
 
 def _glycemic_finding(
+    store: StoragePort,
     glucose: Sequence[GlucoseEvent],
     window_start: datetime,
     window_end: datetime,
@@ -205,7 +174,7 @@ def _glycemic_finding(
 
     expected = max(1, round(_span_days(window_start, window_end) * EXPECTED_READINGS_PER_DAY))
     coverage_pct = round(coverage_fraction(n, expected=expected) * 100.0, 1)
-    episodes = _count_episodes(glucose)
+    episodes = _count_episodes(store, window_start, window_end)
 
     evidence = {
         "n_readings": n,

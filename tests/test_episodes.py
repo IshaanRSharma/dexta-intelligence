@@ -116,6 +116,17 @@ def test_in_range_only_has_no_excursions() -> None:
     assert all(e.kind == "sensor_gap" for e in _detect(store)) or _detect(store) == []
 
 
+def test_excursion_splits_on_intra_run_sensor_gap() -> None:
+    # A low, sensor dark 50 min, low again: two observed hypo episodes, not one
+    # whose duration silently spans the hole (which would falsely read as long).
+    store = _store([(0, 60), (5, 55), (10, 65), (60, 60), (65, 55), (70, 68)])
+    hypo = [e for e in _detect(store) if e.kind == "hypo"]
+    assert len(hypo) == 2
+    assert hypo[0].end == _ts(10) and hypo[1].start == _ts(60)
+    assert all(e.duration_min <= 15.0 for e in hypo)  # neither spans the 60-min hole
+    assert any(e.kind == "sensor_gap" for e in _detect(store))
+
+
 # ── sensor gaps ───────────────────────────────────────────────────────────────
 
 
@@ -293,6 +304,20 @@ def test_high_then_insulin_then_low_is_low_after_high() -> None:
 
 def test_no_bridge_is_a_weak_follows() -> None:
     store = _store([(0, 60), (5, 55), (15, 120), (40, 200), (45, 220), (50, 120)])
+    graph = _graph(store)
+    assert len(graph.edges) == 1
+    assert graph.edges[0].relation == "follows"
+    assert graph.edges[0].bridge is None
+
+
+def test_chain_across_a_sensor_gap_is_only_a_weak_follows() -> None:
+    # low ends at 10, sensor dark until 60, a rescue carb logged at 30 in the
+    # unseen gap, high starts at 60. The trajectory through the hole is
+    # unobserved, so the edge stays "follows" and never rebound_after_low.
+    meals = [MealEvent(ts=_ts(30), carbs_g=15.0, note="rescue")]
+    store = _store(
+        [(0, 60), (5, 55), (10, 65), (60, 200), (65, 220), (70, 120)], meals=meals
+    )
     graph = _graph(store)
     assert len(graph.edges) == 1
     assert graph.edges[0].relation == "follows"
@@ -523,3 +548,16 @@ def test_episode_tools_registered_on_belt() -> None:
     ctx, tk = _ctx_toolkit(store)
     names = {s.name for s in build_belt(ctx, tk)}
     assert {"episodes", "explain_episode"} <= names
+
+
+def test_find_lows_count_agrees_with_episodes_tool_across_a_gap() -> None:
+    # A low, sensor dark 50 min, low again. find_lows and the episodes tool must
+    # report the same count, because both segment via the shared engine and
+    # neither lets a run silently span the gap.
+    store = _store([(0, 60), (5, 55), (10, 65), (60, 60), (65, 55), (70, 68)])
+    ctx, tk = _ctx_toolkit(store)
+    lows = tk.find_lows()
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    result, _ = specs["episodes"].fn({"kind": "hypo"})
+    assert lows["n_lows"] == 2
+    assert result["summary"]["num_hypo"] == lows["n_lows"]

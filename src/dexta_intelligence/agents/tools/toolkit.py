@@ -14,11 +14,13 @@ purpose: they ship in every prompt.
 from __future__ import annotations
 
 import bisect
+import math
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from dexta_intelligence.analytics.episodes import detect_episodes
 from dexta_intelligence.analytics.oref import carbs_on_board, insulin_totals
 from dexta_intelligence.coldstart import CapabilitySet
 from dexta_intelligence.connectors.tandem import PROFILE_SOURCE_ID
@@ -185,6 +187,8 @@ class DiscoveryToolkit:
         #: UTC; "dinner", "overnight", and per-day grouping are computed in this
         #: zone so they land at the patient's clock time, not UTC's.
         self._tz = _resolve_tz(getattr(ctx, "timezone", "UTC"))
+        #: Kept so find_lows/find_spikes can segment via the shared episode engine.
+        self._store = ctx.store
         start = datetime.combine(ctx.window[0], time.min, tzinfo=self._tz).astimezone(UTC)
         end = datetime.combine(ctx.window[1], time.max, tzinfo=self._tz).astimezone(UTC)
         self._target = (target_low, target_high)
@@ -1204,41 +1208,30 @@ class DiscoveryToolkit:
     def find_spikes(
         self, threshold: float = _SPIKE_THRESHOLD, top_n: int = 10
     ) -> dict[str, Any]:
-        """Excursion peaks above ``threshold`` inside the ACTIVE window -
-        contiguous above-threshold runs, one peak each, largest first."""
+        """Excursion peaks at or above ``threshold`` inside the ACTIVE window -
+        contiguous above-threshold runs, one peak each, largest first.
+
+        Segmented by the shared episode engine (:func:`detect_episodes`), so the
+        count agrees with the ``episodes`` tool and a run never silently spans a
+        sensor gap. ``episodes`` uses a strict ``>`` cut, so the inclusive
+        ``>= threshold`` boundary is segmented at ``ceil(threshold) - 1``.
+        """
         threshold = max(140.0, min(float(threshold), 400.0))
         top_n = max(1, min(int(top_n), 25))
-        ts_list, vals_list = self._active_glucose()
-        spikes: list[dict[str, Any]] = []
-        run_start: datetime | None = None
-        run_peak, run_peak_ts = 0.0, None
-        prev_ts: datetime | None = None
-        for ts, v in zip(ts_list, vals_list, strict=True):
-            if v >= threshold:
-                if run_start is None:
-                    run_start = ts
-                    run_peak, run_peak_ts = v, ts
-                elif v > run_peak:
-                    run_peak, run_peak_ts = v, ts
-                prev_ts = ts
-            elif run_start is not None:
-                assert run_peak_ts is not None and prev_ts is not None
-                spikes.append(
-                    {
-                        "ts": run_peak_ts.isoformat(),
-                        "peak_mg_dl": round(run_peak, 1),
-                        "duration_min": round((prev_ts - run_start).total_seconds() / 60),
-                    }
-                )
-                run_start, run_peak_ts = None, None
-        if run_start is not None and run_peak_ts is not None and prev_ts is not None:
-            spikes.append(
-                {
-                    "ts": run_peak_ts.isoformat(),
-                    "peak_mg_dl": round(run_peak, 1),
-                    "duration_min": round((prev_ts - run_start).total_seconds() / 60),
-                }
-            )
+        low, _ = self._target
+        eps = detect_episodes(
+            self._store, self._active_start, self._active_end,
+            target_low=low, target_high=math.ceil(threshold) - 1,
+        )
+        spikes: list[dict[str, Any]] = [
+            {
+                "ts": e.extreme_ts.isoformat(),
+                "peak_mg_dl": e.extreme_mg_dl,
+                "duration_min": round(e.duration_min),
+            }
+            for e in eps
+            if e.kind == "hyper" and e.extreme_ts is not None
+        ]
         spikes.sort(key=lambda s: -float(s["peak_mg_dl"]))
         out: dict[str, Any] = {
             "threshold": threshold,
@@ -1254,41 +1247,30 @@ class DiscoveryToolkit:
         contiguous below-threshold run as one nadir with its duration, plus the
         total count. The hypo analog of find_spikes - the instrument for 'how many
         times / how long did I go low'. ``clinically_significant`` flags runs of
-        >= 15 continuous minutes (the consensus hypo-event definition)."""
+        >= 15 continuous minutes (the consensus hypo-event definition).
+
+        Segmented by the shared episode engine (:func:`detect_episodes`), so the
+        count agrees with the ``episodes`` tool and a run never silently spans a
+        sensor gap. ``episodes`` uses a strict ``<`` cut, matching ``< threshold``
+        at ``ceil(threshold)``.
+        """
         threshold = max(40.0, min(float(threshold), 100.0))
         top_n = max(1, min(int(top_n), 50))
-        ts_list, vals_list = self._active_glucose()
-        lows: list[dict[str, Any]] = []
-        run_start: datetime | None = None
-        run_nadir: float = 1000.0
-        run_nadir_ts: datetime | None = None
-        prev_ts: datetime | None = None
-
-        def _close() -> None:
-            nonlocal run_start, run_nadir, run_nadir_ts
-            assert run_nadir_ts is not None and prev_ts is not None and run_start is not None
-            dur = round((prev_ts - run_start).total_seconds() / 60)
-            lows.append(
-                {
-                    "ts": run_nadir_ts.isoformat(),
-                    "nadir_mg_dl": round(run_nadir, 1),
-                    "duration_min": dur,
-                    "clinically_significant": dur >= 15,
-                }
-            )
-            run_start, run_nadir, run_nadir_ts = None, 1000.0, None
-
-        for ts, v in zip(ts_list, vals_list, strict=True):
-            if v < threshold:
-                if run_start is None:
-                    run_start, run_nadir, run_nadir_ts = ts, v, ts
-                elif v < run_nadir:
-                    run_nadir, run_nadir_ts = v, ts
-                prev_ts = ts
-            elif run_start is not None:
-                _close()
-        if run_start is not None:
-            _close()
+        _, high = self._target
+        eps = detect_episodes(
+            self._store, self._active_start, self._active_end,
+            target_low=math.ceil(threshold), target_high=high,
+        )
+        lows: list[dict[str, Any]] = [
+            {
+                "ts": e.extreme_ts.isoformat(),
+                "nadir_mg_dl": e.extreme_mg_dl,
+                "duration_min": round(e.duration_min),
+                "clinically_significant": e.clinically_significant,
+            }
+            for e in eps
+            if e.kind == "hypo" and e.extreme_ts is not None
+        ]
         lows.sort(key=lambda low: float(low["nadir_mg_dl"]))
         out: dict[str, Any] = {
             "threshold": threshold,

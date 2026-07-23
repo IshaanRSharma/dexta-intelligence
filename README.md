@@ -127,6 +127,31 @@ flowchart TD
 Every serious answer carries a visible plan, a tool-by-tool trace, the evidence behind it, the
 competing hypotheses, and what could not be checked.
 
+## The temporal episode graph
+
+Raw CGM data is thousands of readings, one every five minutes. Language models are measurably bad
+at reasoning over that directly: they miscount episodes, misjudge how long a low lasted, and invent
+trends (this is exactly the failure the benchmark above measures). dexta never asks the model to.
+A deterministic pass first segments the raw trace into a small, addressable graph of the things a
+clinician actually talks about:
+
+- **Episode nodes** are each contiguous low (< 70 mg/dL), high (> 180), or sensor gap, with its
+  span, nadir or peak, duration, and severity. The cut points are the 2019 international consensus
+  (Battelino et al., Diabetes Care). A run never silently spans a sensor gap, so a reported duration
+  is always time the sensor was actually watching.
+- **Context edges** tie each episode to the meals, boluses, activity, and sleep around it, each with
+  a signed offset ("45 g carbs, 20 min before"). A carb entry and the bolus for it fold into one
+  "treatment" edge.
+- **Chain edges** link consecutive episodes that sit within three hours and name the shape of the
+  sequence: `rebound_after_low` (a low, rescue carbs, then a high), `low_after_high`, or a weaker
+  `follows`. These describe the geometry, never assign blame, and are never claimed across a sensor
+  gap where the trajectory is unobserved.
+
+This one segmentation is the single source of truth the whole system reasons over. Chat traverses
+it to answer "why did I go high then", goals track episode counts, the background producers and the
+curiosity daemon surface recurring patterns from it, and the Timeline draws it. Every episode number
+in an answer or on screen comes from this graph, with no model in the counting.
+
 ## Features
 
 The web app is one clear feature per tab:

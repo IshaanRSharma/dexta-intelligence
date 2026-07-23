@@ -18,10 +18,14 @@ nodes so the segmentation is held fixed:
   safe, a false "merged" hides the missed-bolus signal.
 
 It is a pure function over the store: no model, no numpy, byte-deterministic given
-the same events. Excursion thresholds follow the benchmark's own definitions
-(strict ``> 180`` / ``< 70``) so episode facts line up with the scored ground
-truth. Durations are endpoint-elapsed (last minus first in-run reading), matching
-the ``find_lows`` / ``find_spikes`` tool convention.
+the same events. Excursion thresholds are the 2019 international consensus cut
+points (Battelino et al., Diabetes Care 2019: strict ``> 180`` / ``< 70``, severe
+``> 250`` / ``< 54``); the LLM-CGM benchmark adopts the same definitions, so
+episode facts line up with its scored ground truth. Durations are endpoint-elapsed
+(last minus first in-run reading), matching the ``find_lows`` / ``find_spikes``
+tool convention. A run never spans a sensor gap: two excursions either side of a
+dark sensor are separate observed episodes, and a chain across a gap is only the
+weak ``follows`` since the trajectory through the hole is unobserved.
 """
 
 from __future__ import annotations
@@ -165,9 +169,14 @@ def _minutes(a: datetime, b: datetime) -> float:
 
 
 def _excursions(
-    readings: list[tuple[datetime, int]], *, low: int, high: int,
+    readings: list[tuple[datetime, int]], *, low: int, high: int, gap_min: float,
 ) -> list[Episode]:
-    """Contiguous hypo (< low) and hyper (> high) runs as episodes (no links yet)."""
+    """Contiguous hypo (< low) and hyper (> high) runs as episodes (no links yet).
+
+    A run is also broken by a sensor gap longer than ``gap_min``: two lows either
+    side of a dark sensor are separate observed episodes, not one whose duration
+    silently spans the hole and falsely trips clinical significance.
+    """
     episodes: list[Episode] = []
     run: list[tuple[datetime, int]] = []
     run_kind: str | None = None
@@ -192,7 +201,8 @@ def _excursions(
 
     for ts, v in readings:
         kind = "hypo" if v < low else "hyper" if v > high else None
-        if kind != run_kind:
+        gap_break = bool(run) and kind == run_kind and _minutes(ts, run[-1][0]) > gap_min
+        if kind != run_kind or gap_break:
             close()
             run, run_kind = [], kind
         if kind is not None:
@@ -363,7 +373,7 @@ def _detect(
     if not readings:
         return [], None
     ctx = _fetch_context(store, start, end)
-    episodes = _excursions(readings, low=target_low, high=target_high)
+    episodes = _excursions(readings, low=target_low, high=target_high, gap_min=gap_min)
     episodes = _attach_context(episodes, ctx)
     episodes += _sensor_gaps(readings, gap_min)
     episodes.sort(key=lambda e: e.start)
@@ -430,19 +440,24 @@ def _chain_episodes(episodes: list[Episode], ctx: _WindowContext) -> list[Episod
     "follows". Names describe the geometry and never assign blame.
     """
     excursions = [e for e in episodes if e.kind != "sensor_gap"]
+    sensor_gaps = [e for e in episodes if e.kind == "sensor_gap"]
     edges: list[EpisodeEdge] = []
     for a, b in pairwise(excursions):
         gap = round(_minutes(b.start, a.end), 1)
         if gap < 0 or gap > CHAIN_MAX_GAP_MIN:
             continue
+        # A dark sensor between the two excursions leaves the trajectory through
+        # the hole unobserved, so keep the weak "follows" and never claim a
+        # confident rebound.
+        crosses_gap = any(g.start < b.start and g.end > a.end for g in sensor_gaps)
         events = _gap_events(ctx, a.end, b.start)
         relation = "follows"
         bridge: ContextLink | None = None
-        if a.kind == "hypo" and b.kind == "hyper":
+        if not crosses_gap and a.kind == "hypo" and b.kind == "hyper":
             bridge = _pick_bridge(events, "carbs_g", a.end)
             if bridge is not None:
                 relation = "rebound_after_low"
-        elif a.kind == "hyper" and b.kind == "hypo":
+        elif not crosses_gap and a.kind == "hyper" and b.kind == "hypo":
             bridge = _pick_bridge(events, "units", a.end)
             if bridge is not None:
                 relation = "low_after_high"
@@ -527,6 +542,7 @@ def summarize(episodes: list[Episode]) -> dict[str, Any]:
         "num_hyper": len(hyper),
         "n_sensor_gaps": len(gaps),
         "n_clinically_significant_hypo": sum(1 for e in hypo if e.clinically_significant),
+        "n_clinically_significant_hyper": sum(1 for e in hyper if e.clinically_significant),
         "n_severe_hypo": sum(1 for e in hypo if e.severe),
         "n_severe_hyper": sum(1 for e in hyper if e.severe),
         "longest_hyper_min": max((e.duration_min for e in hyper), default=0.0),

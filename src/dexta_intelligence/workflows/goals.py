@@ -58,6 +58,9 @@ METRIC_LABELS: dict[GoalMetric, str] = {
     GoalMetric.TBR: "time below range (%)",
     GoalMetric.MEAN_GLUCOSE: "mean glucose (mg/dL)",
     GoalMetric.CV: "glucose variability, CV (%)",
+    GoalMetric.NUM_HYPO: "number of hypo episodes",
+    GoalMetric.NUM_SEVERE_HYPO: "number of severe hypo episodes (< 54 mg/dL)",
+    GoalMetric.LONGEST_HYPER: "longest hyper episode (min)",
 }
 
 _DEFAULT_DIRECTION: dict[GoalMetric, Direction] = {
@@ -66,9 +69,21 @@ _DEFAULT_DIRECTION: dict[GoalMetric, Direction] = {
     GoalMetric.TBR: "decrease",
     GoalMetric.MEAN_GLUCOSE: "decrease",
     GoalMetric.CV: "decrease",
+    GoalMetric.NUM_HYPO: "decrease",
+    GoalMetric.NUM_SEVERE_HYPO: "decrease",
+    GoalMetric.LONGEST_HYPER: "decrease",
+}
+
+#: Episode-graph goal metrics -> the :func:`summarize` key each reads.
+_EPISODE_METRIC_KEY: dict[GoalMetric, str] = {
+    GoalMetric.NUM_HYPO: "num_hypo",
+    GoalMetric.NUM_SEVERE_HYPO: "n_severe_hypo",
+    GoalMetric.LONGEST_HYPER: "longest_hyper_min",
 }
 
 _KEYWORD_METRIC: tuple[tuple[frozenset[str], GoalMetric], ...] = (
+    (frozenset({"episode", "episodes"}), GoalMetric.NUM_HYPO),
+    (frozenset({"severe low", "severe hypo", "below 54"}), GoalMetric.NUM_SEVERE_HYPO),
     (frozenset({"low", "lows", "hypo", "below", "overnight low"}), GoalMetric.NOCTURNAL_TBR),
     (frozenset({"range", "tir", "in-range", "target"}), GoalMetric.TIR),
     (frozenset({"variabilit", "stable", "swing", "spik", "cv", "smooth"}), GoalMetric.CV),
@@ -82,7 +97,9 @@ _COMPOSE_PROMPT = """A Type-1 patient stated this goal:
   "{statement}"
 
 Pick the single best DETERMINISTIC success metric and a short plan of read-only
-tools to investigate it. Metrics: tir | nocturnal_tbr | tbr | mean_glucose | cv.
+tools to investigate it. Metrics: tir | nocturnal_tbr | tbr | mean_glucose | cv |
+num_hypo | num_severe_hypo | longest_hyper (the last three count/measure
+segmented episodes; prefer them when the goal is about episodes/events).
 
 {tool_schema}
 
@@ -109,6 +126,12 @@ def measure_metric(metric: GoalMetric, ctx: AgentContext) -> float | None:
     glucose = ctx.store.get_glucose(start, end)
     if not glucose:
         return None
+
+    if metric in _EPISODE_METRIC_KEY:
+        from dexta_intelligence.analytics.episodes import build_graph  # noqa: PLC0415
+
+        summary = build_graph(ctx.store, start, end).summary()
+        return float(summary[_EPISODE_METRIC_KEY[metric]])
 
     if metric is GoalMetric.NOCTURNAL_TBR:
         night = [g.mg_dl for g in glucose if _NIGHT_HOURS[0] <= g.ts.hour < _NIGHT_HOURS[1]]
@@ -261,7 +284,7 @@ def _llm_compose(statement: str, model: BaseChatModel) -> _Plan | None:
 
 
 def _default_tools(metric: GoalMetric) -> list[dict[str, Any]]:
-    if metric is GoalMetric.NOCTURNAL_TBR:
+    if metric in (GoalMetric.NOCTURNAL_TBR, GoalMetric.NUM_HYPO, GoalMetric.NUM_SEVERE_HYPO):
         return [{"tool": "event_proximity", "args": {"event_type": "bolus", "window_min": 180}}]
     if metric is GoalMetric.CV:
         return [{"tool": "tod_compare", "args": {"hours_a": [0, 6], "hours_b": [11, 15]}}]

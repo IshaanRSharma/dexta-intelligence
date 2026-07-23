@@ -156,6 +156,21 @@ def test_record_run_persists_coverage_and_evidence(store: SQLiteStore) -> None:
         assert "numbers" in run.evidence_items[0]
 
 
+def test_coverage_summary_carries_episode_rollup(store: SQLiteStore) -> None:
+    """Every investigation records the deterministic episode-graph rollup, so a
+    coordinator run is episode-aware from the same segmentation the producers use."""
+    from dexta_intelligence.agents.coordinator import _coverage_summary  # noqa: PLC0415
+
+    _seed_glucose(store)
+    summary = _coverage_summary(_full_coverage_ctx(store))
+    assert "episodes" in summary
+    ep = summary["episodes"]
+    assert {
+        "num_hypo", "num_hyper", "n_severe_hypo", "n_severe_hyper", "n_chains"
+    } <= ep.keys()
+    assert all(isinstance(v, (int, float)) for v in ep.values())
+
+
 def test_poor_coverage_marks_run_limited(store: SQLiteStore) -> None:
     """A run over thin sensor coverage is flagged limited even with findings."""
     from dexta_intelligence.agents.coordinator import (  # noqa: PLC0415

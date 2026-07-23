@@ -24,18 +24,25 @@ def _store() -> SQLiteStore:
 
 
 def _rebound_day(store: SQLiteStore, day_offset: int) -> None:
-    """A low -> rescue carbs -> rebound high on the given day (a rebound_after_low)."""
+    """A low -> rescue carbs -> rebound high on the given day (a rebound_after_low).
+
+    Readings are at realistic 5-min CGM cadence so the whole trajectory is
+    observed: no sensor gap between the low and the high, so the rebound relation
+    is confident rather than a weak gap-crossing follows.
+    """
     base = START + timedelta(days=day_offset)
 
     def at(h: int, m: int) -> datetime:
         return base.replace(hour=h, minute=m)
 
     rows = [
-        (at(15, 30), 118), (at(15, 50), 55), (at(16, 5), 66), (at(16, 40), 110),
-        (at(17, 10), 205), (at(17, 15), 205), (at(17, 50), 150), (at(18, 20), 120),
+        (at(15, 30), 110), (at(15, 35), 85), (at(15, 40), 66), (at(15, 45), 58),
+        (at(15, 50), 55), (at(15, 55), 62), (at(16, 0), 68), (at(16, 5), 90),
+        (at(16, 10), 140), (at(16, 15), 185), (at(16, 20), 205), (at(16, 25), 210),
+        (at(16, 30), 200), (at(16, 35), 150), (at(16, 40), 120),
     ]
     store.insert_glucose([GlucoseEvent(ts=t, mg_dl=v) for t, v in rows])
-    store.insert_meals([MealEvent(ts=at(16, 15), carbs_g=15.0, note="rescue")])
+    store.insert_meals([MealEvent(ts=at(16, 2), carbs_g=15.0, note="rescue")])
 
 
 def _graph(store: SQLiteStore) -> object:
