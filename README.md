@@ -149,8 +149,7 @@ clinician actually talks about:
 
 This one segmentation is the single source of truth the whole system reasons over. Chat traverses
 it to answer "why did I go high then", goals track episode counts, the background producers and the
-curiosity daemon surface recurring patterns from it, and the Timeline draws it. Every episode number
-in an answer or on screen comes from this graph, with no model in the counting.
+curiosity daemon surface recurring patterns from it, and the Timeline draws it. 
 
 ## Features
 
