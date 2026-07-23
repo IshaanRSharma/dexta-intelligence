@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from dexta_intelligence.models import GlucoseEvent
+    from dexta_intelligence.store.port import StoragePort
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ class PatternAgent:
         _collect(candidates, _check_tod_drift(glucose, window_start, window_end))
         _collect(candidates, _check_weekday_weekend(ctx, glucose, window_start, window_end))
         _collect(candidates, _check_post_meal_outlier(ctx, glucose, window_start, window_end))
-        _collect(candidates, _check_episode_frequency(glucose, window_start, window_end))
+        _collect(candidates, _check_episode_frequency(ctx.store, window_start, window_end))
         _collect(candidates, _check_sleep_glucose(ctx, glucose, window_start, window_end))
 
         return _candidates_to_findings(candidates, window_start, window_end)
@@ -386,46 +387,26 @@ def _check_post_meal_outlier(
 
 
 def _hypo_episodes_by_day(
-    glucose: Sequence[GlucoseEvent],
+    store: StoragePort, window_start: datetime, window_end: datetime,
 ) -> dict[date, int]:
-    """Approximate daily hypo counts via contiguous low runs ≥ 15 min."""
-    readings = sorted(glucose, key=lambda g: g.ts)
+    """Clinically-significant (>= 15 min) hypo episodes per day, segmented by the
+    shared episode engine so counts match the episodes tool and no run spans a gap."""
+    from dexta_intelligence.analytics.episodes import build_graph  # noqa: PLC0415
+
+    graph = build_graph(store, window_start, window_end, target_low=TARGET_LOW_MG_DL)
     counts: dict[date, int] = defaultdict(int)
-    in_run = False
-    run_start: datetime | None = None
-    run_end: datetime | None = None
-
-    def _close() -> None:
-        nonlocal in_run, run_start, run_end
-        if not in_run or run_start is None or run_end is None:
-            return
-        duration = (run_end - run_start).total_seconds() / 60.0
-        if duration >= EPISODE_MIN_DURATION_MINUTES:
-            counts[run_start.date()] += 1
-        in_run = False
-        run_start = None
-        run_end = None
-
-    for reading in readings:
-        if reading.mg_dl < TARGET_LOW_MG_DL:
-            if in_run:
-                run_end = reading.ts
-            else:
-                in_run = True
-                run_start = reading.ts
-                run_end = reading.ts
-        else:
-            _close()
-    _close()
+    for ep in graph.episodes:
+        if ep.kind == "hypo" and ep.clinically_significant:
+            counts[ep.start.date()] += 1
     return dict(counts)
 
 
 def _check_episode_frequency(
-    glucose: Sequence[GlucoseEvent],
+    store: StoragePort,
     window_start: datetime,
     window_end: datetime,
 ) -> _PatternCandidate | None:
-    episode_days = _hypo_episodes_by_day(glucose)
+    episode_days = _hypo_episodes_by_day(store, window_start, window_end)
     midpoint = _midpoint_datetime(window_start, window_end)
     mid_day = midpoint.date()
 

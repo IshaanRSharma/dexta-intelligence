@@ -14,6 +14,8 @@ Two invariants are load-bearing and tested explicitly:
 
 from __future__ import annotations
 
+import pytest
+
 from dexta_intelligence.guard.faithfulness import audit, build_provenance
 from dexta_intelligence.guard.metrics import metric_for_key, metrics_in_context
 
@@ -220,3 +222,56 @@ def test_correct_gri_citations_pass() -> None:
     assert audit(
         "Your hypoglycemia component was 10.", GRI_EV, check_provenance=True
     ).ok
+
+
+# ── derivation: recompute a metric from its inputs, not just its stored value ──
+
+def test_sd_reported_as_cv_caught_even_when_cv_was_never_computed() -> None:
+    # Only sd + mean are in evidence; no CV was computed. The guard derives the
+    # true CV (28.7) from them and flags the SD (38.8) reported as CV. The old
+    # membership-only check could not: it had no CV value to compare against.
+    ev = {"mean": 135.2, "sd": 38.8}
+    report = audit("Your coefficient of variation is 38.8.", ev, check_provenance=True)
+    assert not report.ok
+    pv = report.provenance_violations[0]
+    assert pv.claimed_metric == "cv" and pv.matched_metric == "sd"
+
+
+def test_correct_cv_is_traceable_via_derivation() -> None:
+    # 28.7 is not literally in the evidence, but it is derivable from sd+mean, so
+    # a faithful answer that cites it must pass both checks.
+    ev = {"mean": 135.2, "sd": 38.8}
+    report = audit("Your coefficient of variation is 28.7.", ev, check_provenance=True)
+    assert report.ok
+    assert not report.violations and not report.provenance_violations
+
+
+def test_component_reported_as_gri_caught_by_derivation() -> None:
+    # No GRI stored; derived GRI = min(100, 3*0.2 + 1.6*0.7) = 1.72. A component
+    # (0.7) reported as the whole index is flagged.
+    ev = {"gri_hypo_component": 0.2, "gri_hyper_component": 0.7}
+    report = audit("Your glycemia risk index is 0.7.", ev, check_provenance=True)
+    assert not report.ok
+    pv = report.provenance_violations[0]
+    assert pv.claimed_metric == "gri" and pv.matched_metric == "gri_hyper_component"
+
+
+def test_correct_derived_gri_passes() -> None:
+    ev = {"gri_hypo_component": 0.2, "gri_hyper_component": 0.7}
+    assert audit("Your glycemia risk index is 1.7.", ev, check_provenance=True).ok
+
+
+def test_compute_metric_and_derived_values() -> None:
+    from dexta_intelligence.guard.metrics import (  # noqa: PLC0415
+        compute_metric,
+        derived_values,
+        inputs_of,
+    )
+
+    assert inputs_of("cv") == ("sd", "mean")
+    assert inputs_of("mean") == ()  # no formula
+    assert compute_metric("cv", {"sd": [38.8], "mean": [135.2]}) == pytest.approx(28.7, abs=0.05)
+    assert compute_metric("cv", {"sd": [38.8]}) is None  # missing input
+    assert compute_metric("cv", {"sd": [1.0], "mean": [0.0]}) is None  # div by zero -> None
+    assert compute_metric("mean", {"mean": [135.2]}) is None  # no formula
+    assert pytest.approx(28.7, abs=0.05) in derived_values({"sd": [38.8], "mean": [135.2]})

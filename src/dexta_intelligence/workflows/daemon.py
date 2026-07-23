@@ -61,6 +61,7 @@ class CycleReport:
     findings_persisted: int = 0
     stale_pruned: int = 0
     open_promoted: int = 0
+    curiosities_banked: int = 0
     deep_ran: bool = False
     errors: tuple[tuple[str, str], ...] = ()
 
@@ -78,6 +79,7 @@ class _Accumulator:
     findings_persisted: int = 0
     stale_pruned: int = 0
     open_promoted: int = 0
+    curiosities_banked: int = 0
     deep_ran: bool = False
     errors: list[tuple[str, str]] = field(default_factory=list)
 
@@ -94,13 +96,16 @@ def run_cycle(
     model: BaseChatModel | None = None,
     notify: Notifier | None = None,
     deep: bool = False,
+    curiosity: bool = False,
     now: datetime | None = None,
 ) -> CycleReport:
-    """Run one cadence cycle: sync, monitor, tick due goals, optional deep pass.
+    """Run one cadence cycle: sync, monitor, tick due goals, optional deep pass,
+    optional curiosity scan.
 
     Every step is isolated: a failing step logs, records its error on the
     report, and the cycle proceeds. Returns a :class:`CycleReport` and never
-    raises. The deep coordinator pass runs only when ``deep`` is true.
+    raises. The deep coordinator pass runs only when ``deep`` is true; the
+    episode-graph curiosity scan runs only when ``curiosity`` is true.
     """
     moment = _resolve_now(now)
     acc = _Accumulator()
@@ -133,6 +138,9 @@ def run_cycle(
 
     _tick_due_goals(store, ctx, moment, model, acc)
 
+    if curiosity:
+        _curiosity_pass(store, ctx, config, acc)
+
     if deep:
         _deep_pass(store, ctx, config, model, acc)
 
@@ -144,9 +152,33 @@ def run_cycle(
         findings_persisted=acc.findings_persisted,
         stale_pruned=acc.stale_pruned,
         open_promoted=acc.open_promoted,
+        curiosities_banked=acc.curiosities_banked,
         deep_ran=acc.deep_ran,
         errors=tuple(acc.errors),
     )
+
+
+def _curiosity_pass(
+    store: StoragePort, ctx: AgentContext, config: Config, acc: _Accumulator
+) -> None:
+    """Scan the episode graph for salient recurring structure and bank new wonders
+    as open hypotheses. Deterministic, model-free, isolated like every other step."""
+    from datetime import time as _time  # noqa: PLC0415
+
+    from dexta_intelligence.analytics.episodes import build_graph  # noqa: PLC0415
+    from dexta_intelligence.workflows.curiosity import bank_curiosities  # noqa: PLC0415
+
+    try:
+        start = datetime.combine(ctx.window[0], _time.min, tzinfo=UTC)
+        end = datetime.combine(ctx.window[1], _time.max, tzinfo=UTC)
+        graph = build_graph(
+            store, start, end,
+            target_low=config.analysis.target_low,
+            target_high=config.analysis.target_high,
+        )
+        acc.curiosities_banked = len(bank_curiosities(store, graph))
+    except Exception as exc:
+        acc.fail("curiosity", exc)
 
 
 def _evaluate_open_investigations(
@@ -174,6 +206,7 @@ def run_daemon(
     deep_every: int,
     model: BaseChatModel | None = None,
     notify: Notifier | None = None,
+    curiosity: bool = False,
     max_cycles: int | None = None,
     on_cycle: Callable[[CycleReport], None] | None = None,
 ) -> int:
@@ -189,7 +222,9 @@ def run_daemon(
     try:
         while max_cycles is None or cycle < max_cycles:
             deep = deep_every > 0 and cycle % deep_every == 0
-            report = run_cycle(config, store, model=model, notify=notify, deep=deep)
+            report = run_cycle(
+                config, store, model=model, notify=notify, deep=deep, curiosity=curiosity
+            )
             if on_cycle is not None:
                 on_cycle(report)
             cycle += 1

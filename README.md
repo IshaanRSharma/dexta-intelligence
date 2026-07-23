@@ -39,8 +39,11 @@ complete raw data in-context; dexta computes through its tools.
 
 The plain model confidently narrates computation it cannot do and tells the patient their
 overnight average is 25 mg/dL lower than it is. dexta's every number traces to a tool call:
-mean absolute error **14.7 vs 0.15 (~100x lower)**, and 14/14 on the curated subset. That
-confident, plausible, untraceable error is exactly what the faithfulness rail exists to prevent.
+mean absolute error **14.7 vs 0.15 (~100x lower)**, every well-defined statistic exact. On the
+14-question subset its only non-exact answers are two genuine interpretation differences and one
+principled decline (it refused to fabricate a hypoglycemia-episode count the benchmark defines by
+counting every 5-minute dip, and said so). That confident, plausible, untraceable error is exactly
+what the faithfulness rail exists to prevent.
 
 Scope, stated plainly: synthetic data, one patient, single pass, 14 of 30 tasks. A controlled
 probe, not a clinical claim. Scripts, raw dumps, hand-verified tables, and the honest negatives
@@ -123,6 +126,31 @@ flowchart TD
 
 Every serious answer carries a visible plan, a tool-by-tool trace, the evidence behind it, the
 competing hypotheses, and what could not be checked.
+
+## The temporal episode graph
+
+Raw CGM data is thousands of readings, one every five minutes. Language models are measurably bad
+at reasoning over that directly: they miscount episodes, misjudge how long a low lasted, and invent
+trends (this is exactly the failure the benchmark above measures). dexta never asks the model to.
+A deterministic pass first segments the raw trace into a small, addressable graph of the things a
+clinician actually talks about:
+
+- **Episode nodes** are each contiguous low (< 70 mg/dL), high (> 180), or sensor gap, with its
+  span, nadir or peak, duration, and severity. The cut points are the 2019 international consensus
+  (Battelino et al., Diabetes Care). A run never silently spans a sensor gap, so a reported duration
+  is always time the sensor was actually watching.
+- **Context edges** tie each episode to the meals, boluses, activity, and sleep around it, each with
+  a signed offset ("45 g carbs, 20 min before"). A carb entry and the bolus for it fold into one
+  "treatment" edge.
+- **Chain edges** link consecutive episodes that sit within three hours and name the shape of the
+  sequence: `rebound_after_low` (a low, rescue carbs, then a high), `low_after_high`, or a weaker
+  `follows`. These describe the geometry, never assign blame, and are never claimed across a sensor
+  gap where the trajectory is unobserved.
+
+This one segmentation is the single source of truth the whole system reasons over. Chat traverses
+it to answer "why did I go high then", goals track episode counts, the background producers and the
+curiosity daemon surface recurring patterns from it, and the Timeline draws it. Every episode number
+in an answer or on screen comes from this graph, with no model in the counting.
 
 ## Features
 

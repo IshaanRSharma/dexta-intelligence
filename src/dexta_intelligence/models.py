@@ -451,6 +451,11 @@ class GoalMetric(enum.StrEnum):
     TBR = "tbr"
     MEAN_GLUCOSE = "mean_glucose"
     CV = "cv"
+    # Episode-graph metrics: counts/durations of segmented excursions, so a goal
+    # can track "fewer hypo episodes" rather than only aggregate time-in-band.
+    NUM_HYPO = "num_hypo"
+    NUM_SEVERE_HYPO = "num_severe_hypo"
+    LONGEST_HYPER = "longest_hyper"
 
 
 class Goal(_FrozenModel):

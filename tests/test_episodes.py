@@ -20,6 +20,7 @@ from dexta_intelligence.analytics.episodes import (
     EpisodeGraph,
     build_graph,
     detect_episodes,
+    pair_treatments,
     summarize,
 )
 from dexta_intelligence.coldstart import ColdStartReport
@@ -115,6 +116,17 @@ def test_in_range_only_has_no_excursions() -> None:
     assert all(e.kind == "sensor_gap" for e in _detect(store)) or _detect(store) == []
 
 
+def test_excursion_splits_on_intra_run_sensor_gap() -> None:
+    # A low, sensor dark 50 min, low again: two observed hypo episodes, not one
+    # whose duration silently spans the hole (which would falsely read as long).
+    store = _store([(0, 60), (5, 55), (10, 65), (60, 60), (65, 55), (70, 68)])
+    hypo = [e for e in _detect(store) if e.kind == "hypo"]
+    assert len(hypo) == 2
+    assert hypo[0].end == _ts(10) and hypo[1].start == _ts(60)
+    assert all(e.duration_min <= 15.0 for e in hypo)  # neither spans the 60-min hole
+    assert any(e.kind == "sensor_gap" for e in _detect(store))
+
+
 # ── sensor gaps ───────────────────────────────────────────────────────────────
 
 
@@ -182,6 +194,186 @@ def test_sensor_gap_has_no_context_links() -> None:
     store = _store([(0, 120), (5, 120), (60, 120)], meals=meals)
     gap = next(e for e in _detect(store) if e.kind == "sensor_gap")
     assert gap.links == ()
+
+
+# ── treatment pairing ─────────────────────────────────────────────────────────
+
+
+def test_meal_and_close_bolus_pair_into_one_treatment_edge() -> None:
+    meals = [MealEvent(ts=_ts(-20), carbs_g=58.0, note="dinner")]
+    insulin = [InsulinEvent(ts=_ts(-17), kind=InsulinKind.BOLUS, units=6.0)]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals, insulin=insulin)
+    ep = next(e for e in _detect(store) if e.kind == "hyper")
+    kinds = [link.kind for link in ep.links]
+    assert kinds == ["treatment"]
+    t = ep.links[0]
+    assert t.offset_min == -20.0  # anchored to the meal
+    assert t.detail["carbs_g"] == 58.0
+    assert t.detail["units"] == 6.0
+    assert t.detail["bolus_dt_min"] == 3.0
+
+
+def test_shared_raw_event_id_pairs_beyond_the_time_window() -> None:
+    meals = [MealEvent(ts=_ts(-40), carbs_g=30.0, raw_event_id=7)]
+    insulin = [InsulinEvent(ts=_ts(-10), kind=InsulinKind.BOLUS, units=3.0, raw_event_id=7)]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals, insulin=insulin)
+    ep = next(e for e in _detect(store) if e.kind == "hyper")
+    assert [link.kind for link in ep.links] == ["treatment"]
+    assert ep.links[0].detail["bolus_dt_min"] == 30.0
+
+
+def test_ambiguous_boluses_pair_nothing() -> None:
+    # Two manual boluses inside the window of one meal: conservative, keep all
+    # three as separate edges rather than guessing which one was the meal bolus.
+    meals = [MealEvent(ts=_ts(-20), carbs_g=58.0)]
+    insulin = [
+        InsulinEvent(ts=_ts(-18), kind=InsulinKind.BOLUS, units=4.0),
+        InsulinEvent(ts=_ts(-12), kind=InsulinKind.BOLUS, units=2.0),
+    ]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals, insulin=insulin)
+    ep = next(e for e in _detect(store) if e.kind == "hyper")
+    assert sorted(link.kind for link in ep.links) == ["bolus", "bolus", "meal"]
+
+
+def test_automatic_bolus_never_time_pairs() -> None:
+    meals = [MealEvent(ts=_ts(-20), carbs_g=58.0)]
+    insulin = [InsulinEvent(ts=_ts(-18), kind=InsulinKind.BOLUS, units=1.5, automatic=True)]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals, insulin=insulin)
+    ep = next(e for e in _detect(store) if e.kind == "hyper")
+    assert sorted(link.kind for link in ep.links) == ["bolus", "meal"]
+
+
+def test_distant_meal_and_bolus_stay_separate() -> None:
+    # 20 minutes apart without a shared raw id: outside the pairing window, so
+    # the missed-bolus signal (a late correction is not a meal bolus) survives.
+    meals = [MealEvent(ts=_ts(-40), carbs_g=58.0)]
+    insulin = [InsulinEvent(ts=_ts(-20), kind=InsulinKind.BOLUS, units=6.0)]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals, insulin=insulin)
+    ep = next(e for e in _detect(store) if e.kind == "hyper")
+    assert sorted(link.kind for link in ep.links) == ["bolus", "meal"]
+
+
+def test_two_meals_near_one_bolus_pair_nothing() -> None:
+    meals = [
+        MealEvent(ts=_ts(-22), carbs_g=40.0),
+        MealEvent(ts=_ts(-14), carbs_g=18.0),
+    ]
+    insulin = [InsulinEvent(ts=_ts(-18), kind=InsulinKind.BOLUS, units=5.0)]
+    pairs, rest_meals, rest_boluses = pair_treatments(meals, insulin)
+    assert pairs == []
+    assert len(rest_meals) == 2 and len(rest_boluses) == 1
+
+
+def _graph(store: SQLiteStore) -> EpisodeGraph:
+    return build_graph(store, _ts(-10), _ts(100000))
+
+
+# ── episode-to-episode chains ─────────────────────────────────────────────────
+
+
+def test_low_then_carbs_then_high_is_a_rebound_chain() -> None:
+    # hypo ends at min 10; 15 g rescue carbs at 20 (in the gap); hyper starts at 40
+    meals = [MealEvent(ts=_ts(20), carbs_g=15.0, note="rescue")]
+    store = _store(
+        [(0, 60), (5, 55), (10, 65), (40, 200), (45, 220), (50, 120)], meals=meals
+    )
+    graph = _graph(store)
+    edges = [e for e in graph.edges]
+    assert len(edges) == 1
+    edge = edges[0]
+    assert edge.relation == "rebound_after_low"
+    assert edge.src_id.startswith("hypo:") and edge.dst_id.startswith("hyper:")
+    assert edge.gap_min == 30.0
+    assert edge.bridge is not None
+    assert edge.bridge.kind == "meal" and edge.bridge.detail["carbs_g"] == 15.0
+    assert edge.bridge.offset_min == 10.0  # from the low's END
+
+
+def test_high_then_insulin_then_low_is_low_after_high() -> None:
+    insulin = [InsulinEvent(ts=_ts(25), kind=InsulinKind.BOLUS, units=2.0)]
+    store = _store(
+        [(0, 200), (5, 220), (10, 210), (30, 120), (60, 60), (65, 55), (70, 120)],
+        insulin=insulin,
+    )
+    graph = _graph(store)
+    assert len(graph.edges) == 1
+    edge = graph.edges[0]
+    assert edge.relation == "low_after_high"
+    assert edge.bridge is not None and edge.bridge.kind == "bolus"
+
+
+def test_no_bridge_is_a_weak_follows() -> None:
+    store = _store([(0, 60), (5, 55), (15, 120), (40, 200), (45, 220), (50, 120)])
+    graph = _graph(store)
+    assert len(graph.edges) == 1
+    assert graph.edges[0].relation == "follows"
+    assert graph.edges[0].bridge is None
+
+
+def test_chain_across_a_sensor_gap_is_only_a_weak_follows() -> None:
+    # low ends at 10, sensor dark until 60, a rescue carb logged at 30 in the
+    # unseen gap, high starts at 60. The trajectory through the hole is
+    # unobserved, so the edge stays "follows" and never rebound_after_low.
+    meals = [MealEvent(ts=_ts(30), carbs_g=15.0, note="rescue")]
+    store = _store(
+        [(0, 60), (5, 55), (10, 65), (60, 200), (65, 220), (70, 120)], meals=meals
+    )
+    graph = _graph(store)
+    assert len(graph.edges) == 1
+    assert graph.edges[0].relation == "follows"
+    assert graph.edges[0].bridge is None
+
+
+def test_far_apart_episodes_do_not_chain() -> None:
+    store = _store(
+        [(0, 200), (5, 210), (10, 120)]
+        + [(10 + 30 * i, 120) for i in range(1, 8)]
+        + [(250, 60), (255, 55), (260, 120)]
+    )
+    graph = _graph(store)
+    assert graph.edges == ()
+
+
+def test_largest_carb_event_in_gap_is_the_bridge() -> None:
+    meals = [
+        MealEvent(ts=_ts(15), carbs_g=8.0),
+        MealEvent(ts=_ts(22), carbs_g=20.0),
+    ]
+    store = _store(
+        [(0, 60), (5, 55), (10, 65), (40, 200), (45, 220), (50, 120)], meals=meals
+    )
+    edge = _graph(store).edges[0]
+    assert edge.relation == "rebound_after_low"
+    assert edge.bridge is not None and edge.bridge.detail["carbs_g"] == 20.0
+
+
+def test_edges_for_walks_both_directions() -> None:
+    meals = [MealEvent(ts=_ts(20), carbs_g=15.0)]
+    store = _store(
+        [(0, 60), (5, 55), (10, 65), (40, 200), (45, 220), (50, 120)], meals=meals
+    )
+    graph = _graph(store)
+    low = next(e for e in graph.episodes if e.kind == "hypo")
+    high = next(e for e in graph.episodes if e.kind == "hyper")
+    assert [e.dst_id for e in graph.edges_for(low.id)["out"]] == [high.id]
+    assert [e.src_id for e in graph.edges_for(high.id)["in"]] == [low.id]
+    assert graph.to_dict()["edges"][0]["relation"] == "rebound_after_low"
+
+
+def test_two_clean_pairs_both_pair() -> None:
+    meals = [
+        MealEvent(ts=_ts(0), carbs_g=40.0),
+        MealEvent(ts=_ts(240), carbs_g=60.0),
+    ]
+    insulin = [
+        InsulinEvent(ts=_ts(2), kind=InsulinKind.BOLUS, units=4.0),
+        InsulinEvent(ts=_ts(243), kind=InsulinKind.BOLUS, units=6.5),
+    ]
+    pairs, rest_meals, rest_boluses = pair_treatments(meals, insulin)
+    assert len(pairs) == 2
+    assert rest_meals == [] and rest_boluses == []
+    assert pairs[0][0].carbs_g == 40.0 and pairs[0][1].units == 4.0
+    assert pairs[1][0].carbs_g == 60.0 and pairs[1][1].units == 6.5
 
 
 # ── rollup, determinism, serialization ────────────────────────────────────────
@@ -287,6 +479,54 @@ def test_explain_episode_traverses_to_context() -> None:
     assert numbers["meal_carbs_g"] == 45.0
 
 
+def test_explain_episode_summary_is_first_and_model_facing() -> None:
+    meals = [MealEvent(ts=_ts(-20), carbs_g=45.0, note="breakfast")]
+    store = _store([(0, 200), (5, 220), (10, 120)], meals=meals)
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    node_id = specs["episodes"].fn({})[0]["episodes"][0]["id"]
+    result, _ = specs["explain_episode"].fn({"episode_id": node_id})
+    # summary is the first key, so it survives context-budget reduction.
+    assert next(iter(result)) == "summary"
+    summary = result["summary"]
+    assert "high episode" in summary
+    assert "220 mg/dL peak" in summary  # the same number the structured field carries
+    assert "1 event(s)" in summary and "meal" in summary
+
+
+def test_explain_episode_summary_narrates_the_chain() -> None:
+    # low -> rescue carbs -> rebound high: the summary must name the relation and
+    # the bridge event, so the model reasons over the causal chain in prose.
+    meals = [MealEvent(ts=_ts(20), carbs_g=15.0, note="rescue")]
+    store = _store(
+        [(0, 60), (5, 55), (10, 65), (40, 200), (45, 220), (50, 120)], meals=meals
+    )
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    high_id = next(
+        n["id"] for n in specs["episodes"].fn({})[0]["episodes"] if n["kind"] == "hyper"
+    )
+    result, _ = specs["explain_episode"].fn({"episode_id": high_id})
+    summary = result["summary"]
+    assert "followed a low episode" in summary
+    assert "rebound after low" in summary
+    assert "bridged by 15 g carbs (rescue)" in summary
+    assert "30 min gap" in summary  # low ends at 00:10, high starts at 00:40
+    # the chain is still present as structured data alongside the prose.
+    assert result["chain"]["in"][0]["relation"] == "rebound_after_low"
+
+
+def test_explain_episode_summary_without_chain() -> None:
+    store = _store([(0, 200), (5, 220), (10, 120)])
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    node_id = specs["episodes"].fn({})[0]["episodes"][0]["id"]
+    result, _ = specs["explain_episode"].fn({"episode_id": node_id})
+    summary = result["summary"]
+    assert summary.startswith("A high episode")
+    assert "followed" not in summary  # no chain, no chain clause
+
+
 def test_explain_episode_by_timestamp() -> None:
     store = _store([(0, 200), (5, 220), (10, 120)])
     ctx, tk = _ctx_toolkit(store)
@@ -308,3 +548,16 @@ def test_episode_tools_registered_on_belt() -> None:
     ctx, tk = _ctx_toolkit(store)
     names = {s.name for s in build_belt(ctx, tk)}
     assert {"episodes", "explain_episode"} <= names
+
+
+def test_find_lows_count_agrees_with_episodes_tool_across_a_gap() -> None:
+    # A low, sensor dark 50 min, low again. find_lows and the episodes tool must
+    # report the same count, because both segment via the shared engine and
+    # neither lets a run silently span the gap.
+    store = _store([(0, 60), (5, 55), (10, 65), (60, 60), (65, 55), (70, 68)])
+    ctx, tk = _ctx_toolkit(store)
+    lows = tk.find_lows()
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    result, _ = specs["episodes"].fn({"kind": "hypo"})
+    assert lows["n_lows"] == 2
+    assert result["summary"]["num_hypo"] == lows["n_lows"]

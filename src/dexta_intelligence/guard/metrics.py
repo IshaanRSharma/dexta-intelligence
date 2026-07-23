@@ -22,19 +22,40 @@ value stored as a fraction (0.287) and cited as a percent (28.7%) still matches.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-__all__ = ["METRICS", "Metric", "is_percent", "metric_for_key", "metrics_in_context"]
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+__all__ = [
+    "METRICS",
+    "Metric",
+    "compute_metric",
+    "derived_values",
+    "inputs_of",
+    "is_percent",
+    "metric_for_key",
+    "metrics_in_context",
+]
 
 
 @dataclass(frozen=True, slots=True)
 class Metric:
-    """One CGM statistic and the tokens that denote it in data and in prose."""
+    """One CGM statistic and the tokens that denote it in data and in prose.
+
+    ``derives_from`` names the metrics this one is computed from and ``formula``
+    computes it from their values. Together they let the guard check a claim
+    against the metric's *recomputed* value, not just a stored one, and identify a
+    number that is actually one of the metric's inputs (SD reported as CV).
+    """
 
     canonical: str
     key_aliases: frozenset[str]
     prose_aliases: tuple[str, ...]
     is_percent: bool = False
+    derives_from: tuple[str, ...] = ()
+    formula: Callable[[dict[str, float]], float] | None = field(default=None, compare=False)
 
 
 #: The ontology. Order matters only for deterministic iteration; resolution is by
@@ -45,8 +66,13 @@ METRICS: tuple[Metric, ...] = (
            ("mean glucose", "average glucose", "mean", "average")),
     Metric("sd", frozenset({"sd", "std", "stdev", "standard_deviation"}),
            ("standard deviation", "std dev", "sd")),
+    # CV is a coefficient: SD normalized by the mean, as a percent. The formula
+    # lets the guard recompute the true CV from sd + mean, so an SD reported as a
+    # CV is caught even when no CV value was computed to compare against.
     Metric("cv", frozenset({"cv", "cv_pct", "coefficient_of_variation"}),
-           ("coefficient of variation", "glycemic variability", "cv"), is_percent=True),
+           ("coefficient of variation", "glycemic variability", "cv"), is_percent=True,
+           derives_from=("sd", "mean"),
+           formula=lambda v: 100.0 * v["sd"] / v["mean"]),
     Metric("gmi", frozenset({"gmi", "gmi_pct", "a1c", "ea1c", "estimated_a1c", "eag"}),
            ("glucose management indicator", "estimated a1c", "gmi", "hba1c", "a1c"),
            is_percent=True),
@@ -79,8 +105,15 @@ METRICS: tuple[Metric, ...] = (
     # ratios (never cited as fractions). Banded gri_low/gri_high are percent-of-time
     # but exclude the severe bands, so they stay distinct from cumulative tbr/tar;
     # very-low/very-high map onto tbr54/tar250 above.
+    # GRI = min(100, 3.0*hypo_component + 1.6*hyper_component), the weighting in
+    # toolkit.glycemia_risk_index (Klonoff). Deriving it catches a single
+    # component reported as the whole index.
     Metric("gri", frozenset({"gri", "gri_score", "glycemia_risk_index", "glycemic_risk_index"}),
-           ("glycemia risk index", "glycemic risk index", "gri")),
+           ("glycemia risk index", "glycemic risk index", "gri"),
+           derives_from=("gri_hypo_component", "gri_hyper_component"),
+           formula=lambda v: min(
+               100.0, 3.0 * v["gri_hypo_component"] + 1.6 * v["gri_hyper_component"]
+           )),
     Metric("gri_hypo_component", frozenset({"gri_hypo_component", "hypo_component"}),
            ("hypoglycemia component", "hypo component")),
     Metric("gri_hyper_component", frozenset({"gri_hyper_component", "hyper_component"}),
@@ -92,6 +125,7 @@ METRICS: tuple[Metric, ...] = (
 )
 
 _KEY_TO_METRIC: dict[str, str] = {k: m.canonical for m in METRICS for k in m.key_aliases}
+_BY_CANONICAL: dict[str, Metric] = {m.canonical: m for m in METRICS}
 
 # (alias, canonical, needs_word_boundary) sorted longest-first so a specific
 # multi-word phrase wins over a short abbreviation sharing a substring.
@@ -119,6 +153,50 @@ def metric_for_key(key: str) -> str | None:
         return _KEY_TO_METRIC[norm]
     tail = norm.rsplit(".", 1)[-1]
     return _KEY_TO_METRIC.get(tail)
+
+
+def inputs_of(canonical: str) -> tuple[str, ...]:
+    """The metrics ``canonical`` is derived from, empty when it has no formula."""
+    metric = _BY_CANONICAL.get(canonical)
+    return metric.derives_from if metric else ()
+
+
+def compute_metric(canonical: str, values_by_metric: dict[str, list[float]]) -> float | None:
+    """Recompute a metric from its inputs, or ``None`` when it has no formula or an
+    input is missing.
+
+    Takes one representative value per input (the first recorded). A division by
+    zero or malformed input yields ``None`` rather than raising, so the guard
+    degrades to its stored-value check instead of failing.
+    """
+    metric = _BY_CANONICAL.get(canonical)
+    if metric is None or metric.formula is None:
+        return None
+    inputs: dict[str, float] = {}
+    for name in metric.derives_from:
+        values = values_by_metric.get(name)
+        if not values:
+            return None
+        inputs[name] = values[0]
+    try:
+        return float(metric.formula(inputs))
+    except (ArithmeticError, KeyError, ValueError, TypeError):
+        return None
+
+
+_DERIVABLE: tuple[str, ...] = tuple(m.canonical for m in METRICS if m.formula is not None)
+
+
+def derived_values(values_by_metric: dict[str, list[float]]) -> list[float]:
+    """Every metric value derivable from the evidence (CV from sd+mean, GRI from
+    its components). A faithful answer may legitimately cite these even when no
+    tool emitted them, so they belong in the traceability pool."""
+    out: list[float] = []
+    for canonical in _DERIVABLE:
+        value = compute_metric(canonical, values_by_metric)
+        if value is not None:
+            out.append(value)
+    return out
 
 
 def metrics_in_context(window: str) -> set[str]:

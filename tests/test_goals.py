@@ -189,6 +189,21 @@ def test_measure_nocturnal_tbr_detects_planted_lows() -> None:
     assert value is not None and value > 80  # nights are deep in range-below
 
 
+def test_measure_num_hypo_counts_episodes_from_the_graph() -> None:
+    # one contiguous overnight low per day for 30 days -> 30 hypo episodes, read
+    # from the same episode graph the rest of the system uses.
+    store = _store_with_nocturnal_lows()
+    value = measure_metric(GoalMetric.NUM_HYPO, _ctx(store))
+    assert value == 30.0
+
+
+def test_keyword_compose_maps_episodes_to_num_hypo() -> None:
+    goal = compose_goal("cut down on my hypo episodes", now=_NOW)
+    assert goal.metric is GoalMetric.NUM_HYPO
+    assert goal.direction == "decrease"
+    assert goal.tools  # a default plan was attached
+
+
 def test_tick_records_checkpoint_and_arc() -> None:
     store = _store_with_nocturnal_lows()
     goal = compose_goal("reduce my overnight lows", now=_NOW)

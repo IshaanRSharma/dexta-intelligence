@@ -13,7 +13,7 @@ from datetime import UTC, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
-from dexta_intelligence.analytics.episodes import build_graph
+from dexta_intelligence.analytics.episodes import EpisodeEdge, build_graph
 from dexta_intelligence.server.views_episode import episode_card_view
 
 if TYPE_CHECKING:
@@ -102,8 +102,20 @@ def episode_detail_payload(
     hi = episode.end + pad
     readings = sorted(store.get_glucose(lo, hi), key=lambda g: g.ts)
     series = [{"t": g.ts.isoformat(), "v": g.mg_dl} for g in readings]
+
+    def _edge_with_neighbour(edge: EpisodeEdge, other_id: str) -> dict[str, Any]:
+        row = edge.to_dict()
+        other = graph.node(other_id)
+        row["other"] = _node_row(other.to_dict()) if other is not None else None
+        return row
+
+    chain = graph.edges_for(episode_id)
     return {
         "episode": episode.to_dict(),
+        "chain": {
+            "in": [_edge_with_neighbour(e, e.src_id) for e in chain["in"]],
+            "out": [_edge_with_neighbour(e, e.dst_id) for e in chain["out"]],
+        },
         "series": series,
         "window": {"start": lo.isoformat(), "end": hi.isoformat()},
         "target": {
@@ -112,6 +124,12 @@ def episode_detail_payload(
         },
         "timezone": config.analysis.timezone,
     }
+
+
+def _node_row(node: dict[str, Any]) -> dict[str, Any]:
+    keys = ("id", "kind", "start", "end", "duration_min", "extreme_mg_dl",
+            "severe", "clinically_significant")
+    return {k: node.get(k) for k in keys}
 
 
 def _salient_episode_id(nodes: list[dict[str, Any]]) -> str | None:

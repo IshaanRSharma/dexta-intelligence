@@ -367,13 +367,42 @@ def _coverage_summary(ctx: AgentContext) -> dict[str, Any]:
     except Exception:
         return {"limited": True, "note": "coverage unavailable"}
     pct = float(cov.glucose_coverage_pct)
-    return {
+    summary: dict[str, Any] = {
         "glucose_coverage_pct": round(pct, 1),
         "span_days": round(float(cov.span_days), 1),
         "n_insulin": cov.n_insulin,
         "n_meals": cov.n_meals,
         "has_treatment": cov.n_insulin > 0 or cov.n_meals > 0,
         "limited": pct < _LIMITED_COVERAGE_PCT,
+    }
+    episodes = _episode_rollup(ctx)
+    if episodes is not None:
+        summary["episodes"] = episodes
+    return summary
+
+
+def _episode_rollup(ctx: AgentContext) -> dict[str, Any] | None:
+    """Deterministic episode-graph rollup for the investigation record: the same
+    segmentation the producers and the ``episodes`` tool use, so every run records
+    how many hypo/hyper episodes, severe episodes, and typed chains the window holds.
+    Read-only and isolated; a failure just omits the block."""
+    from datetime import time as _time  # noqa: PLC0415
+
+    from dexta_intelligence.analytics.episodes import build_graph  # noqa: PLC0415
+
+    try:
+        start = datetime.combine(ctx.window[0], _time.min, tzinfo=UTC)
+        end = datetime.combine(ctx.window[1], _time.max, tzinfo=UTC)
+        graph = build_graph(ctx.store, start, end)
+    except Exception:
+        return None
+    s = graph.summary()
+    return {
+        "num_hypo": s["num_hypo"],
+        "num_hyper": s["num_hyper"],
+        "n_severe_hypo": s["n_severe_hypo"],
+        "n_severe_hyper": s["n_severe_hyper"],
+        "n_chains": sum(1 for e in graph.edges if e.relation != "follows"),
     }
 
 

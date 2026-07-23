@@ -55,6 +55,35 @@
 </article>
 
 <article class="card">
+  <h2>+ Log a treatment</h2>
+  <p class="page-sub">Record carbs and the insulin you took for them as one action. Both land at the same time, so the timeline shows a single treatment node. This records what you already did; dexta never suggests a dose.</p>
+  <form method="post" action="/actions/log-treatment" class="settings-form">
+    <div class="fields">
+      <div class="field">
+        <label class="field-label" for="treat-carbs">Carbs (g) <span class="field-opt">optional</span></label>
+        <input id="treat-carbs" name="carbs_g" type="number" min="1" max="400" step="any" placeholder="e.g. 58" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label class="field-label" for="treat-units">Insulin (U) <span class="field-opt">optional</span></label>
+        <input id="treat-units" name="units" type="number" min="0.05" max="60" step="any" placeholder="e.g. 5.2" autocomplete="off" />
+        <p class="field-hint">Enter carbs, units, or both.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="treat-ts">When?</label>
+        <input id="treat-ts" name="treatment_ts" type="datetime-local" value="{{ default_ts }}" required />
+      </div>
+      <div class="field">
+        <label class="field-label" for="treat-note">Note <span class="field-opt">optional</span></label>
+        <input id="treat-note" name="note" type="text" placeholder="e.g. dinner, pizza" autocomplete="off" />
+      </div>
+    </div>
+    <div class="card-actions">
+      <button type="submit" id="treat-submit">Log treatment</button>
+    </div>
+  </form>
+</article>
+
+<article class="card">
   <h2>Or describe it in your own words</h2>
   <p class="page-sub">dexta proposes structured events from your text. A deterministic validator checks each one, and nothing is stored until you confirm it below.</p>
   <form method="post" action="/actions/capture/propose">

@@ -27,6 +27,8 @@ from dexta_intelligence.models import (
     Goal,
     GoalCheckpoint,
     GoalMetric,
+    InsulinEvent,
+    InsulinKind,
     InvestigationRun,
     MealEvent,
     OpenInvestigation,
@@ -570,6 +572,103 @@ def test_serve_no_warning_on_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "WARNING" not in out.getvalue()
 
 
+# ── treatment logger ──────────────────────────────────────────────────────────
+
+
+def _logged_treatments(store: SQLiteStore) -> tuple[list[Any], list[Any]]:
+    lo = FIXED_NOW - timedelta(days=2)
+    hi = FIXED_NOW + timedelta(days=2)
+    return store.get_meals(lo, hi), store.get_insulin(lo, hi)
+
+
+def test_log_treatment_writes_paired_meal_and_bolus(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    resp = client.post(
+        "/actions/log-treatment",
+        data={
+            "treatment_ts": "2025-06-10T12:00",
+            "carbs_g": "58",
+            "units": "5.2",
+            "note": "dinner",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/log?flash=treatment_ok"
+    meals, insulin = _logged_treatments(store)
+    assert len(meals) == 1 and meals[0].carbs_g == 58.0 and meals[0].note == "dinner"
+    assert len(insulin) == 1 and insulin[0].units == 5.2
+    assert insulin[0].automatic is False
+    assert meals[0].ts == insulin[0].ts  # dt = 0, so the episode graph pairs them
+    store.close()
+
+
+def test_log_treatment_carbs_only_writes_meal_only(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    client.post(
+        "/actions/log-treatment",
+        data={"treatment_ts": "2025-06-10T12:00", "carbs_g": "15", "units": ""},
+        follow_redirects=False,
+    )
+    meals, insulin = _logged_treatments(store)
+    assert len(meals) == 1 and insulin == []
+    store.close()
+
+
+def test_log_treatment_rejects_empty_and_bad_numbers(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    client = _client(store)
+    empty = client.post(
+        "/actions/log-treatment",
+        data={"treatment_ts": "2025-06-10T12:00", "carbs_g": "", "units": ""},
+        follow_redirects=False,
+    )
+    assert empty.headers["location"] == "/log?flash=treatment_empty"
+    for carbs, units in (("abc", ""), ("-5", ""), ("", "900"), ("", "0")):
+        bad = client.post(
+            "/actions/log-treatment",
+            data={"treatment_ts": "2025-06-10T12:00", "carbs_g": carbs, "units": units},
+            follow_redirects=False,
+        )
+        assert bad.headers["location"] == "/log?flash=treatment_badnum", (carbs, units)
+    meals, insulin = _logged_treatments(store)
+    assert meals == [] and insulin == []
+    store.close()
+
+
+def test_log_page_shows_treatment_form(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    body = _client(store).get("/log").text
+    assert "Log a treatment" in body
+    assert 'action="/actions/log-treatment"' in body
+    assert "never suggests a dose" in body
+    store.close()
+
+
+# ── sync targets the served store ─────────────────────────────────────────────
+
+
+def test_action_sync_uses_served_store_opener(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    store = _store(tmp_path)
+    opener = _opener(_db_path(tmp_path))
+    app = create_app(Config(), store_opener=opener)
+    captured: dict[str, Any] = {}
+
+    def fake_cmd_sync(**kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr("dexta_intelligence.cli.data.cmd_sync", fake_cmd_sync)
+    resp = TestClient(app).post("/actions/sync", follow_redirects=False)
+    assert resp.status_code == 303
+    assert captured["opener"] is opener
+    store.close()
+
+
 # ── demo isolation: throwaway db, no real-data ingress ────────────────────────
 
 
@@ -1096,6 +1195,122 @@ def test_episode_json_carries_labelled_edges(tmp_path: Path) -> None:
     assert meals, "expected a meal edge on the episode"
     assert meals[0]["detail"]["carbs_g"] == 45
     assert meals[0]["offset_min"] < 0
+    store.close()
+
+
+def _chained_episode_dict() -> dict[str, Any]:
+    """An explain_episode-shaped dict: a rebound high with an incoming chain from
+    a low, bridged by rescue carbs."""
+    return {
+        "id": "hyper:2026-03-08T17:10:00+00:00",
+        "kind": "hyper",
+        "start": "2026-03-08T17:10:00+00:00",
+        "end": "2026-03-08T17:50:00+00:00",
+        "duration_min": 40.0,
+        "extreme_mg_dl": 206.0,
+        "links": [],
+        "chain": {
+            "in": [
+                {
+                    "src_id": "hypo:2026-03-08T15:50:00+00:00",
+                    "dst_id": "hyper:2026-03-08T17:10:00+00:00",
+                    "relation": "rebound_after_low",
+                    "gap_min": 55.0,
+                    "bridge": {
+                        "kind": "meal",
+                        "ts": "2026-03-08T16:15:00+00:00",
+                        "offset_min": 25.0,
+                        "detail": {"carbs_g": 16.0, "note": "rescue carbs"},
+                    },
+                }
+            ],
+            "out": [],
+        },
+    }
+
+
+def test_episode_chain_view_builds_the_sequence() -> None:
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    from dexta_intelligence.server.views_episode import episode_chain_view  # noqa: PLC0415
+
+    view = episode_chain_view(_chained_episode_dict(), ZoneInfo("UTC"))
+    assert view is not None
+    assert view["this"]["short"] == "High"
+    assert len(view["incoming"]) == 1 and view["outgoing"] == []
+    step = view["incoming"][0]
+    assert step["relation"] == "rebound after low"
+    assert step["relation_key"] == "rebound_after_low"
+    assert step["bridge"] == "16 g carbs, rescue carbs"
+    assert step["gap"] == "55 min"
+    assert step["node"]["short"] == "Low"
+
+
+def test_episode_chain_view_none_without_chain() -> None:
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    from dexta_intelligence.server.views_episode import episode_chain_view  # noqa: PLC0415
+
+    assert episode_chain_view({"id": "hyper:x", "kind": "hyper"}, ZoneInfo("UTC")) is None
+    assert episode_chain_view(
+        {"id": "hyper:x", "kind": "hyper", "chain": {"in": [], "out": []}}, ZoneInfo("UTC")
+    ) is None
+
+
+def test_chain_partial_renders_chain_strip() -> None:
+    from importlib import resources  # noqa: PLC0415
+    from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+    from jinja2 import Environment, FileSystemLoader, select_autoescape  # noqa: PLC0415
+
+    from dexta_intelligence.server.views_episode import episode_chain_view  # noqa: PLC0415
+
+    templates_dir = str(resources.files("dexta_intelligence.server") / "templates")
+    env = Environment(
+        loader=FileSystemLoader(templates_dir), autoescape=select_autoescape()
+    )
+    chain = episode_chain_view(_chained_episode_dict(), ZoneInfo("UTC"))
+    html = env.get_template("_episode_chain.html").render(chain=chain)
+    assert "chain-strip" in html
+    assert "rebound after low" in html
+    assert "via 16 g carbs, rescue carbs" in html
+    assert "this episode" in html
+
+
+def test_episodes_json_includes_chain_edges(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    data = _client(store).get("/episodes.json").json()
+    assert "edges" in data
+    # The seeded high and low sit ~85 min apart with nothing in the gap: a
+    # weak "follows", never a confident causal name.
+    assert any(e["relation"] == "follows" for e in data["edges"])
+    store.close()
+
+
+def test_episode_json_chain_names_bridge_and_neighbour(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _seed_excursions(store)
+    high_start = FIXED_NOW - timedelta(days=1)
+    # A correction bolus in the gap between the seeded high and low makes the
+    # chain a confident low_after_high with the bolus as its bridge.
+    store.insert_insulin([
+        InsulinEvent(
+            ts=high_start + timedelta(minutes=70), kind=InsulinKind.BOLUS, units=2.0
+        )
+    ])
+    client = _client(store)
+    nodes = client.get("/episodes.json").json()["nodes"]
+    hypo = next(n for n in nodes if n["kind"] == "hypo")
+    data = client.get("/episode.json", params={"id": hypo["id"]}).json()
+    incoming = data["chain"]["in"]
+    assert len(incoming) == 1
+    edge = incoming[0]
+    assert edge["relation"] == "low_after_high"
+    assert edge["bridge"]["kind"] == "bolus"
+    assert edge["bridge"]["detail"]["units"] == 2.0
+    assert edge["other"]["kind"] == "hyper"
+    assert edge["other"]["id"] == edge["src_id"]
     store.close()
 
 
