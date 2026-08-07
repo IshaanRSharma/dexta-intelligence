@@ -57,9 +57,9 @@ services:
   # No Postgres, no real data, no API key. The `demo` profile keeps it out of the
   # default `up`.
   demo:
-    # Uses the published image if present locally (docker compose pull demo),
-    # otherwise builds from source.
-    image: ghcr.io/ishaanrsharma/dexta-intelligence:latest
+    # Built from source, not pulled: there is no published image yet. The tag is
+    # just a local name so rebuilds replace it instead of piling up untagged layers.
+    image: dexta-intelligence:demo
     build: .
     profiles: ["demo"]
     ports:

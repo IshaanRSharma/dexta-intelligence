@@ -25,6 +25,7 @@ from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
+from dexta_intelligence.analytics.rollups import daily_rollup
 from dexta_intelligence.models import (
     ActivityEvent,
     GlucoseEvent,
@@ -33,6 +34,7 @@ from dexta_intelligence.models import (
     ManualEvent,
     MealEvent,
     PredictionEvent,
+    RollupPeriod,
     SleepEvent,
     TherapyProfile,
 )
@@ -647,14 +649,62 @@ def seed_demo(store: StoragePort) -> None:
         store.add_profile_version(profile)
     for event in _demo_manual():
         store.add_manual_event(event)
+    _seed_rollups(store, glucose)
+
+
+def _seed_rollups(store: StoragePort, glucose: list[GlucoseEvent]) -> None:
+    """Compute the daily rollups the demo would otherwise never get.
+
+    Rollups are normally a side effect of connector sync, which demo mode
+    disables. Without them every rollup-backed surface (dashboard time in
+    range, goals, trends) reads empty on a fully seeded database.
+    """
+    days = sorted({g.ts.date() for g in glucose})
+    if not days:
+        return
+    start = datetime.combine(days[0], datetime.min.time(), tzinfo=UTC)
+    end = datetime.combine(days[-1], datetime.max.time(), tzinfo=UTC)
+
+    glucose_by_day: dict[date, list[GlucoseEvent]] = {}
+    for reading in store.get_glucose(start, end):
+        glucose_by_day.setdefault(reading.ts.date(), []).append(reading)
+    insulin_by_day: dict[date, list[InsulinEvent]] = {}
+    for dose in store.get_insulin(start, end):
+        insulin_by_day.setdefault(dose.ts.date(), []).append(dose)
+    meals_by_day: dict[date, list[MealEvent]] = {}
+    for meal in store.get_meals(start, end):
+        meals_by_day.setdefault(meal.ts.date(), []).append(meal)
+
+    rollups = [
+        rollup
+        for day in days
+        if (
+            rollup := daily_rollup(
+                day,
+                glucose_by_day.get(day, []),
+                insulin=insulin_by_day.get(day, []),
+                meals=meals_by_day.get(day, []),
+            )
+        )
+        is not None
+    ]
+    if rollups:
+        store.upsert_rollups(rollups)
 
 
 def seed_demo_if_empty(store: StoragePort) -> bool:
     """Seed the synthetic patient only when ``store`` has no glucose yet.
 
     Returns whether it seeded, so a one-command demo is idempotent: the first
-    `serve --demo` populates the database, restarts reuse it untouched."""
-    if store.coverage().first_ts is not None:
+    `serve --demo` populates the database, restarts reuse it untouched. A
+    database seeded before rollups were part of the seed is repaired in place
+    rather than left with every rollup-backed surface reading empty."""
+    coverage = store.coverage()
+    if coverage.first_ts is not None:
+        if coverage.last_ts is not None and not store.get_rollups(
+            RollupPeriod.DAILY, coverage.first_ts, coverage.last_ts
+        ):
+            _seed_rollups(store, store.get_glucose(coverage.first_ts, coverage.last_ts))
         return False
     seed_demo(store)
     return True
