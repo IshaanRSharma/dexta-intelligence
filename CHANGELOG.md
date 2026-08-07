@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0]
+
 ### Added
 - The graph, surfaced as product: a why-chain episode card on chat answers
   (span, duration, extreme, severity, typed context edges with signed
@@ -146,6 +148,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The one-command Docker demo served a fully seeded database that rendered
+  empty. Daily rollups are computed as a side effect of connector sync, which
+  demo mode disables, so the demo store never had them and every rollup-backed
+  surface (dashboard time in range, goals, trends) read blank on 185 days of
+  data. Rollups are now part of the seed, and a store seeded before this change
+  is backfilled rather than left permanently blank.
 - Dosing gate hardened after an adversarial red-team pass: the shared
   `_ADVICE_RE` backstop only matched four verbs, so "raise your basal",
   "give 2 units", "2 more units", "up your basal" and similar phrasings
