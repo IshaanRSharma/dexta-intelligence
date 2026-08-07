@@ -51,14 +51,24 @@ are all in [bench/](bench/README.md).
 
 ## Quickstart
 
-One command from a clone, just Docker, no data or API key:
+One command, no clone, just Docker, no data or API key:
+
+```bash
+docker run --rm -p 8787:8787 ghcr.io/ishaanrsharma/dexta-intelligence \
+  dexta --db /tmp/demo.db serve --demo --host 0.0.0.0 --port 8787
+```
+
+That seeds a synthetic patient and serves http://localhost:8787. The image is multi-arch
+(amd64 and arm64); `--rm` throws the demo database away when you stop it with Ctrl-C.
+
+Or from a clone, building your working tree instead of the published image:
 
 ```bash
 docker compose up demo      # builds, seeds a synthetic patient, serves http://localhost:8787
 ```
 
-The first run builds the image, so it takes a few minutes; later runs start in seconds and reuse
-the database seeded the first time. Stop it with Ctrl-C. To start over from an empty database:
+The first compose run builds the image, so it takes a few minutes; later runs start in seconds and
+reuse the database seeded the first time. To start over from an empty database:
 
 ```bash
 docker compose rm -sf demo && docker volume rm dexta-intelligence_dexta_demo
