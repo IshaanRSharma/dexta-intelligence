@@ -6,6 +6,44 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- The episode graph refuses to let a window artefact read as a fact. An
+  excursion clipped by a window edge, the end of the record, or a sensor gap is
+  flagged truncated and its duration reported as a lower bound, instead of the
+  same 175-minute high silently becoming "85 min" under a window that started
+  halfway through it. Every summary now carries observation coverage, so an
+  episode count cannot read the same whether the sensor ran for thirty days or
+  three. Locating an episode by timestamp returns a miss when nothing was
+  happening then, naming the nearest as a separate fact, rather than handing
+  back an excursion hours away for the model to explain as the answer. The
+  `episodes` tool reports how many episodes matched alongside how many rows it
+  returned, and an episode with no context says so in prose instead of
+  returning an empty list for the model to fill in.
+- Episode detection implements the whole 2019 consensus event definition. An
+  excursion now ends only after 15 minutes back in range, so an afternoon spent
+  bobbing around 180 is one episode rather than a dozen counts of sensor noise.
+  This diverges deliberately from the LLM-CGM benchmark's count-every-dip
+  convention, which dexta already declines to answer under. Context edges reach
+  back four hours for food and insulin rather than three, matching how long a
+  mixed meal absorbs.
+- The demo patient's CGM is generated from its own treatment record. Carbs push
+  glucose up, damped by how promptly the bolus landed; isolated boluses and
+  workouts pull it down; the baseline between them wanders rather than jittering.
+  Previously the trace was built independently of the record beside it, so six
+  months of meals and boluses moved nothing, every meal-versus-glucose test was
+  null by construction, and the patient sat at 98.9% time in range with a CV of
+  11. It now sits at 76% in range, CV 32, GMI 6.9, meeting each consensus target
+  without meeting it trivially, with bounds asserted in tests. Dinner exists on
+  every day rather than one in six, bolus timing varies so late insulin is
+  discoverable rather than asserted, and the Mar-Jun excursions carry the events
+  that explain them instead of appearing from nowhere.
+- `explain_spike` reports moderate confidence on the demo's hero spike rather
+  than high. That is the computed reading on a record where ordinary meals also
+  run high, which narrows the bolus-delay separation the score depends on.
+- README: the demo setup is now a self-contained section covering what gets
+  seeded, the record's actual shape and metrics, a guided tour, resetting, and
+  moving to your own data.
+
 ## [0.2.0]
 
 ### Added

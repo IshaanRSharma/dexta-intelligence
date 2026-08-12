@@ -49,45 +49,85 @@ Scope, stated plainly: synthetic data, one patient, single pass, 14 of 30 tasks.
 probe, not a clinical claim. Scripts, raw dumps, hand-verified tables, and the honest negatives
 are all in [bench/](bench/README.md).
 
-## Quickstart
+## Quickstart: run the demo
 
-One command, no clone, just Docker, no data or API key:
+The demo is the whole product on a synthetic patient. **No data, no API key, no account, no
+clone.** If you have Docker, this is the entire setup:
 
 ```bash
 docker run --rm -p 8787:8787 ghcr.io/ishaanrsharma/dexta-intelligence \
   dexta --db /tmp/demo.db serve --demo --host 0.0.0.0 --port 8787
 ```
 
-That seeds a synthetic patient and serves http://localhost:8787. The image is multi-arch
-(amd64 and arm64); `--rm` throws the demo database away when you stop it with Ctrl-C.
+Open **http://localhost:8787**. The image is multi-arch (amd64/arm64) and `--rm` throws the demo
+database away when you stop it with Ctrl-C.
 
-Or from a clone, building your working tree instead of the published image:
+Prefer no Docker? From a source checkout:
 
 ```bash
-docker compose up demo      # builds, seeds a synthetic patient, serves http://localhost:8787
+pip install -e ".[gui,llm]"
+dexta serve --demo          # seeds the synthetic patient into an empty database, serves the web app
+dexta demo                  # or: one investigation end to end in the terminal, nothing to open
 ```
 
-The first compose run builds the image, so it takes a few minutes; later runs start in seconds and
-reuse the database seeded the first time. To start over from an empty database:
+`dexta demo` prints a complete investigation, plan through trace to finding, in about two seconds.
+It is the fastest way to see what the harness does without leaving the terminal.
+
+### What gets seeded
+
+`--demo` seeds a store *only if it is empty*, so restarting reuses what it already made and never
+touches real data. It is deliberately isolated: throwaway database, connector sync disabled.
+
+The record is one synthetic Tandem t:slim X2 / Control-IQ patient, **2025-12-15 to 2026-06-17**
+(185 days, 53,261 CGM readings at 5-minute spacing):
+
+| Stream | What's there |
+| --- | --- |
+| CGM | 53,261 readings. 76% time in range, 2.6% below, 22% above, CV 32%, GMI 6.9% |
+| Insulin | 1,573 events: meal boluses, Control-IQ temp basals, automatic corrections, low-glucose suspends |
+| Carbs | 569 entries across breakfast, lunch, and dinner |
+| Sleep / activity | 184 scored nights, 94 workouts |
+| Therapy profiles | 2 versions (a winter-to-spring sensitivity change mid-record) |
+| Forecast curves | 12 logged oref COB/UAM curves, so prediction reconciliation has real material |
+| Manual context | 3 user-reported notes (a high-fat dinner, a stressful day, a site change) |
+
+The glucose trace is generated *from* that record rather than beside it: carbs push it up, damped
+by how promptly the bolus landed, and corrections and workouts pull it down. So the causes are
+really there to be found, and the variability is a real patient's, not a flat line with noise on it.
+
+### A five-minute tour
+
+1. **Timeline** shows the temporal episode graph: every high, low, and sensor gap as a node.
+   Click any one to see the meals, boluses, and activity around it with their real offsets.
+2. **Chat**: ask *"why did I spike on March 14?"*. The planted story is a dinner bolused 22 minutes
+   late. Watch the tool trace build the answer.
+3. **Investigations**: run the deep pass. Plan, then trace, then evidence, then the skeptic.
+4. **Findings** and **Reports** hold what survived, with evidence strength and counter-evidence.
+
+Chat and the tool-by-tool drill-down need a model (see [Running](#running)). The Timeline, the
+deterministic deep analysis, and the findings it produces need no key at all.
+
+### Building from a clone instead
+
+```bash
+docker compose up demo      # builds your working tree, seeds, serves http://localhost:8787
+```
+
+The first run builds the image and takes a few minutes; later runs start in seconds and reuse the
+database seeded the first time. To start over from an empty one:
 
 ```bash
 docker compose rm -sf demo && docker volume rm dexta-intelligence_dexta_demo
 ```
 
-Or from a source checkout:
+### Moving on to your own data
+
+Nothing carries over from the demo, by design. Point dexta at a fresh database and connect a
+source in the **Connectors** tab (or `dexta sync`):
 
 ```bash
-pip install -e ".[gui,llm]"
-
-dexta serve --demo          # seed a synthetic patient (if empty) and open the web app
-dexta demo                  # or: run one investigation end to end in the terminal, no key needed
+dexta --db ~/.dexta/dexta.db serve
 ```
-
-`dexta demo` / `--demo` is the fastest way to see it: it loads ~6 months of a realistic Tandem t:slim X2
-patient (CGM, boluses, Control-IQ basals, carb entries, two profile versions, logged forecast
-curves, manual notes) with a planted, explainable dinner-spike, then explains it with a visible
-plan and trace. The demo is fully isolated: it runs on a throwaway database and connector sync is
-disabled, so it never mixes with real data.
 
 ## Architecture
 
@@ -147,8 +187,11 @@ clinician actually talks about:
 
 - **Episode nodes** are each contiguous low (< 70 mg/dL), high (> 180), or sensor gap, with its
   span, nadir or peak, duration, and severity. The cut points are the 2019 international consensus
-  (Battelino et al., Diabetes Care). A run never silently spans a sensor gap, so a reported duration
-  is always time the sensor was actually watching.
+  (Battelino et al., Diabetes Care), including its two-sided event rule: an excursion starts on
+  crossing a threshold and does not end until readings are back in range for 15 minutes. Both
+  halves matter, because without the second a trace bobbing around 180 for an afternoon segments
+  into a dozen "episodes" and every count built on them measures sensor noise. A run never
+  silently spans a sensor gap, so a reported duration is always time the sensor was watching.
 - **Context edges** tie each episode to the meals, boluses, activity, and sleep around it, each with
   a signed offset ("45 g carbs, 20 min before"). A carb entry and the bolus for it fold into one
   "treatment" edge.
@@ -161,6 +204,19 @@ This one segmentation is the single source of truth the whole system reasons ove
 it to answer "why did I go high then", goals track episode counts, the background producers and the
 curiosity daemon surface recurring patterns from it, and the Timeline draws it. Every episode number
 in an answer or on screen comes from this graph, with no model in the counting.
+
+Because the model reads this graph rather than the trace, the graph is what has to refuse to
+mislead it. Three properties do that work:
+
+- **A clipped episode says so.** One that was already underway when the window opened, or still
+  underway when it closed, is flagged, and its duration is reported as a lower bound. The same
+  physiological run would otherwise report a different length under a differently aligned window.
+- **Counts carry their denominator.** Every summary reports how much of the window the sensor was
+  actually watching, so "two lows this month" cannot read the same whether the sensor ran for
+  thirty days or three.
+- **A miss is a miss.** Asking what happened at a moment when nothing was happening returns exactly
+  that, and names the nearest episode as a separate fact, rather than handing back an excursion
+  seven hours away for the model to explain as though it were the answer.
 
 ## Features
 
