@@ -106,9 +106,31 @@ def test_clinically_significant_threshold() -> None:
 
 
 def test_separate_runs_are_separate_episodes() -> None:
-    store = _store([(0, 200), (5, 205), (10, 120), (15, 210), (20, 220), (25, 120)])
+    # 20 min back in range between them clears the consensus end-of-event bar.
+    store = _store([(0, 200), (5, 205), (10, 120), (15, 120), (20, 120), (25, 210), (30, 220)])
     hyper = [e for e in _detect(store) if e.kind == "hyper"]
     assert len(hyper) == 2
+
+
+def test_a_brief_dip_back_in_range_does_not_end_an_episode() -> None:
+    # Battelino 2019 ends an event only after 15 min back in range. Without that
+    # half of the rule a trace bobbing across 180 shatters into a dozen episodes
+    # and every count built on them measures sensor noise instead of glycemia.
+    store = _store([(0, 200), (5, 205), (10, 120), (15, 210), (20, 220), (25, 120)])
+    hyper = [e for e in _detect(store) if e.kind == "hyper"]
+    assert len(hyper) == 1
+    assert hyper[0].start == _ts(0) and hyper[0].end == _ts(20)
+    assert hyper[0].duration_min == 20.0
+    assert hyper[0].n_readings == 4  # the in-range dip is spanned, not counted
+    assert hyper[0].extreme_mg_dl == 220.0
+
+
+def test_a_dip_below_range_still_ends_a_high() -> None:
+    # The merge rule joins same-kind runs only; a high, a low, then a high is
+    # three events however tightly they sit.
+    store = _store([(0, 200), (5, 60), (10, 210), (15, 120)])
+    kinds = [e.kind for e in _detect(store) if e.kind != "sensor_gap"]
+    assert kinds == ["hyper", "hypo", "hyper"]
 
 
 def test_in_range_only_has_no_excursions() -> None:

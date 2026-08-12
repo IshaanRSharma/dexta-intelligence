@@ -20,12 +20,19 @@ nodes so the segmentation is held fixed:
 It is a pure function over the store: no model, no numpy, byte-deterministic given
 the same events. Excursion thresholds are the 2019 international consensus cut
 points (Battelino et al., Diabetes Care 2019: strict ``> 180`` / ``< 70``, severe
-``> 250`` / ``< 54``); the LLM-CGM benchmark adopts the same definitions, so
-episode facts line up with its scored ground truth. Durations are endpoint-elapsed
-(last minus first in-run reading), matching the ``find_lows`` / ``find_spikes``
-tool convention. A run never spans a sensor gap: two excursions either side of a
-dark sensor are separate observed episodes, and a chain across a gap is only the
-weak ``follows`` since the trajectory through the hole is unobserved.
+``> 250`` / ``< 54``), including its two-sided event rule: an excursion starts on
+crossing a threshold and does not end until readings are back in range for
+:data:`EVENT_MERGE_MIN_MINUTES`. Both halves matter. Without the second, a trace
+bobbing around 180 for an afternoon segments into a dozen "episodes", and every
+count built on them measures sensor noise.
+
+That is a deliberate divergence from the LLM-CGM benchmark, which counts each
+5-minute dip separately; dexta declines that question rather than answer it under
+a definition it does not implement. Durations are endpoint-elapsed (last minus
+first in-run reading), matching the ``find_lows`` / ``find_spikes`` tool
+convention. A run never spans a sensor gap: two excursions either side of a dark
+sensor are separate observed episodes, and a chain across a gap is only the weak
+``follows`` since the trajectory through the hole is unobserved.
 
 Two properties exist so a downstream reader (the model above all) cannot mistake
 a window artefact for a fact:
@@ -77,14 +84,22 @@ SEVERE_HIGH = 250
 #: A contiguous excursion of at least this many minutes is a clinically
 #: significant event (the consensus hypo/hyper-event definition).
 CLINICAL_MIN_MINUTES = 15
+#: The other half of that definition: an event ends only once readings are back
+#: within range for this long, so a trace bobbing across a threshold is one event
+#: and not a dozen. Compared endpoint to endpoint, which on 5-minute data merges
+#: through two in-range readings (10 min back in range) and splits on three (15).
+EVENT_MERGE_MIN_MINUTES = 15
 #: A reading gap longer than this is a sensor gap (mirrors workflows.monitor).
 GAP_MIN_MINUTES = 30
 
 #: How far before an episode a context event may sit and still be linked, by kind
-#: (minutes). Activity reaches furthest back: post-exercise insulin sensitization
-#: drives lows hours later. Sleep is linked by interval overlap, not a window.
+#: (minutes). Four hours for food and insulin: a mixed or high-fat meal absorbs
+#: well past the three-hour mark, and a shorter reach leaves late-afternoon highs
+#: with no lunch attached and nothing in the record to explain them. Activity
+#: reaches furthest back, since post-exercise insulin sensitization drives lows
+#: hours later. Sleep is linked by interval overlap, not a window.
 _PRE_MIN: dict[str, float] = {
-    "meal": 180.0, "bolus": 180.0, "treatment": 180.0, "activity": 360.0,
+    "meal": 240.0, "bolus": 240.0, "treatment": 240.0, "activity": 360.0,
 }
 #: How far after an episode's end a context event may sit and still be linked.
 _POST_MIN = 60.0
@@ -245,6 +260,21 @@ def _excursions(
     if run_kind is not None:
         runs.append((start_i, len(readings) - 1, run_kind))
 
+    # One event, not several: a brief dip back inside the range does not end an
+    # excursion. The merge window is far under gap_min, so it can never bridge a
+    # sensor gap and re-introduce an unobserved span.
+    merged: list[tuple[int, int, str]] = []
+    for i0, i1, kind in runs:
+        if merged:
+            p0, p1, p_kind = merged[-1]
+            if kind == p_kind and _minutes(readings[i0][0], readings[p1][0]) <= (
+                EVENT_MERGE_MIN_MINUTES
+            ):
+                merged[-1] = (p0, i1, kind)
+                continue
+        merged.append((i0, i1, kind))
+    runs = merged
+
     def observed(i: int, j: int) -> bool:
         """Whether reading ``j`` sits adjacent to ``i`` rather than across a hole."""
         return 0 <= j < len(readings) and abs(_minutes(readings[j][0], readings[i][0])) <= gap_min
@@ -257,12 +287,16 @@ def _excursions(
         if kind == "hypo":
             ext_ts, ext = min(run, key=lambda r: r[1])
             severe = ext < SEVERE_LOW
+            beyond = sum(1 for _, v in run if v < low)
         else:
             ext_ts, ext = max(run, key=lambda r: r[1])
             severe = ext > SEVERE_HIGH
+            beyond = sum(1 for _, v in run if v > high)
+        # The span may contain a brief in-range dip the merge rule stepped over;
+        # n_readings stays the count actually outside the range.
         episodes.append(Episode(
             id=_episode_id(kind, start), kind=kind, start=start, end=end,
-            duration_min=round(dur, 1), n_readings=len(run), severe=severe,
+            duration_min=round(dur, 1), n_readings=beyond, severe=severe,
             clinically_significant=dur >= CLINICAL_MIN_MINUTES,
             extreme_mg_dl=float(ext), extreme_ts=ext_ts,
             truncated_start=not observed(i0, i0 - 1),
