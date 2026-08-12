@@ -26,6 +26,20 @@ episode facts line up with its scored ground truth. Durations are endpoint-elaps
 tool convention. A run never spans a sensor gap: two excursions either side of a
 dark sensor are separate observed episodes, and a chain across a gap is only the
 weak ``follows`` since the trajectory through the hole is unobserved.
+
+Two properties exist so a downstream reader (the model above all) cannot mistake
+a window artefact for a fact:
+
+- **Truncation.** An excursion with no in-range reading adjacent to a boundary is
+  flagged ``truncated_start`` / ``truncated_end``: the window edge, the end of the
+  record, and the far side of a sensor gap all mean nobody was watching when the
+  run began or ended. Its ``duration_min`` is then a *lower bound* (the same
+  physiological run gets a different id and a shorter duration under a differently
+  aligned window), so "longest high" is quotable as-is only when it is untruncated.
+- **Observation coverage.** :meth:`EpisodeGraph.coverage` reports how much of the
+  window the sensor was actually watching. Episode counts are counts of *observed*
+  episodes; without the denominator "two lows this month" reads the same whether
+  the sensor ran for thirty days or for three.
 """
 
 from __future__ import annotations
@@ -83,6 +97,16 @@ TREATMENT_PAIR_MAX_MIN = 15.0
 #: minutes) are independent events, not a chain.
 CHAIN_MAX_GAP_MIN = 180.0
 
+#: How far from a moment :meth:`EpisodeGraph.at` will still call an episode "the
+#: one at that time". Past this the answer is that nothing was happening then,
+#: which is more useful than the nearest excursion of an arbitrary distance away.
+AT_TOLERANCE_MIN = 120.0
+
+#: Nominal CGM sampling interval (minutes). Observation coverage is readings x
+#: this interval over the window, the standard sensor-active convention (the same
+#: one behind :func:`analytics.rollups.coverage_fraction`).
+SAMPLE_INTERVAL_MIN = 5.0
+
 
 @dataclass(frozen=True, slots=True)
 class ContextLink:
@@ -109,6 +133,12 @@ class Episode:
     ``id`` is a stable, human-legible node handle (``hyper:2025-01-16T03:10:00+00:00``)
     so the graph is addressable: an agent can name an episode and traverse to the
     context around it rather than re-deriving it from a trace.
+
+    ``truncated_start`` / ``truncated_end`` mark a run that was already underway at
+    the window's first reading, or still underway at its last. The excursion is
+    real; only its extent is unknown, so ``duration_min`` (and the extreme) are
+    lower bounds and the id shifts with the window. :attr:`complete` is the single
+    check a caller makes before quoting a duration as the whole event.
     """
 
     id: str
@@ -122,6 +152,14 @@ class Episode:
     extreme_mg_dl: float | None
     extreme_ts: datetime | None
     links: tuple[ContextLink, ...] = field(default_factory=tuple)
+    truncated_start: bool = False
+    truncated_end: bool = False
+
+    @property
+    def complete(self) -> bool:
+        """Whether both boundaries were observed, so ``duration_min`` is the
+        whole event rather than the part this window happened to contain."""
+        return not (self.truncated_start or self.truncated_end)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -131,6 +169,9 @@ class Episode:
             "clinically_significant": self.clinically_significant,
             "extreme_mg_dl": self.extreme_mg_dl,
             "extreme_ts": self.extreme_ts.isoformat() if self.extreme_ts else None,
+            "truncated_start": self.truncated_start,
+            "truncated_end": self.truncated_end,
+            "complete": self.complete,
             "links": [link.to_dict() for link in self.links],
         }
 
@@ -168,6 +209,13 @@ def _minutes(a: datetime, b: datetime) -> float:
     return (a - b).total_seconds() / 60.0
 
 
+def _distance_min(ep: Episode, ts: datetime) -> float:
+    """Minutes from ``ts`` to an episode's span, 0 while it is inside it."""
+    if ep.start <= ts <= ep.end:
+        return 0.0
+    return min(abs(_minutes(ep.start, ts)), abs(_minutes(ep.end, ts)))
+
+
 def _excursions(
     readings: list[tuple[datetime, int]], *, low: int, high: int, gap_min: float,
 ) -> list[Episode]:
@@ -176,38 +224,50 @@ def _excursions(
     A run is also broken by a sensor gap longer than ``gap_min``: two lows either
     side of a dark sensor are separate observed episodes, not one whose duration
     silently spans the hole and falsely trips clinical significance.
-    """
-    episodes: list[Episode] = []
-    run: list[tuple[datetime, int]] = []
-    run_kind: str | None = None
 
-    def close() -> None:
-        if not run or run_kind is None:
-            return
+    A boundary is flagged truncated when there is no in-range reading adjacent to
+    it: the window edge, the end of the record, and the far side of a sensor gap
+    are the same fact, that nobody was watching when the run began or ended. The
+    span is then a lower bound rather than the event.
+    """
+    runs: list[tuple[int, int, str]] = []
+    start_i, run_kind = 0, None
+    for i, (ts, v) in enumerate(readings):
+        kind = "hypo" if v < low else "hyper" if v > high else None
+        gap_break = (
+            run_kind is not None and kind == run_kind
+            and _minutes(ts, readings[i - 1][0]) > gap_min
+        )
+        if kind != run_kind or gap_break:
+            if run_kind is not None:
+                runs.append((start_i, i - 1, run_kind))
+            start_i, run_kind = i, kind
+    if run_kind is not None:
+        runs.append((start_i, len(readings) - 1, run_kind))
+
+    def observed(i: int, j: int) -> bool:
+        """Whether reading ``j`` sits adjacent to ``i`` rather than across a hole."""
+        return 0 <= j < len(readings) and abs(_minutes(readings[j][0], readings[i][0])) <= gap_min
+
+    episodes: list[Episode] = []
+    for i0, i1, kind in runs:
+        run = readings[i0 : i1 + 1]
         start, end = run[0][0], run[-1][0]
         dur = _minutes(end, start)
-        if run_kind == "hypo":
+        if kind == "hypo":
             ext_ts, ext = min(run, key=lambda r: r[1])
             severe = ext < SEVERE_LOW
         else:
             ext_ts, ext = max(run, key=lambda r: r[1])
             severe = ext > SEVERE_HIGH
         episodes.append(Episode(
-            id=_episode_id(run_kind, start), kind=run_kind, start=start, end=end,
+            id=_episode_id(kind, start), kind=kind, start=start, end=end,
             duration_min=round(dur, 1), n_readings=len(run), severe=severe,
             clinically_significant=dur >= CLINICAL_MIN_MINUTES,
             extreme_mg_dl=float(ext), extreme_ts=ext_ts,
+            truncated_start=not observed(i0, i0 - 1),
+            truncated_end=not observed(i1, i1 + 1),
         ))
-
-    for ts, v in readings:
-        kind = "hypo" if v < low else "hyper" if v > high else None
-        gap_break = bool(run) and kind == run_kind and _minutes(ts, run[-1][0]) > gap_min
-        if kind != run_kind or gap_break:
-            close()
-            run, run_kind = [], kind
-        if kind is not None:
-            run.append((ts, v))
-    close()
     return episodes
 
 
@@ -360,6 +420,7 @@ def _attach_context(episodes: list[Episode], ctx: _WindowContext) -> list[Episod
             duration_min=ep.duration_min, n_readings=ep.n_readings, severe=ep.severe,
             clinically_significant=ep.clinically_significant,
             extreme_mg_dl=ep.extreme_mg_dl, extreme_ts=ep.extreme_ts, links=tuple(links),
+            truncated_start=ep.truncated_start, truncated_end=ep.truncated_end,
         ))
     return out
 
@@ -367,17 +428,17 @@ def _attach_context(episodes: list[Episode], ctx: _WindowContext) -> list[Episod
 def _detect(
     store: StoragePort, start: datetime, end: datetime, *,
     target_low: int, target_high: int, gap_min: float,
-) -> tuple[list[Episode], _WindowContext | None]:
+) -> tuple[list[Episode], _WindowContext | None, int]:
     readings = [(g.ts, g.mg_dl) for g in store.get_glucose(start, end)]
     readings.sort(key=lambda r: r[0])
     if not readings:
-        return [], None
+        return [], None, 0
     ctx = _fetch_context(store, start, end)
     episodes = _excursions(readings, low=target_low, high=target_high, gap_min=gap_min)
     episodes = _attach_context(episodes, ctx)
     episodes += _sensor_gaps(readings, gap_min)
     episodes.sort(key=lambda e: e.start)
-    return episodes, ctx
+    return episodes, ctx, len(readings)
 
 
 def detect_episodes(
@@ -390,7 +451,7 @@ def detect_episodes(
 
     Deterministic and model-free. Returns an empty list when there are no readings.
     """
-    episodes, _ = _detect(
+    episodes, _, _ = _detect(
         store, start, end, target_low=target_low, target_high=target_high, gap_min=gap_min
     )
     return episodes
@@ -476,10 +537,17 @@ class EpisodeGraph:
     :class:`EpisodeEdge` chains. ``node`` and ``at`` are the two entry points an
     agent uses: name a node, or find the one covering a moment, then read its
     edges; ``edges_for`` walks the chain either direction.
+
+    The window bounds and reading count travel with the graph so :meth:`coverage`
+    can state how much of it the sensor actually watched. Every count in
+    :meth:`summary` is a count of *observed* episodes over that coverage.
     """
 
     episodes: tuple[Episode, ...]
     edges: tuple[EpisodeEdge, ...] = ()
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    n_readings: int = 0
 
     def node(self, episode_id: str) -> Episode | None:
         return next((e for e in self.episodes if e.id == episode_id), None)
@@ -491,20 +559,53 @@ class EpisodeGraph:
             "out": [e for e in self.edges if e.src_id == episode_id],
         }
 
-    def at(self, ts: datetime) -> Episode | None:
-        """The excursion covering ``ts``, else the nearest excursion by start time.
+    def at(self, ts: datetime, *, within_min: float = AT_TOLERANCE_MIN) -> Episode | None:
+        """The excursion covering ``ts``, else the nearest one within ``within_min``.
 
         Reverse traversal: from a moment (or a context event's time) to the episode
         it belongs to. Sensor gaps are skipped; they are not excursions to explain.
+        Distance is measured to the episode's *span*, not its start, so an episode
+        that ended a minute before ``ts`` counts as near. Returns ``None`` past the
+        tolerance: "nothing was happening then" is the honest answer, and beats
+        handing back an arbitrarily distant excursion that reads like a match. Use
+        :meth:`nearest` when the distance itself is what you want.
         """
+        found = self.nearest(ts)
+        if found is None:
+            return None
+        episode, distance_min = found
+        return episode if distance_min <= within_min else None
+
+    def nearest(self, ts: datetime) -> tuple[Episode, float] | None:
+        """The excursion closest to ``ts`` and its distance in minutes (0 if it
+        covers ``ts``), or ``None`` when the window holds no excursion at all."""
         excursions = [e for e in self.episodes if e.kind != "sensor_gap"]
-        covering = [e for e in excursions if e.start <= ts <= e.end]
-        if covering:
-            return covering[0]
-        return min(excursions, key=lambda e: abs(_minutes(e.start, ts)), default=None)
+        if not excursions:
+            return None
+        episode = min(excursions, key=lambda e: _distance_min(e, ts))
+        return episode, round(_distance_min(episode, ts), 1)
+
+    def coverage(self) -> dict[str, Any]:
+        """How much of the window the sensor was watching.
+
+        The denominator under every episode count: readings x the nominal sampling
+        interval over the window span, the standard sensor-active convention.
+        ``observed_pct`` is capped at 100 because "more than complete" (duplicate or
+        overlapping-sensor readings) is meaningless.
+        """
+        if self.window_start is None or self.window_end is None:
+            return {"n_readings": self.n_readings, "window_min": None, "observed_pct": None}
+        window_min = max(0.0, _minutes(self.window_end, self.window_start))
+        observed_min = self.n_readings * SAMPLE_INTERVAL_MIN
+        pct = min(100.0, 100.0 * observed_min / window_min) if window_min else 0.0
+        return {
+            "n_readings": self.n_readings,
+            "window_min": round(window_min, 1),
+            "observed_pct": round(pct, 1),
+        }
 
     def summary(self) -> dict[str, Any]:
-        return summarize(list(self.episodes))
+        return {**summarize(list(self.episodes)), **self.coverage()}
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -521,11 +622,14 @@ def build_graph(
 ) -> EpisodeGraph:
     """Detect episodes over ``[start, end]`` and wrap them as a traversable graph,
     chained episode to episode where consecutive excursions sit close enough."""
-    episodes, ctx = _detect(
+    episodes, ctx, n_readings = _detect(
         store, start, end, target_low=target_low, target_high=target_high, gap_min=gap_min
     )
     edges = _chain_episodes(episodes, ctx) if ctx is not None else []
-    return EpisodeGraph(episodes=tuple(episodes), edges=tuple(edges))
+    return EpisodeGraph(
+        episodes=tuple(episodes), edges=tuple(edges),
+        window_start=start, window_end=end, n_readings=n_readings,
+    )
 
 
 def summarize(episodes: list[Episode]) -> dict[str, Any]:
@@ -533,10 +637,23 @@ def summarize(episodes: list[Episode]) -> dict[str, Any]:
 
     Keys line up with the metric ontology (``num_hypo``, ``longest_hyper_min``) so
     this doubles as a faithfulness-guard evidence bundle for episode-scoped prose.
+
+    ``longest_*_truncated`` says the longest run of that kind ran past a window
+    edge, so its minutes are a floor rather than the event: the one bit a reader
+    needs before quoting "your longest high was N minutes".
     """
     hypo = [e for e in episodes if e.kind == "hypo"]
     hyper = [e for e in episodes if e.kind == "hyper"]
     gaps = [e for e in episodes if e.kind == "sensor_gap"]
+
+    def longest(runs: list[Episode]) -> tuple[float, bool]:
+        if not runs:
+            return 0.0, False
+        top = max(runs, key=lambda e: e.duration_min)
+        return top.duration_min, not top.complete
+
+    longest_hyper, hyper_truncated = longest(hyper)
+    longest_hypo, hypo_truncated = longest(hypo)
     return {
         "num_hypo": len(hypo),
         "num_hyper": len(hyper),
@@ -545,6 +662,9 @@ def summarize(episodes: list[Episode]) -> dict[str, Any]:
         "n_clinically_significant_hyper": sum(1 for e in hyper if e.clinically_significant),
         "n_severe_hypo": sum(1 for e in hypo if e.severe),
         "n_severe_hyper": sum(1 for e in hyper if e.severe),
-        "longest_hyper_min": max((e.duration_min for e in hyper), default=0.0),
-        "longest_hypo_min": max((e.duration_min for e in hypo), default=0.0),
+        "n_truncated": sum(1 for e in episodes if e.kind != "sensor_gap" and not e.complete),
+        "longest_hyper_min": longest_hyper,
+        "longest_hyper_truncated": hyper_truncated,
+        "longest_hypo_min": longest_hypo,
+        "longest_hypo_truncated": hypo_truncated,
     }

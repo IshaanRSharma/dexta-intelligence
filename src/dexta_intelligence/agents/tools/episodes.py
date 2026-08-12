@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from dexta_intelligence.agents.reason import ToolSpec
-from dexta_intelligence.analytics.episodes import Episode, build_graph
+from dexta_intelligence.analytics.episodes import Episode, EpisodeGraph, build_graph
 
 if TYPE_CHECKING:
     from dexta_intelligence.agents.base import AgentContext
@@ -26,16 +26,22 @@ if TYPE_CHECKING:
 _SUMMARY_KEYS = (
     "num_hypo", "num_hyper", "n_sensor_gaps", "n_clinically_significant_hypo",
     "n_severe_hypo", "n_severe_hyper", "longest_hyper_min", "longest_hypo_min",
+    "observed_pct", "n_readings",
 )
 
 
 def _node_row(ep: Episode) -> dict[str, Any]:
-    return {
+    row = {
         "id": ep.id, "kind": ep.kind, "start": ep.start.isoformat(),
         "duration_min": ep.duration_min, "extreme_mg_dl": ep.extreme_mg_dl,
         "severe": ep.severe, "clinically_significant": ep.clinically_significant,
         "n_links": len(ep.links),
     }
+    if not ep.complete:
+        # Only carried when true: the model should read it as an exception, and
+        # the common case should not pay context for a false flag on every row.
+        row["duration_is_lower_bound"] = True
+    return row
 
 
 _KIND_WORD = {"hypo": "low", "hyper": "high", "sensor_gap": "sensor gap"}
@@ -107,16 +113,30 @@ def _episode_summary(result: dict[str, Any]) -> str:
     result dict; no model, no re-derivation."""
     kind = str(result.get("kind", ""))
     word = _KIND_WORD.get(kind, "episode")
+    truncated = not result.get("complete", True)
     facts = []
     ext, dur = result.get("extreme_mg_dl"), result.get("duration_min")
     if _num(ext):
         facts.append(f"{ext:g} mg/dL {_EXTREME_NOUN.get(kind, 'extreme')}")
     if _num(dur):
-        facts.append(f"{dur:g} min")
+        facts.append(f"at least {dur:g} min" if truncated else f"{dur:g} min")
     head = f"A {word} episode"
     if facts:
         head += " (" + ", ".join(facts) + ")"
     sentences = [head + "."]
+    match = result.get("match") or {}
+    if match.get("mode") == "nearest" and _num(match.get("distance_min")):
+        sentences.append(
+            f"Nothing was in progress at the moment asked about; this is the nearest "
+            f"episode, {match['distance_min']:g} min away."
+        )
+    if truncated:
+        edge = "already underway when the window opened" if result.get("truncated_start") \
+            else "still underway when the window closed"
+        sentences.append(
+            f"It was {edge}, so its duration and extreme are lower bounds, not the "
+            "whole event. Widen the window before quoting them."
+        )
     chain = result.get("chain") or {}
     clauses = [_edge_clause(e, "in") for e in chain.get("in") or []]
     clauses += [_edge_clause(e, "out") for e in chain.get("out") or []]
@@ -126,7 +146,42 @@ def _episode_summary(result: dict[str, Any]) -> str:
     if n_links:
         kinds = sorted({str(link.get("kind")) for link in result["links"]})
         sentences.append(f"Context around it: {n_links} event(s) ({', '.join(kinds)}).")
+    elif kind != "sensor_gap":
+        # Said out loud rather than left as an empty list: an absent context is a
+        # finding ("nothing was logged"), and the alternative is a model that
+        # supplies a plausible meal nobody recorded.
+        sentences.append(
+            "No meal, bolus, activity, or sleep was logged in the lookback window "
+            "around it, so nothing in the record explains it."
+        )
     return " ".join(sentences)
+
+
+def _no_episode_at(graph: EpisodeGraph, ts: datetime) -> dict[str, Any]:
+    """The answer when nothing was happening at a moment.
+
+    An explicit "glucose was in range then" beats handing back the nearest
+    excursion of whatever distance: the model asked what happened at a time, and
+    a hypo six hours away silently becomes the explanation for it.
+    """
+    out: dict[str, Any] = {
+        "summary": (
+            f"No hypo or hyper episode was in progress at {ts.isoformat()}, and none "
+            "started within 2 h of it: glucose was in range around that moment."
+        ),
+        "matched": False,
+        "timestamp": ts.isoformat(),
+    }
+    found = graph.nearest(ts)
+    if found is not None:
+        episode, distance_min = found
+        out["summary"] += (
+            f" The nearest episode is {episode.id}, {distance_min:g} min away; name it "
+            "explicitly with episode_id only if that is genuinely what you meant."
+        )
+        out["nearest"] = {"id": episode.id, "kind": episode.kind,
+                          "distance_min": distance_min}
+    return out
 
 
 def episode_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec]:
@@ -143,23 +198,49 @@ def episode_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec
         nodes = [e for e in graph.episodes if not kind or e.kind == kind]
         nodes.sort(key=lambda e: -e.duration_min)
         summary = graph.summary()
-        result = {"summary": summary, "episodes": [_node_row(e) for e in nodes[:top_n]]}
+        # n_matching vs the rows returned: without it a capped list reads as the
+        # complete set, and "you had 10 highs" is one confident sentence away.
+        result = {
+            "summary": summary,
+            "n_matching": len(nodes),
+            "n_shown": min(top_n, len(nodes)),
+            "episodes": [_node_row(e) for e in nodes[:top_n]],
+        }
+        if len(nodes) > top_n:
+            result["note"] = (
+                f"Showing the {top_n} longest of {len(nodes)} matching episodes. "
+                "Counts in 'summary' cover all of them; the rows do not."
+            )
         return result, {k: summary[k] for k in _SUMMARY_KEYS}
 
     def explain_episode(args: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
         graph = _graph()
         ep: Episode | None = None
+        match: dict[str, Any] | None = None
         episode_id = str(args.get("episode_id", "")).strip()
         if episode_id:
             ep = graph.node(episode_id)
         elif args.get("timestamp"):
             try:
-                ep = graph.at(datetime.fromisoformat(str(args["timestamp"])))
+                ts = datetime.fromisoformat(str(args["timestamp"]))
             except ValueError:
                 return {"error": "timestamp must be ISO-8601"}, {}
+            ep = graph.at(ts)
+            if ep is None:
+                return _no_episode_at(graph, ts), {}
+            distance = 0.0 if ep.start <= ts <= ep.end else round(
+                min(abs((ep.start - ts).total_seconds()), abs((ep.end - ts).total_seconds()))
+                / 60.0, 1
+            )
+            match = {
+                "mode": "covering" if distance == 0.0 else "nearest",
+                "distance_min": distance,
+            }
         if ep is None:
             return {"error": "no episode matched; call episodes to list valid ids"}, {}
         body = ep.to_dict()
+        if match is not None:
+            body["match"] = match
         chain = graph.edges_for(ep.id)
         body["chain"] = {
             "in": [e.to_dict() for e in chain["in"]],
@@ -187,7 +268,12 @@ def episode_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec
                 "addressable nodes {id, kind, start, duration_min, extreme_mg_dl, "
                 "severe, clinically_significant, n_links}, longest first, plus roll-up "
                 "counts (num_hypo, num_hyper, longest_hyper_min, sensor gaps). Use to "
-                "survey excursions or to get an episode id for explain_episode."
+                "survey excursions or to get an episode id for explain_episode. "
+                "Rows are capped at top_n: quote counts from 'summary' (which covers "
+                "every match) and never from the row count. 'summary.observed_pct' is "
+                "how much of the window the sensor was actually watching; these are "
+                "counts of OBSERVED episodes, so qualify them when it is well under "
+                "100. A row carrying duration_is_lower_bound ran past a window edge."
             ),
             parameters={
                 "type": "object",
@@ -210,7 +296,11 @@ def episode_specs(ctx: AgentContext, toolkit: DiscoveryToolkit) -> list[ToolSpec
                 "to its context instead of guessing from a trace. Includes 'chain': "
                 "typed edges to the previous/next episode when they sit within 3 h "
                 "(rebound_after_low, low_after_high, follows), each with the "
-                "load-bearing bridge event in the gap when one exists."
+                "load-bearing bridge event in the gap when one exists. Locating by "
+                "timestamp returns matched=false when nothing was in progress then "
+                "(rather than a distant episode); read 'summary' first, it states "
+                "explicitly when no context was logged and when a duration is only a "
+                "lower bound because the episode ran past the window edge."
             ),
             parameters={
                 "type": "object",
