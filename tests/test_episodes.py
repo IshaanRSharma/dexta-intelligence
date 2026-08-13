@@ -106,9 +106,31 @@ def test_clinically_significant_threshold() -> None:
 
 
 def test_separate_runs_are_separate_episodes() -> None:
-    store = _store([(0, 200), (5, 205), (10, 120), (15, 210), (20, 220), (25, 120)])
+    # 20 min back in range between them clears the consensus end-of-event bar.
+    store = _store([(0, 200), (5, 205), (10, 120), (15, 120), (20, 120), (25, 210), (30, 220)])
     hyper = [e for e in _detect(store) if e.kind == "hyper"]
     assert len(hyper) == 2
+
+
+def test_a_brief_dip_back_in_range_does_not_end_an_episode() -> None:
+    # Battelino 2019 ends an event only after 15 min back in range. Without that
+    # half of the rule a trace bobbing across 180 shatters into a dozen episodes
+    # and every count built on them measures sensor noise instead of glycemia.
+    store = _store([(0, 200), (5, 205), (10, 120), (15, 210), (20, 220), (25, 120)])
+    hyper = [e for e in _detect(store) if e.kind == "hyper"]
+    assert len(hyper) == 1
+    assert hyper[0].start == _ts(0) and hyper[0].end == _ts(20)
+    assert hyper[0].duration_min == 20.0
+    assert hyper[0].n_readings == 4  # the in-range dip is spanned, not counted
+    assert hyper[0].extreme_mg_dl == 220.0
+
+
+def test_a_dip_below_range_still_ends_a_high() -> None:
+    # The merge rule joins same-kind runs only; a high, a low, then a high is
+    # three events however tightly they sit.
+    store = _store([(0, 200), (5, 60), (10, 210), (15, 120)])
+    kinds = [e.kind for e in _detect(store) if e.kind != "sensor_gap"]
+    assert kinds == ["hyper", "hypo", "hyper"]
 
 
 def test_in_range_only_has_no_excursions() -> None:
@@ -443,6 +465,74 @@ def test_graph_at_covering_and_nearest() -> None:
     assert near is not None and near.kind != "sensor_gap"
 
 
+def test_graph_at_returns_nothing_past_the_tolerance() -> None:
+    # An unbounded nearest match turns "what happened at 09:00?" into an
+    # explanation built from an excursion hours away. Past the tolerance the
+    # honest answer is that nothing was happening.
+    store = _store([(0, 200), (5, 220), (10, 120)] + [(m, 120) for m in range(15, 900, 5)])
+    graph = _graph(store)
+    assert graph.at(_ts(600)) is None
+    found = graph.nearest(_ts(600))
+    assert found is not None
+    episode, distance_min = found
+    assert episode.kind == "hyper"
+    assert distance_min == 595.0  # measured to the span's end (00:05), not its start
+
+
+def test_graph_nearest_measures_distance_to_the_span() -> None:
+    store = _store([(m, 220) for m in range(0, 65, 5)] + [(m, 120) for m in range(65, 200, 5)])
+    graph = _graph(store)
+    # 01:15 sits 15 min past a run that ended at 01:00, not 75 min from its start.
+    found = graph.nearest(_ts(75))
+    assert found is not None and found[1] == 15.0
+    assert graph.nearest(_ts(30)) == (graph.episodes[0], 0.0)  # inside the span
+
+
+def test_episode_running_past_the_window_edge_is_flagged_truncated() -> None:
+    # The same physiological run gets a different id and a shorter duration under
+    # a differently aligned window, so the duration is only a lower bound.
+    store = _store([(-5, 120)] + [(m, 220) for m in range(0, 65, 5)] + [(65, 120)])
+    whole = build_graph(store, _ts(-100), _ts(200)).episodes[0]
+    assert whole.complete and whole.duration_min == 60.0
+
+    clipped = build_graph(store, _ts(30), _ts(200)).episodes[0]
+    assert clipped.duration_min == 30.0  # half the run, silently, without the flag
+    assert clipped.truncated_start and not clipped.truncated_end
+    assert not clipped.complete
+    assert clipped.to_dict()["complete"] is False
+
+
+def test_episode_starting_after_a_sensor_gap_is_truncated() -> None:
+    # The far side of a dark sensor is the same fact as a window edge: nobody was
+    # watching when the run began, so its span is a floor, not the event.
+    store = _store([(0, 120), (300, 220), (305, 220), (310, 120)])
+    hypers = [e for e in _graph(store).episodes if e.kind == "hyper"]
+    assert len(hypers) == 1
+    assert hypers[0].truncated_start and not hypers[0].truncated_end
+
+
+def test_summary_marks_a_truncated_longest_run() -> None:
+    readings = [(-5, 120)] + [(m, 220) for m in range(0, 65, 5)] + [(65, 120)]
+    store = _store(readings)
+    assert build_graph(store, _ts(-100), _ts(200)).summary()["longest_hyper_truncated"] is False
+    clipped = build_graph(store, _ts(30), _ts(200)).summary()
+    assert clipped["longest_hyper_min"] == 30.0
+    assert clipped["longest_hyper_truncated"] is True
+    assert clipped["n_truncated"] == 1
+
+
+def test_graph_coverage_is_the_denominator_under_every_count() -> None:
+    # Two lows over a day the sensor watched for an hour is not the same claim as
+    # two lows over a day it watched in full.
+    store = _store([(0, 60), (5, 55), (10, 120), (30, 60), (35, 55), (40, 120)])
+    coverage = build_graph(store, _ts(0), _ts(1440)).coverage()
+    assert coverage["n_readings"] == 6
+    assert coverage["window_min"] == 1440.0
+    assert coverage["observed_pct"] == 2.1  # 6 readings x 5 min over 24 h
+    full = build_graph(store, _ts(0), _ts(45)).coverage()
+    assert full["observed_pct"] == 66.7
+
+
 # ── belt tools: query and traverse ────────────────────────────────────────────
 
 
@@ -533,6 +623,75 @@ def test_explain_episode_by_timestamp() -> None:
     specs = {s.name: s for s in episode_specs(ctx, tk)}
     result, _ = specs["explain_episode"].fn({"timestamp": _ts(5).isoformat()})
     assert result["kind"] == "hyper"
+    assert result["match"] == {"mode": "covering", "distance_min": 0.0}
+
+
+def test_explain_episode_by_timestamp_reports_a_quiet_moment() -> None:
+    # The model asked what happened at a time nothing happened. Handing back a
+    # 10-hour-away excursion invites it to explain the wrong event.
+    store = _store([(0, 200), (5, 220), (10, 120)] + [(m, 120) for m in range(15, 900, 5)])
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    result, numbers = specs["explain_episode"].fn({"timestamp": _ts(600).isoformat()})
+    assert result["matched"] is False
+    assert "glucose was in range" in result["summary"]
+    assert result["nearest"]["distance_min"] == 595.0
+    assert numbers == {}  # nothing to quote, so nothing reaches the guard
+
+
+def test_explain_episode_summary_says_when_no_context_was_logged() -> None:
+    # An empty links list is easy to read past; an absent context is a finding,
+    # and the alternative is a model inventing a meal nobody recorded.
+    store = _store([(0, 200), (5, 220), (10, 120)])
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    node_id = specs["episodes"].fn({})[0]["episodes"][0]["id"]
+    result, _ = specs["explain_episode"].fn({"episode_id": node_id})
+    assert result["links"] == []
+    assert "nothing in the record explains it" in result["summary"]
+
+
+def test_explain_episode_summary_calls_a_truncated_duration_a_lower_bound() -> None:
+    store = _store([(m, 220) for m in range(0, 65, 5)] + [(65, 120)])
+    cov = store.coverage()
+    assert cov.last_ts is not None
+    ctx = AgentContext(
+        store=store, window=(_ts(30).date(), cov.last_ts.date()),
+        gates=ColdStartReport.from_coverage(cov), run_id="test", timezone="UTC",
+    )
+    tk = DiscoveryToolkit(ctx, target_low=70, target_high=180)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    result, _ = specs["explain_episode"].fn({"timestamp": _ts(0).isoformat()})
+    assert "at least 60 min" in result["summary"]
+    assert "lower bounds" in result["summary"]
+
+
+def test_episodes_tool_says_when_the_row_list_is_capped() -> None:
+    # Rows are capped; counts are not. Without the note a capped list reads as
+    # the complete set and "you had 2 highs" is one confident sentence away.
+    readings = []
+    for i in range(6):
+        readings += [(i * 60, 200), (i * 60 + 5, 220), (i * 60 + 10, 120)]
+    ctx, tk = _ctx_toolkit(_store(readings))
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    result, _ = specs["episodes"].fn({"kind": "hyper", "top_n": 2})
+    assert result["summary"]["num_hyper"] == 6
+    assert result["n_matching"] == 6
+    assert result["n_shown"] == 2
+    assert len(result["episodes"]) == 2
+    assert "2 longest of 6" in result["note"]
+
+    uncapped, _ = specs["episodes"].fn({"kind": "hyper"})
+    assert "note" not in uncapped  # nothing was hidden, so nothing to say
+
+
+def test_episodes_tool_surfaces_observation_coverage_to_the_guard() -> None:
+    store = _store([(0, 60), (5, 55), (10, 120)])
+    ctx, tk = _ctx_toolkit(store)
+    specs = {s.name: s for s in episode_specs(ctx, tk)}
+    result, numbers = specs["episodes"].fn({})
+    assert numbers["observed_pct"] == result["summary"]["observed_pct"]
+    assert numbers["n_readings"] == 3
 
 
 def test_explain_episode_unknown_id_errors() -> None:

@@ -1,14 +1,32 @@
 """Synthetic patient for `dexta demo` - the zero-config try-it on-ramp.
 
-Builds an in-memory :class:`SQLiteStore` loaded with ~90 days of 5-minute CGM
+Builds an in-memory :class:`SQLiteStore` loaded with ~6 months of 5-minute CGM
 plus a planted recurring late-bolus dinner spike, enough that
-:func:`~dexta_intelligence.investigations.spike.explain_spike` produces the
-"late/insufficient meal insulin context" finding with high confidence.
+:func:`~dexta_intelligence.investigations.spike.explain_spike` reaches the
+"late/insufficient meal insulin context" attribution.
+
+It lands at moderate confidence, not high, and that is the correct reading rather
+than a shortfall to tune away. Confidence here is computed from recurrence and
+from how far the bolus delay separates spiking events from quiet ones. In a record
+where ordinary meals also run high, that separation is genuinely narrower than in
+one where the planted dinners were the only thing that ever moved. Manufacturing
+the wider separation would mean shaping the data to the number.
 
 Around that hero spike the store is populated so every surface has something to
 show: sleep and activity context, logged forecast curves (so prediction
 reconciliation has real material), two therapy-profile versions (so versioned
 profiles matter), and a few user-reported manual notes aligned to the spike.
+
+The trace is generated *from* the treatment record, not alongside it. Every carb
+entry produces a postprandial response damped by how promptly its bolus landed,
+and the baseline between meals is a correlated wander rather than independent
+per-reading jitter. That matters beyond looking right: a record whose carbs move
+nothing is one where every meal-versus-glucose correlation the discovery agents
+test is null by construction, and where "why did I go high?" has no answer to
+find. Variability lands where a real well-controlled T1D record sits, roughly 75%
+time in range at a CV near 32, instead of the near-flat 99% an independently
+generated baseline produces. Those bounds are asserted in ``tests/test_demo.py``
+so the record cannot quietly drift back to implausible.
 
 Fully deterministic (seeded RNG, fixed dates - no ``random.random`` / ``now``).
 This mirrors the ``late_bolus`` golden dataset; tests/ cannot be imported by
@@ -21,10 +39,12 @@ import hashlib
 import json
 import math
 import random
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
+from dexta_intelligence.analytics.rollups import daily_rollup
 from dexta_intelligence.models import (
     ActivityEvent,
     GlucoseEvent,
@@ -33,6 +53,7 @@ from dexta_intelligence.models import (
     ManualEvent,
     MealEvent,
     PredictionEvent,
+    RollupPeriod,
     SleepEvent,
     TherapyProfile,
 )
@@ -60,13 +81,100 @@ _START = datetime(2025, 12, 15, 0, 2, tzinfo=UTC)
 _DAYS = 185
 _N_DINNERS = 18
 _ONTIME_IDX = frozenset({3, 7, 11, 15})
-_BUMP_PRE = timedelta(minutes=20)
-_BUMP_POST = timedelta(minutes=150)
+
+#: Stationary spread (mg/dL) and autocorrelation time (minutes) of the baseline
+#: wander. An Ornstein-Uhlenbeck walk rather than per-reading jitter: real CGM
+#: drifts over hours, and independent noise flattens to nothing over any window
+#: wide enough to matter, which is what held the old trace at 99% time in range.
+_WANDER_SD = 30.0
+_WANDER_TAU_MIN = 110.0
+
+#: Postprandial response per gram of carbohydrate (mg/dL), before the bolus
+#: credit below. Spread deterministically per meal so days differ; the range
+#: brackets the usual adult carb factor.
+_CARB_RISE_MIN = 1.35
+_CARB_RISE_MAX = 5.0
+#: A bolus this many minutes after the carb entry (or earlier) blunts the
+#: response the most; the credit decays to nothing as the bolus slips later,
+#: which is the same mechanism the hero dinner spike is planted to demonstrate.
+_BOLUS_ON_TIME_MIN = 10.0
+_BOLUS_LATE_MIN = 60.0
+#: Share of everyday meals whose bolus lands badly late.
+_LATE_BOLUS_SHARE = 0.24
+#: How much of the carb rise a well-timed bolus removes. Enough that prompt
+#: insulin visibly works and late insulin visibly does not, since that separation
+#: is the signal the whole demo is built to surface. Not so much that a bolused
+#: meal reads flat: prompt insulin bounds a postprandial excursion, it does not
+#: abolish one.
+_BOLUS_MAX_CREDIT = 0.62
+#: Minutes from carb entry to the peak of its response, and the widths of the
+#: rise and the (slower) fall. A postprandial excursion takes hours to clear.
+_RESPONSE_PEAK_MIN = 62.0
+_RESPONSE_RISE_MIN = 40.0
+_RESPONSE_FALL_MIN = 95.0
+
+#: A bolus with no carb entry within this many minutes is a correction, and pushes
+#: glucose down instead of blunting a rise. Wide enough to cover a badly late meal
+#: bolus: counting one as a correction would have it both fail to blunt its meal
+#: and drive a fall of its own, which is how a demo patient ends up spending 8% of
+#: the record below range.
+_CORRECTION_ISOLATION_MIN = 75.0
+#: mg/dL removed per unit of correction insulin. A fraction of the profile's
+#: ~45 mg/dL/U sensitivity, since basal and counter-regulation take the rest.
+_CORRECTION_FALL_PER_U = 38.0
+_CORRECTION_PEAK_MIN = 85.0
+_CORRECTION_RISE_MIN = 55.0
+_CORRECTION_FALL_MIN = 105.0
+
+#: mg/dL removed by an hour of all-out activity, scaled by intensity and length.
+#: Wide and slow on the way out: post-exercise insulin sensitization is the reason
+#: the demo's planted post-workout lows arrive an hour and a half after the run.
+_ACTIVITY_FALL_PER_HOUR = 80.0
+_ACTIVITY_PEAK_MIN = 80.0
+_ACTIVITY_RISE_MIN = 50.0
+_ACTIVITY_FALL_MIN = 150.0
+
+
+@dataclass(frozen=True, slots=True)
+class _Response:
+    """One event's signed contribution to the trace, as a peak and two widths.
+
+    Meals push up, corrections and activity pull down. Modelling them the same way
+    is the point: the record's events are what move the curve, so every excursion
+    in the demo has something logged that accounts for it.
+    """
+
+    peak_ts: datetime
+    amount: float
+    rise_min: float
+    fall_min: float
+
+    def at(self, ts: datetime) -> float:
+        offset_min = (ts - self.peak_ts).total_seconds() / 60.0
+        width = self.rise_min if offset_min < 0 else self.fall_min
+        return self.amount * math.exp(-((offset_min / width) ** 2))
+
+
+#: Overnight/fasting centre of the trace (mg/dL) and the diurnal swing around it.
+_BASELINE_MG_DL = 133.0
+_BASELINE_SWING = 14.0
 
 
 def _baseline(ts: datetime) -> float:
     hour = ts.hour + ts.minute / 60
-    return 124.0 + 14.0 * math.sin(2 * math.pi * (hour - 9.0) / 24)
+    return _BASELINE_MG_DL + _BASELINE_SWING * math.sin(2 * math.pi * (hour - 9.0) / 24)
+
+
+def _wander(n: int, rng: random.Random) -> list[float]:
+    """``n`` steps of a zero-mean Ornstein-Uhlenbeck walk on the reading grid."""
+    phi = math.exp(-_GRID_MIN / _WANDER_TAU_MIN)
+    step_sd = _WANDER_SD * math.sqrt(1.0 - phi * phi)
+    out: list[float] = []
+    value = 0.0
+    for _ in range(n):
+        value = phi * value + rng.gauss(0.0, step_sd)
+        out.append(value)
+    return out
 
 
 def _grid(start: datetime, days: int) -> list[datetime]:
@@ -88,30 +196,151 @@ def _dinner_ts(day: date, idx: int) -> datetime:
     return base + timedelta(minutes=(idx * 11) % 46)
 
 
+def _nearest_min(ts: datetime, others: list[datetime]) -> float | None:
+    """Minutes from ``ts`` to the closest of ``others``, or ``None`` if empty."""
+    return min((abs((o - ts).total_seconds() / 60.0) for o in others), default=None)
+
+
+def _event_responses(
+    meals: list[MealEvent],
+    boluses: list[InsulinEvent],
+    activity: list[ActivityEvent],
+) -> list[_Response]:
+    """Every logged event's effect on the curve.
+
+    Carbs push glucose up, damped by how promptly a manual bolus followed: the
+    credit fades to nothing as the bolus slips past an hour, which is the same
+    mechanism the hero dinner spike is planted to demonstrate. A bolus with no carb
+    entry near it is a correction and pulls down. So does activity, slowly and for
+    hours afterwards.
+    """
+    manual = sorted(b.ts for b in boluses if not b.automatic)
+    meal_times = sorted(m.ts for m in meals if m.carbs_g)
+    out: list[_Response] = []
+
+    for i, meal in enumerate(sorted(meals, key=lambda m: m.ts)):
+        carbs = meal.carbs_g
+        if not carbs:
+            continue
+        span = _CARB_RISE_MAX - _CARB_RISE_MIN
+        per_gram = _CARB_RISE_MIN + span * (((i * 37) % 100) / 99.0)
+        delay = _nearest_min(meal.ts, manual)
+        credit = 0.0
+        if delay is not None:
+            slip = (delay - _BOLUS_ON_TIME_MIN) / (_BOLUS_LATE_MIN - _BOLUS_ON_TIME_MIN)
+            credit = _BOLUS_MAX_CREDIT * (1.0 - min(1.0, max(0.0, slip)))
+        out.append(_Response(
+            peak_ts=meal.ts + timedelta(minutes=_RESPONSE_PEAK_MIN),
+            amount=carbs * per_gram * (1.0 - credit),
+            rise_min=_RESPONSE_RISE_MIN, fall_min=_RESPONSE_FALL_MIN,
+        ))
+
+    for bolus in boluses:
+        near_meal = _nearest_min(bolus.ts, meal_times)
+        if near_meal is not None and near_meal <= _CORRECTION_ISOLATION_MIN:
+            continue  # covered by the meal's credit above, not a correction
+        out.append(_Response(
+            peak_ts=bolus.ts + timedelta(minutes=_CORRECTION_PEAK_MIN),
+            amount=-(bolus.units or 0.0) * _CORRECTION_FALL_PER_U,
+            rise_min=_CORRECTION_RISE_MIN, fall_min=_CORRECTION_FALL_MIN,
+        ))
+
+    for session in activity:
+        hours = (session.duration_min or 0.0) / 60.0
+        out.append(_Response(
+            peak_ts=session.ts + timedelta(minutes=_ACTIVITY_PEAK_MIN),
+            amount=-_ACTIVITY_FALL_PER_HOUR * hours * (session.intensity or 0.5),
+            rise_min=_ACTIVITY_RISE_MIN, fall_min=_ACTIVITY_FALL_MIN,
+        ))
+    return out
+
+
 def _trace(
     grid: list[datetime],
     bumps: list[tuple[datetime, datetime, float]],
+    responses: list[_Response],
     rng: random.Random,
 ) -> list[GlucoseEvent]:
-    """CGM trace: diurnal baseline + jitter, with jitter-free planted excursions."""
-    by_day: dict[date, list[tuple[datetime, datetime, float]]] = {}
-    for anchor_ts, peak_ts, peak in bumps:
-        by_day.setdefault(anchor_ts.date(), []).append((anchor_ts, peak_ts, peak))
+    """CGM trace: diurnal baseline, a correlated wander, the record's own events,
+    and the planted excursions exact at their peaks.
 
+    The wander and the event responses are faded out in proportion to how strongly
+    a planted bump is in effect, so a planted peak lands on its stated value to the
+    mg/dL (the hero spike must read 246) while the curve stays continuous either
+    side of it. Bucketing by day keeps this linear in readings rather than
+    readings x events.
+    """
+    bumps_by_day: dict[date, list[tuple[datetime, float]]] = {}
+    for anchor_ts, peak_ts, peak in bumps:
+        bumps_by_day.setdefault(anchor_ts.date(), []).append(
+            (peak_ts, peak - _baseline(peak_ts))
+        )
+    resp_by_day: dict[date, list[_Response]] = {}
+    for response in responses:
+        resp_by_day.setdefault(response.peak_ts.date(), []).append(response)
+
+    wander = _wander(len(grid), rng)
     events: list[GlucoseEvent] = []
-    for ts in grid:
-        base = _baseline(ts)
-        value = base
-        planted = False
-        for anchor_ts, peak_ts, peak in by_day.get(ts.date(), ()):
-            if anchor_ts - _BUMP_PRE <= ts <= anchor_ts + _BUMP_POST:
-                value = base + _bump(ts, peak_ts, peak - _baseline(peak_ts))
-                planted = True
-                break
-        if not planted:
-            value += rng.randint(-6, 6)
-        events.append(GlucoseEvent(ts=ts, mg_dl=round(value)))
+    for i, ts in enumerate(grid):
+        today, yesterday = ts.date(), (ts - timedelta(days=1)).date()
+        planted = 0.0
+        strength = 0.0
+        for peak_ts, amplitude in bumps_by_day.get(today, ()):
+            share = _bump(ts, peak_ts, 1.0)
+            planted += amplitude * share
+            strength = max(strength, share)
+        moved = 0.0
+        for day in (today, yesterday):  # a late event's tail runs past midnight
+            for response in resp_by_day.get(day, ()):
+                moved += response.at(ts)
+        damp = 1.0 - strength
+        value = _baseline(ts) + planted + damp * (moved + wander[i])
+        events.append(GlucoseEvent(ts=ts, mg_dl=round(min(400.0, max(40.0, value)))))
     return events
+
+
+#: Ceiling (mg/dL) for DEMO_SPIKE_DATE outside its planted dinner, and the hour
+#: after which the planted spike owns the day.
+_HERO_DAY_CEILING = 192.0
+_HERO_SPIKE_HOUR = 18
+
+
+def _protect_hero_day(glucose: list[GlucoseEvent]) -> list[GlucoseEvent]:
+    """Keep the planted dinner spike the largest thing on DEMO_SPIKE_DATE.
+
+    ``explain_spike`` locates the day's spike as its highest reading above the
+    threshold, so a lunch that happened to run higher would silently retarget the
+    demo's headline investigation at the wrong event. Daytime deviations above the
+    baseline are compressed under a ceiling rather than erased, so the day still
+    carries the postprandial shape every other day has. One day of the record is
+    pinned; the other 184 are whatever the treatment record produces.
+    """
+    def daytime(g: GlucoseEvent) -> bool:
+        return g.ts.date() == DEMO_SPIKE_DATE and g.ts.hour < _HERO_SPIKE_HOUR
+
+    # Headroom is measured against the baseline at each reading, not the daily
+    # centre: the diurnal term alone moves the ceiling by a dozen mg/dL.
+    worst = max(
+        (
+            (g.mg_dl - _baseline(g.ts)) / max(1.0, _HERO_DAY_CEILING - _baseline(g.ts))
+            for g in glucose
+            if daytime(g)
+        ),
+        default=0.0,
+    )
+    if worst <= 1.0:
+        return glucose
+    scale = 1.0 / worst
+    out: list[GlucoseEvent] = []
+    for g in glucose:
+        deviation = g.mg_dl - _baseline(g.ts)
+        if not daytime(g) or deviation <= 0.0:
+            out.append(g)
+            continue
+        out.append(g.model_copy(
+            update={"mg_dl": round(_baseline(g.ts) + deviation * scale)}
+        ))
+    return out
 
 
 def _daily_basal(start: datetime, days: int) -> list[InsulinEvent]:
@@ -127,11 +356,22 @@ def _daily_basal(start: datetime, days: int) -> list[InsulinEvent]:
     ]
 
 
-def _patient() -> tuple[list[GlucoseEvent], list[InsulinEvent], list[MealEvent]]:
-    rng = random.Random(_SEED)
-    dinner_days = [
+def _planted_dinner_days() -> list[date]:
+    """The every-fifth-day dinners the hero late-bolus story is planted on."""
+    return [
         DEMO_SPIKE_DATE - timedelta(days=5 * (_N_DINNERS - 1 - i)) for i in range(_N_DINNERS)
     ]
+
+
+def _patient(
+    other_meals: list[MealEvent],
+    other_boluses: list[InsulinEvent],
+    other_activity: list[ActivityEvent],
+) -> tuple[list[GlucoseEvent], list[InsulinEvent], list[MealEvent]]:
+    """The hero timeline (planted dinners) plus a trace that answers to the rest of
+    the treatment record: ``other_meals``, ``other_boluses``, ``other_activity``."""
+    rng = random.Random(_SEED)
+    dinner_days = _planted_dinner_days()
 
     meals: list[MealEvent] = []
     boluses: list[InsulinEvent] = []
@@ -154,7 +394,11 @@ def _patient() -> tuple[list[GlucoseEvent], list[InsulinEvent], list[MealEvent]]
         )
         bumps.append((meal_ts, _snap(meal_ts + timedelta(minutes=42), _START), peak))
 
-    glucose = _trace(_grid(_START, _DAYS), bumps, rng)
+    # The planted dinners already carry their own shape, so only the rest of the
+    # record drives a modelled response; otherwise a hero peak would be counted
+    # twice and land off its stated value.
+    responses = _event_responses(other_meals, other_boluses, other_activity)
+    glucose = _trace(_grid(_START, _DAYS), bumps, responses, rng)
     insulin = _daily_basal(_START, _DAYS) + boluses
     return glucose, insulin, meals
 
@@ -208,16 +452,25 @@ def _miss_days() -> set[date]:
     return {DEMO_SPIKE_DATE - timedelta(days=d) for d in _MISS_DAY_OFFSETS}
 
 
+#: Minutes the miss-day elevation takes to ramp in and out. A step change would
+#: be a 78 mg/dL jump between two readings five minutes apart, a rate no glucose
+#: physiology produces and one the error grids would rightly flag as nonsense.
+_MISS_RAMP_MIN = 35.0
+
+
 def _with_prolonged_highs(glucose: list[GlucoseEvent]) -> list[GlucoseEvent]:
     """Elevate 21:00-24:00 on the miss days to a prolonged high the forecast
     fails to anticipate (the reconciliation ground truth)."""
     days = _miss_days()
     out: list[GlucoseEvent] = []
     for g in glucose:
-        if g.ts.date() in days and 21 <= g.ts.hour < 24:
-            out.append(g.model_copy(update={"mg_dl": min(350, g.mg_dl + _MISS_ELEVATION)}))
-        else:
+        if g.ts.date() not in days or not 21 <= g.ts.hour < 24:
             out.append(g)
+            continue
+        into = (g.ts.hour - 21) * 60.0 + g.ts.minute
+        share = min(1.0, into / _MISS_RAMP_MIN, (180.0 - into) / _MISS_RAMP_MIN)
+        elevated = g.mg_dl + _MISS_ELEVATION * max(0.0, share)
+        out.append(g.model_copy(update={"mg_dl": min(350, round(elevated))}))
     return out
 
 
@@ -281,42 +534,114 @@ def _interp(ts: datetime, points: list[tuple[datetime, float]]) -> float:
     return points[-1][1]
 
 
+def _apply_segments(
+    glucose: list[GlucoseEvent], segments: list[list[tuple[datetime, float]]]
+) -> list[GlucoseEvent]:
+    """Overwrite each segment's span with its hand-shaped curve, jitter-free so
+    episode boundaries are stable.
+
+    Each segment's first and last checkpoint is re-anchored to the trace value
+    already at that timestamp, so a planted excursion joins the surrounding curve
+    instead of stepping onto it. Hard-coded endpoints were harmless against a flat
+    baseline and are not against a wandering one: the seam would be a jump of tens
+    of mg/dL between two readings, visible on the Timeline and wrong.
+    """
+    by_ts = {g.ts: g.mg_dl for g in glucose}
+    anchored: list[list[tuple[datetime, float]]] = []
+    for points in segments:
+        head = (points[0][0], float(by_ts.get(points[0][0], points[0][1])))
+        tail = (points[-1][0], float(by_ts.get(points[-1][0], points[-1][1])))
+        anchored.append([head, *points[1:-1], tail])
+
+    out: list[GlucoseEvent] = []
+    for g in glucose:
+        value: float | None = None
+        for points in anchored:
+            if points[0][0] <= g.ts <= points[-1][0]:
+                value = _interp(g.ts, points)
+                break
+        out.append(g if value is None else g.model_copy(update={"mg_dl": round(value)}))
+    return out
+
+
 #: The extended record (Mar 15 - ~Jun 16 2026): a spread of excursions across every
 #: severity band so the demo shows regular and severe highs and lows beyond the
-#: story window. (day offset from _START, hour, minute, extreme mg/dL). Highs >180,
-#: very-high >250, lows <70, very-low <54. Each is held ~30 min so it registers as a
-#: clinically significant (or severe) episode. Spaced so none overlap.
-_EXT_EXCURSIONS: tuple[tuple[int, int, int, int], ...] = (
-    (93, 20, 0, 216),    # high
-    (97, 8, 30, 62),     # low
-    (101, 21, 30, 271),  # very high
-    (106, 3, 0, 48),     # very low (overnight)
-    (111, 13, 0, 228),   # high
-    (116, 16, 30, 57),   # low
-    (122, 20, 30, 241),  # high
-    (127, 2, 30, 44),    # very low (overnight)
-    (133, 19, 0, 293),   # very high
-    (139, 7, 0, 66),     # low
-    (145, 21, 0, 207),   # high
-    (151, 14, 30, 51),   # very low
-    (157, 20, 0, 233),   # high
-    (163, 4, 0, 60),     # low
-    (169, 19, 30, 264),  # very high
-    (175, 15, 30, 55),   # low
-    (181, 20, 0, 221),   # high
+#: story window. (day offset from _START, hour, minute, extreme mg/dL, cause).
+#: Highs >180, very-high >250, lows <70, very-low <54. Each is held ~30 min so it
+#: registers as a clinically significant (or severe) episode. Spaced so none
+#: overlap. Every one carries a cause, which :func:`_ext_events` turns into the
+#: context events that explain it: an excursion with nothing logged around it is
+#: an episode the graph can show and no agent can account for, and a whole quarter
+#: of unexplainable highs is a worse demo than none.
+_EXT_EXCURSIONS: tuple[tuple[int, int, int, int, str], ...] = (
+    (93, 20, 0, 216, "late_bolus"),
+    (97, 8, 30, 62, "over_correction"),
+    (101, 21, 30, 271, "missed_bolus"),
+    (106, 3, 0, 48, "over_correction"),
+    (111, 13, 0, 228, "late_bolus"),
+    (116, 16, 30, 57, "post_exercise"),
+    (122, 20, 30, 241, "late_bolus"),
+    (127, 2, 30, 44, "over_correction"),
+    (133, 19, 0, 293, "missed_bolus"),
+    (139, 7, 0, 66, "over_correction"),
+    (145, 21, 0, 207, "late_bolus"),
+    (151, 14, 30, 51, "post_exercise"),
+    (157, 20, 0, 233, "late_bolus"),
+    (163, 4, 0, 60, "over_correction"),
+    (169, 19, 30, 264, "missed_bolus"),
+    (175, 15, 30, 55, "post_exercise"),
+    (181, 20, 0, 221, "late_bolus"),
 )
+
+#: Carbs (g) behind an extended high, by cause.
+_EXT_MEAL_CARBS = {"late_bolus": 78.0, "missed_bolus": 92.0}
 
 
 def _ext_day(offset: int) -> date:
     return (_START + timedelta(days=offset)).date()
 
 
-def _with_extended_excursions(glucose: list[GlucoseEvent]) -> list[GlucoseEvent]:
-    """Overwrite the extended (Mar-Jun) window with the excursion spread. Each curve
-    ramps to its extreme, holds it ~30 min (so the episode clears the 15-min clinical
-    bar and any severe band), then recovers. Jitter-free so boundaries are stable."""
+def _ext_events() -> tuple[list[MealEvent], list[InsulinEvent], list[ActivityEvent]]:
+    """The context that accounts for each extended excursion.
+
+    Highs get a large meal, either bolused far too late or not at all; lows get
+    either a correction stacked onto an already-falling glucose about two hours
+    earlier, or a hard workout the afternoon before. These are the same shapes the
+    story days plant, so the same traversals that explain a January episode explain
+    a June one.
+    """
+    meals: list[MealEvent] = []
+    insulin: list[InsulinEvent] = []
+    activity: list[ActivityEvent] = []
+    for off, hh, mm, extreme, cause in _EXT_EXCURSIONS:
+        day, onset = _ext_day(off), _at(_ext_day(off), hh, mm) - timedelta(minutes=15)
+        if cause in _EXT_MEAL_CARBS:
+            carbs = _EXT_MEAL_CARBS[cause]
+            meal_ts = onset - timedelta(minutes=75)
+            meals.append(MealEvent(ts=meal_ts, carbs_g=carbs, note="dinner out"))
+            if cause == "late_bolus":
+                insulin.append(InsulinEvent(
+                    ts=meal_ts + timedelta(minutes=55), kind=InsulinKind.BOLUS,
+                    units=round(carbs / _carb_ratio_at(meal_ts), 2), automatic=False,
+                ))
+        elif cause == "over_correction":
+            insulin.append(InsulinEvent(
+                ts=onset - timedelta(minutes=125), kind=InsulinKind.BOLUS,
+                units=round(2.0 + (extreme % 7) * 0.2, 2), automatic=False,
+            ))
+        else:  # post_exercise
+            activity.append(ActivityEvent(
+                ts=_at(day, max(0, hh - 2), mm), kind="run",
+                duration_min=70.0, intensity=0.85,
+            ))
+    return meals, insulin, activity
+
+
+def _ext_segments() -> list[list[tuple[datetime, float]]]:
+    """Each extended excursion as a curve: ramp to the extreme, hold it ~30 min so
+    the episode clears the 15-minute clinical bar and its severity band, recover."""
     segments: list[list[tuple[datetime, float]]] = []
-    for off, hh, mm, extreme in _EXT_EXCURSIONS:
+    for off, hh, mm, extreme, _cause in _EXT_EXCURSIONS:
         center = _at(_ext_day(off), hh, mm)
         segments.append([
             (center - timedelta(minutes=40), 118.0),
@@ -324,31 +649,7 @@ def _with_extended_excursions(glucose: list[GlucoseEvent]) -> list[GlucoseEvent]
             (center + timedelta(minutes=15), float(extreme)),
             (center + timedelta(minutes=40), 120.0),
         ])
-    out: list[GlucoseEvent] = []
-    for g in glucose:
-        value: float | None = None
-        for points in segments:
-            if points[0][0] <= g.ts <= points[-1][0]:
-                value = _interp(g.ts, points)
-                break
-        out.append(g if value is None else g.model_copy(update={"mg_dl": round(value)}))
-    return out
-
-
-def _with_story_days(glucose: list[GlucoseEvent]) -> list[GlucoseEvent]:
-    """Overwrite the story windows with their hand-shaped curves: rebound chains
-    (low, rescue carbs, high), one stacked-correction evening ending in a night
-    low, and post-workout lows. Jitter-free so episode boundaries are stable."""
-    segments = _story_segments()
-    out: list[GlucoseEvent] = []
-    for g in glucose:
-        value: float | None = None
-        for points in segments:
-            if points[0][0] <= g.ts <= points[-1][0]:
-                value = _interp(g.ts, points)
-                break
-        out.append(g if value is None else g.model_copy(update={"mg_dl": round(value)}))
-    return out
+    return segments
 
 
 def _drop_sensor_gap(glucose: list[GlucoseEvent]) -> list[GlucoseEvent]:
@@ -562,19 +863,35 @@ def _demo_manual() -> list[ManualEvent]:
 
 def _tandem_treatment(rng: random.Random) -> tuple[list[MealEvent], list[InsulinEvent]]:
     """Fill out the Tandem t:slim X2 / Control-IQ treatment timeline around the
-    hero dinners: breakfast and lunch carb entries with carb-ratio-matched
+    hero dinners: breakfast, lunch, and dinner carb entries with carb-ratio-matched
     boluses, Control-IQ temp-basal adjustments through the day, occasional
-    automatic corrections, and the rare low-glucose suspend."""
+    automatic corrections, and the rare low-glucose suspend.
+
+    Dinner is skipped on the days the hero story plants one of its own, so those
+    keep exactly the late-bolus shape :func:`_patient` gives them. Every other day
+    gets one: a record where the patient eats breakfast and lunch and then nothing,
+    five days in six, is not a record anyone should be shown as realistic.
+    """
     meals: list[MealEvent] = []
     insulin: list[InsulinEvent] = []
     midnight = _START.replace(hour=0, minute=0)
+    planted_dinners = set(_planted_dinner_days())
     for i in range(_DAYS):
         day = midnight + timedelta(days=i)
-        for hour, base_carbs, note in ((7.5, 45.0, "breakfast"), (12.5, 60.0, "lunch")):
+        slots = [(7.5, 45.0, "breakfast"), (12.5, 60.0, "lunch")]
+        if day.date() not in planted_dinners:
+            slots.append((19.5, 65.0, "dinner"))
+        for hour, base_carbs, note in slots:
             meal_ts = day + timedelta(hours=hour, minutes=rng.uniform(-20.0, 20.0))
             carbs = round(max(10.0, base_carbs + rng.uniform(-12.0, 12.0)), 1)
             meals.append(MealEvent(ts=meal_ts, carbs_g=carbs, note=note))
-            bolus_ts = meal_ts + timedelta(minutes=rng.uniform(0.0, 8.0))
+            # Usually prompt, sometimes badly late. A record where every bolus
+            # lands within eight minutes has no bolus-timing signal to discover:
+            # the variation is what makes "late insulin spikes you" a finding
+            # rather than an assertion.
+            late = rng.random() < _LATE_BOLUS_SHARE
+            delay = rng.uniform(20.0, 48.0) if late else rng.uniform(0.0, 9.0)
+            bolus_ts = meal_ts + timedelta(minutes=delay)
             insulin.append(
                 InsulinEvent(
                     ts=bolus_ts,
@@ -627,34 +944,95 @@ def seed_demo(store: StoragePort) -> None:
     curves, two therapy-profile versions, manual notes, the episode-graph story
     days (rebound chains bridged by rescue carbs, a stacked-correction evening
     ending in a night low, post-workout lows, one sensor gap), and an extended
-    Mar-Jun 2026 spread of highs, very-highs, lows, and very-lows - so every
-    surface and every severity band has data."""
-    glucose, insulin, meals = _patient()
-    glucose = _with_prolonged_highs(glucose)
-    glucose = _with_story_days(glucose)
-    glucose = _with_extended_excursions(glucose)
-    glucose = _drop_sensor_gap(glucose)
-    store.insert_glucose(glucose)
+    Mar-Jun 2026 spread of highs, very-highs, lows, and very-lows, each with the
+    context that explains it - so every surface and every severity band has data."""
+    # The treatment record is built first because the trace is generated from it:
+    # every carb entry outside the planted dinners drives a postprandial response.
     rng = random.Random(_SEED + 1)  # separate stream so the hero timeline is unchanged
     extra_meals, extra_insulin = _tandem_treatment(rng)
     story_meals, story_insulin, story_activity = _story_events()
-    store.insert_insulin(insulin + extra_insulin + story_insulin)
-    store.insert_meals(meals + extra_meals + story_meals)
+    ext_meals, ext_insulin, ext_activity = _ext_events()
+    base_activity = _demo_activity(rng)
+    other_meals = extra_meals + story_meals + ext_meals
+    other_activity = base_activity + story_activity + ext_activity
+    other_boluses = [
+        i for i in extra_insulin + story_insulin + ext_insulin if i.kind == InsulinKind.BOLUS
+    ]
+
+    glucose, insulin, meals = _patient(other_meals, other_boluses, other_activity)
+    glucose = _protect_hero_day(glucose)
+    glucose = _with_prolonged_highs(glucose)
+    # Story days and the extended spread overwrite the generated curve, so they
+    # land last and stay jitter-free: their episode boundaries are contracts.
+    glucose = _apply_segments(glucose, _story_segments())
+    glucose = _apply_segments(glucose, _ext_segments())
+    glucose = _drop_sensor_gap(glucose)
+    store.insert_glucose(glucose)
+    store.insert_insulin(insulin + extra_insulin + story_insulin + ext_insulin)
+    store.insert_meals(meals + other_meals)
     store.insert_sleep(_demo_sleep(rng))
-    store.insert_activity(_demo_activity(rng) + story_activity)
+    store.insert_activity(other_activity)
     store.insert_predictions(_demo_predictions(glucose))
     for profile in _demo_profiles():
         store.add_profile_version(profile)
     for event in _demo_manual():
         store.add_manual_event(event)
+    _seed_rollups(store, glucose)
+
+
+def _seed_rollups(store: StoragePort, glucose: list[GlucoseEvent]) -> None:
+    """Compute the daily rollups the demo would otherwise never get.
+
+    Rollups are normally a side effect of connector sync, which demo mode
+    disables. Without them every rollup-backed surface (dashboard time in
+    range, goals, trends) reads empty on a fully seeded database.
+    """
+    days = sorted({g.ts.date() for g in glucose})
+    if not days:
+        return
+    start = datetime.combine(days[0], datetime.min.time(), tzinfo=UTC)
+    end = datetime.combine(days[-1], datetime.max.time(), tzinfo=UTC)
+
+    glucose_by_day: dict[date, list[GlucoseEvent]] = {}
+    for reading in store.get_glucose(start, end):
+        glucose_by_day.setdefault(reading.ts.date(), []).append(reading)
+    insulin_by_day: dict[date, list[InsulinEvent]] = {}
+    for dose in store.get_insulin(start, end):
+        insulin_by_day.setdefault(dose.ts.date(), []).append(dose)
+    meals_by_day: dict[date, list[MealEvent]] = {}
+    for meal in store.get_meals(start, end):
+        meals_by_day.setdefault(meal.ts.date(), []).append(meal)
+
+    rollups = [
+        rollup
+        for day in days
+        if (
+            rollup := daily_rollup(
+                day,
+                glucose_by_day.get(day, []),
+                insulin=insulin_by_day.get(day, []),
+                meals=meals_by_day.get(day, []),
+            )
+        )
+        is not None
+    ]
+    if rollups:
+        store.upsert_rollups(rollups)
 
 
 def seed_demo_if_empty(store: StoragePort) -> bool:
     """Seed the synthetic patient only when ``store`` has no glucose yet.
 
     Returns whether it seeded, so a one-command demo is idempotent: the first
-    `serve --demo` populates the database, restarts reuse it untouched."""
-    if store.coverage().first_ts is not None:
+    `serve --demo` populates the database, restarts reuse it untouched. A
+    database seeded before rollups were part of the seed is repaired in place
+    rather than left with every rollup-backed surface reading empty."""
+    coverage = store.coverage()
+    if coverage.first_ts is not None:
+        if coverage.last_ts is not None and not store.get_rollups(
+            RollupPeriod.DAILY, coverage.first_ts, coverage.last_ts
+        ):
+            _seed_rollups(store, store.get_glucose(coverage.first_ts, coverage.last_ts))
         return False
     seed_demo(store)
     return True
