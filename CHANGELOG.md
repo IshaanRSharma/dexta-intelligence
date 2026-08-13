@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0]
+
 ### Changed
 - The episode graph refuses to let a window artefact read as a fact. An
   excursion clipped by a window edge, the end of the record, or a sensor gap is
